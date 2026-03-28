@@ -1,0 +1,208 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>CVD Explosion — Forward Test</title>
+    <meta name="cvd-explosion-monitoring-start" content="{% if monitoring_start_by_default is defined %}{{ monitoring_start_by_default|tojson }}{% else %}true{% endif %}">
+    <script>
+      window.CVD_EXPLOSION_MONITORING_START = document.querySelector('meta[name="cvd-explosion-monitoring-start"]').getAttribute('content') === 'true';
+    </script>
+    <link rel="stylesheet" href="/static/css/dashboard_common.css">
+    <script src="/static/js/forward_test_dashboard.js?v=2"></script>
+</head>
+<body>
+<div class="container">
+
+    <div class="card" style="padding:12px 14px;">
+        <div class="main-header">
+            <div class="header-left">
+                <span class="strategy-tag">CVD Explosion</span>
+                <span class="symbol-badge" id="symbol-label">BTCUSDT</span>
+                <span class="status-dot" id="dot"></span>
+            </div>
+            <div style="display:flex;align-items:center;gap:10px;">
+                <span class="price-display" id="price">—</span>
+                <a href="/" class="back">← 홈</a>
+            </div>
+        </div>
+    </div>
+
+    <div class="card" style="padding:10px 14px">
+        <div class="ctrl">
+            <span class="ctrl-label">모니터링</span>
+            <button id="btn-toggle" class="primary" onclick="toggleMonitor()">시작</button>
+            <button onclick="loadOnce()">새로고침</button>
+            <select id="symbol-sel" style="background:var(--card);border:1px solid var(--border);color:var(--text);padding:5px 8px;border-radius:6px;font-size:0.82rem" onchange="onSymbolChange()">
+                <option value="BTCUSDT">BTCUSDT</option>
+                <option value="ETHUSDT">ETHUSDT</option>
+            </select>
+        </div>
+    </div>
+
+    <div class="card">
+        <div class="card-title">신호 (볼륨 폭발 + CVD)</div>
+        <div class="signal-row">
+            <span class="signal-badge none" id="sig-badge">대기</span>
+            <div class="conf-bar-wrap">
+                <div class="conf-label">Confidence <span id="conf-text">0/7</span></div>
+                <div class="conf-bar"><div class="conf-fill" id="conf-fill" style="width:0%"></div></div>
+            </div>
+        </div>
+        <div class="metrics-grid" style="margin-top:14px">
+            <div class="metric"><span class="metric-key">Vol x</span><span class="metric-val" id="m-vr">—</span></div>
+            <div class="metric"><span class="metric-key">CVD 가속</span><span class="metric-val" id="m-acc">—</span></div>
+            <div class="metric"><span class="metric-key">상위 TF CVD</span><span class="metric-val" id="m-hi">—</span></div>
+            <div class="metric"><span class="metric-key">TP</span><span class="metric-val" id="m-tp">—</span></div>
+            <div class="metric"><span class="metric-key">SL</span><span class="metric-val" id="m-sl">—</span></div>
+        </div>
+    </div>
+
+    <div class="card">
+        <div class="card-title">채점 상세</div>
+        <ul class="reasons-list" id="reasons-list"><li>—</li></ul>
+    </div>
+
+    <div class="card">
+        <div class="card-title">현재 포지션</div>
+        <div id="pos-content"><p class="no-pos">포지션 없음</p></div>
+    </div>
+
+    <div class="card">
+        <div class="step-label">Forward Test</div>
+        <div class="card-header">
+            <span>🤖 Forward Test 수익률</span>
+            <button onclick="location.href='/quant/cvd_explosion/forward_test/trades?symbol=' + encodeURIComponent(window.__CVD_EXPLOSION_SYMBOL || 'BTCUSDT')"
+                    style="font-size:0.72rem;padding:3px 8px;">거래 목록 (전체)</button>
+        </div>
+        <div id="forward-stats" style="min-height:60px;color:var(--text-secondary);">로딩 중...</div>
+        <div id="forward-trades-box" style="margin-top:14px; padding-top:14px; border-top:1px solid var(--border-color);">
+            <div style="font-size:0.8rem;font-weight:bold;margin-bottom:8px;color:var(--text-primary);">📋 최근 거래</div>
+            <div id="forward-trades-list" style="font-size:0.75rem;color:var(--text-secondary);">로딩 중...</div>
+            <div id="forward-trades-pagination" style="margin-top:8px;display:flex;gap:6px;align-items:center;flex-wrap:wrap;"></div>
+        </div>
+    </div>
+
+</div>
+
+<script>
+(function() {
+    var _params = new URLSearchParams(window.location.search);
+    var SYMBOL = _params.get('symbol') || 'BTCUSDT';
+    var timer = null;
+    var running = false;
+    window.__CVD_EXPLOSION_SYMBOL = SYMBOL;
+
+    function onSymbolChange() {
+        SYMBOL = document.getElementById('symbol-sel').value;
+        window.__CVD_EXPLOSION_SYMBOL = SYMBOL;
+        document.getElementById('symbol-label').textContent = SYMBOL;
+        loadOnce();
+    }
+    window.onSymbolChange = onSymbolChange;
+
+    function toggleMonitor() {
+        running = !running;
+        var btn = document.getElementById('btn-toggle');
+        if (running) {
+            btn.textContent = '중지'; btn.className = 'active';
+            document.getElementById('dot').className = 'dot live';
+            loadOnce();
+            timer = setInterval(loadOnce, 30000);
+        } else {
+            btn.textContent = '시작'; btn.className = 'primary';
+            document.getElementById('dot').className = 'dot';
+            clearInterval(timer);
+        }
+    }
+    window.toggleMonitor = toggleMonitor;
+
+    function loadOnce() {
+        fetch('/quant/cvd_explosion/realtime_state?symbol=' + SYMBOL)
+            .then(function(r) { return r.json(); })
+            .then(function(d) {
+                document.getElementById('price').textContent = d.current_price
+                    ? '$' + Number(d.current_price).toLocaleString(undefined,{minimumFractionDigits:1}) : '—';
+                renderSignal(d.signal || {}, d.current_price);
+            }).catch(function() {});
+
+        if (window.ForwardTestDashboard && !window.__CVD_FWD_INITED) {
+            window.__CVD_FWD_INITED = true;
+            window.ForwardTestDashboard.init({
+                basePath: '/quant/cvd_explosion',
+                symbolFn: function () { return SYMBOL; },
+                strategyTag: null,
+                statsElId: 'forward-stats',
+                tradesListElId: 'forward-trades-list',
+                tradesPagerElId: 'forward-trades-pagination',
+                pollMs: 30000,
+            });
+        }
+
+        fetch('/quant/cvd_explosion/forward_test/stats?symbol=' + SYMBOL)
+            .then(function(r) { return r.json(); })
+            .then(function(d) { renderPosition(d.current_position); })
+            .catch(function() {});
+    }
+    window.loadOnce = loadOnce;
+
+    function renderSignal(sig, currentPrice) {
+        var signal = sig.signal || 'none';
+        var bull = sig.bull_score || 0;
+        var bear = sig.bear_score || 0;
+        var conf = sig.confidence != null ? Number(sig.confidence)
+            : (signal === 'long' ? bull : signal === 'short' ? bear : Math.max(bull, bear));
+
+        var badge = document.getElementById('sig-badge');
+        badge.textContent = signal === 'long' ? '📈 LONG' : signal === 'short' ? '📉 SHORT' : '대기';
+        badge.className = 'signal-badge ' + signal;
+
+        var pct = Math.min(100, (conf / 7) * 100);
+        document.getElementById('conf-text').textContent = conf + '/7';
+        document.getElementById('conf-fill').style.width = pct + '%';
+
+        document.getElementById('m-vr').textContent = sig.vol_ratio != null ? Number(sig.vol_ratio).toFixed(2) + 'x' : '—';
+        document.getElementById('m-acc').textContent = sig.cvd_accel != null ? sig.cvd_accel : '—';
+        var htf = sig.cvd_higher_tf || '';
+        document.getElementById('m-hi').textContent = (htf ? htf + ' ' : '') + (sig.cvd_higher != null ? sig.cvd_higher : '—');
+        document.getElementById('m-tp').textContent = sig.tp != null ? Number(sig.tp).toLocaleString() : '—';
+        document.getElementById('m-sl').textContent = sig.sl != null ? Number(sig.sl).toLocaleString() : '—';
+
+        var reasons = sig.reasons || [];
+        var ul = document.getElementById('reasons-list');
+        ul.innerHTML = reasons.length
+            ? reasons.map(function(r) { return '<li>' + r + '</li>'; }).join('')
+            : '<li>—</li>';
+    }
+
+    function renderPosition(pos) {
+        var el = document.getElementById('pos-content');
+        if (!pos || !pos.entry_price) { el.innerHTML = '<p class="no-pos">포지션 없음</p>'; return; }
+        var side = pos.side || '—';
+        var entry = pos.entry_price;
+        var tp = pos.tp || pos.tp1_price;
+        var sl = pos.sl || pos.sl_price;
+        var upnl = pos.unrealized_pnl_pct;
+        var cur = pos.current_price;
+        var upnlHtml = upnl != null
+            ? '<div class="pos-item"><span class="pos-key">미실현 PnL</span><span class="pos-val ' + (upnl >= 0 ? 'pos' : 'neg') + '">' + (upnl >= 0 ? '+' : '') + upnl.toFixed(2) + '%</span></div>'
+            : '';
+        el.innerHTML = '<div class="pos-grid">' +
+            '<div class="pos-item"><span class="pos-key">방향</span><span class="pos-val ' + side + '">' + side.toUpperCase() + '</span></div>' +
+            '<div class="pos-item"><span class="pos-key">진입가</span><span class="pos-val">$' + Number(entry).toLocaleString() + '</span></div>' +
+            (cur ? '<div class="pos-item"><span class="pos-key">현재가</span><span class="pos-val">$' + Number(cur).toLocaleString(undefined,{minimumFractionDigits:1}) + '</span></div>' : '') +
+            upnlHtml +
+            '<div class="pos-item"><span class="pos-key">TP</span><span class="pos-val" style="color:var(--green)">' + (tp ? '$' + Number(tp).toLocaleString() : '—') + '</span></div>' +
+            '<div class="pos-item"><span class="pos-key">SL</span><span class="pos-val" style="color:var(--red)">' + (sl ? '$' + Number(sl).toLocaleString() : '—') + '</span></div>' +
+            '</div>';
+    }
+
+    if (window.CVD_EXPLOSION_MONITORING_START !== false) {
+        toggleMonitor();
+    } else {
+        loadOnce();
+    }
+})();
+</script>
+</body>
+</html>
