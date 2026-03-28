@@ -1,0 +1,60 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Market stream — BTC Forward Test</title>
+  <link rel="stylesheet" href="/static/home/css/home.css" />
+</head>
+<body data-poll-interval-sec="{{ poll_interval_sec }}" data-chart-poll-sec="{{ chart_poll_sec }}">
+  <div class="page">
+    <header class="page__header">
+      <h1 class="page__title">실시간 시세 · 지표 스트림</h1>
+      <p class="page__subtitle">
+        서버가 Binance 마크(WS)·REST로 수집 → JSON으로 표시 (브라우저는 HTTP 폴링만, Binance에 직접 연결 없음)
+      </p>
+      <div class="page__toolbar">
+        <label class="page__label" for="symbol-select">기준 심볼</label>
+        <select id="symbol-select" class="page__select" aria-label="기준 심볼">
+          <option value="BTCUSDT" selected>BTCUSDT</option>
+          <option value="ETHUSDT">ETHUSDT</option>
+        </select>
+      </div>
+    </header>
+    <section class="status" aria-live="polite">
+      <span class="status__dot" id="conn-dot" data-state="connecting"></span>
+      <span id="conn-label">연결 중…</span>
+      <span class="status__sep">·</span>
+      <span id="server-clock">—</span>
+    </section>
+    <div id="panel-errors" class="panel panel--errors" hidden></div>
+    <section class="grid" id="price-grid" aria-label="Mark 가격 (멀티 심볼)"></section>
+    <section class="panels" id="panels-root" aria-label="지표"></section>
+
+    <section class="charts-block" aria-label="1h OI 청산 맵 시계열">
+      <h2 class="charts-block__title">1h 시계열 · OI liquidation map</h2>
+      <p class="charts-block__note">
+        backtest과 동일: 1h 캔들 + OI + 테이커 불균형, window {{ liq_window }}, Redis에 최대 {{ liq_retain_bars }}봉(2×window) 캐시
+      </p>
+      <p id="chart-meta" class="muted charts-block__meta">차트 로드 중…</p>
+      <div class="chart-grid">
+        <article class="chart-card" data-chart-step="1">
+          <h3 class="chart-card__label">종가 (1h)</h3>
+          <div class="chart-wrap"><canvas id="chart-price" aria-label="종가 차트"></canvas></div>
+        </article>
+        <article class="chart-card" data-chart-step="2">
+          <h3 class="chart-card__label">미결제 약정 (OI)</h3>
+          <div class="chart-wrap"><canvas id="chart-oi" aria-label="OI 차트"></canvas></div>
+        </article>
+        <article class="chart-card" data-chart-step="3">
+          <h3 class="chart-card__label">테이커 불균형 (봉 단위)</h3>
+          <div class="chart-wrap"><canvas id="chart-cvd" aria-label="테이커 차트"></canvas></div>
+        </article>
+      </div>
+      <div id="chart-zones" class="panel chart-zones"></div>
+    </section>
+  </div>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
+  <script src="/static/home/js/home.js" defer></script>
+</body>
+</html>

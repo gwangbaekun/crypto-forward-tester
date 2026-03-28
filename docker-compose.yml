@@ -1,0 +1,32 @@
+services:
+  redis:
+    image: redis:7-alpine
+    container_name: btc-forwardtest-redis
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_forwardtest:/data
+
+  forwardtest-api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: btc-forwardtest-api
+    restart: unless-stopped
+    depends_on:
+      - redis
+    env_file:
+      - .env
+    working_dir: /app
+    environment:
+      PYTHONPATH: /app/src
+      REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
+    command: ["python", "-m", "app.main"]
+    ports:
+      - "8000:8000"
+    volumes:
+      - .:/app
+
+volumes:
+  redis_forwardtest:
