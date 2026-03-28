@@ -279,6 +279,8 @@ async def _execute_verify_notify(
         except Exception as e:
             print(f"[{strategy_key}] executor 없음: {e}")
 
+    sync_info: Dict[str, Optional[bool]] = {}
+
     for ev in events:
         kind = ev.get("event")
 
@@ -291,6 +293,7 @@ async def _execute_verify_notify(
                 try:
                     result     = await executor.open_position(symbol, side, current_price)
                     fill_price = float((result or {}).get("avgPrice") or 0)
+                    sync_info["entry"] = fill_price > 0
                     if fill_price > 0:
                         trade_id = pos.get("trade_id")
                         if trade_id is not None:
@@ -304,7 +307,10 @@ async def _execute_verify_notify(
                     if tp or sl:
                         await executor.place_tp_sl(symbol, side, tp=tp, sl=sl)
                 except Exception as e:
+                    sync_info["entry"] = False
                     print(f"[{strategy_key}] ❌ 진입 Binance 오류: {e}")
+            else:
+                sync_info["entry"] = None
 
         elif kind == "close":
             trade  = ev.get("trade") or {}
@@ -315,6 +321,7 @@ async def _execute_verify_notify(
                 try:
                     result     = await executor.close_position(symbol, side)
                     fill_price = float((result or {}).get("avgPrice") or 0)
+                    sync_info["close"] = fill_price > 0
                     if fill_price > 0:
                         trade_id    = trade.get("trade_id")
                         entry_price = float(trade.get("entry_price") or 0)
@@ -337,7 +344,10 @@ async def _execute_verify_notify(
                             f"pnl={real_pnl:.4f}%"
                         )
                 except Exception as e:
+                    sync_info["close"] = False
                     print(f"[{strategy_key}] ❌ 청산 Binance 오류: {e}")
+            else:
+                sync_info["close"] = None
 
         elif kind == "tp_advance":
             pos  = ev.get("position") or {}
@@ -347,7 +357,18 @@ async def _execute_verify_notify(
             if executor and side:
                 try:
                     await executor.place_tp_sl(symbol, side, tp=tp, sl=sl)
+                    sync_info["tp_advance"] = True
                 except Exception as e:
+                    sync_info["tp_advance"] = False
                     print(f"[{strategy_key}] ❌ TP/SL 갱신 오류: {e}")
+            else:
+                sync_info["tp_advance"] = None
 
-    # Telegram notifier는 btc_forwardtest에 미포함
+    try:
+        from features.strategy.quant_strategies.common.telegram_notifier import (
+            send_event_alerts,
+        )
+
+        send_event_alerts(strategy_key, symbol, events, sync_info)
+    except Exception as e:
+        print(f"[{strategy_key}] Telegram 알림 오류: {e}")

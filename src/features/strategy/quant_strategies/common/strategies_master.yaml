@@ -15,6 +15,9 @@ atr_breakout:
   tick_interval: 60
   timeframes: ["5m", "15m", "1h", "4h"]
   strategy_tag: atr_breakout
+  label: "ATR Breakout"
+  emoji: "💥"
+  telegram_alerts: true
   binance_live: false
   tick:
     module: features.strategy.quant_strategies.atr_breakout.realtime_feed
@@ -28,6 +31,9 @@ cvd_explosion:
   entry_tf: "1h"
   higher_tf: "4h"
   strategy_tag: cvd_explosion
+  label: "CVD Explosion"
+  emoji: "💣"
+  telegram_alerts: true
   binance_live: false
   tick:
     module: features.strategy.quant_strategies.cvd_explosion.realtime_feed

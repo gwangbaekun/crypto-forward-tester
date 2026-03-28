@@ -97,3 +97,22 @@ def is_binance_live_enabled(strategy_id: str) -> bool:
     """
     strat = get_master_config().get(strategy_id)
     return isinstance(strat, dict) and bool(strat.get("binance_live", False))
+
+
+def is_telegram_alerts_enabled(strategy_id: str) -> bool:
+    """
+    진입/청산 Telegram 알림 여부.
+    - strategies_master.yaml 에 telegram_alerts: true
+    - 또는 binance_live: true (실주문 전략은 알림 동기화와 함께 켜짐)
+    전역 끄기: TELEGRAM_DISABLE=1
+    """
+    import os
+
+    if os.environ.get("TELEGRAM_DISABLE", "").strip().lower() in ("1", "true", "yes"):
+        return False
+    strat = get_master_config().get(strategy_id)
+    if not isinstance(strat, dict):
+        return False
+    if strat.get("telegram_alerts"):
+        return True
+    return bool(strat.get("binance_live", False))
