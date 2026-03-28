@@ -24,7 +24,7 @@ services:
       REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
     command: ["python", "-m", "app.main"]
     ports:
-      - "8000:8000"
+      - "8010:8000"  # ← 호스트만 8010, 컨테이너 내부는 8000 그대로
     volumes:
       - .:/app
 

@@ -1,0 +1,43 @@
+# ATR Breakout — Strategy Config
+# 변동폭 수축(ATR 압축) 구간 → 방향 이탈 + CVD 확인 → 진입.
+# Magnet 미사용 (순환 지표 차단). TP는 측정 이동(Measured Move).
+
+strategy_id: atr_breakout
+strategy_name: "ATR Breakout"
+
+# ── 타임프레임 ───────────────────────────────────────────────────────────
+timeframes:
+  all: ["15m", "1h", "4h"]
+  entry_tf: "15m"
+
+# ── 신호 파라미터 ────────────────────────────────────────────────────────
+signal:
+  confidence_threshold: 4     # 진입 임계값 (현재 최대 5점: setup2 + cvd_entry2 + cvd_higher1)
+  atr_compress_ratio: 0.7     # recent_atr < hist_atr × 이 값이면 압축
+  recent_atr_window: 10       # 최근 ATR 계산 봉 수
+  hist_atr_window: 20         # 기준 ATR 계산 봉 수 (recent 이전)
+  box_window: 10              # consolidation box 범위 (봉 수)
+  cvd_window: 5               # CVD 합산 봉 수
+
+  # 채점 (bull/bear 대칭)
+  scoring:
+    atr_compressed: 2         # ATR 압축 확인
+    box_breakout: 2           # 박스 이탈 발생
+    cvd_15m: 2                # 15m CVD 방향 일치
+    cvd_1h: 1                 # 1h CVD 방향 일치
+
+# ── TP/SL (Measured Move) ────────────────────────────────────────────────
+tpsl:
+  tp_multiplier: 2.0          # 이탈거리 × 이 값 = TP (measured move)
+  # Long:  TP = close + (close - box_low)  × tp_multiplier
+  # Short: TP = close - (box_high - close) × tp_multiplier
+  # SL = box 반대 끝 (Long → box_low, Short → box_high)
+
+# ── 청산 규칙 ─────────────────────────────────────────────────────────────
+exit:
+  # SL/TP 도달
+  # False Breakout: 가격이 box 안쪽으로 재진입 → closed_false_breakout
+
+# ── Forward Test ─────────────────────────────────────────────────────────
+forward_test:
+  entry_source: ["engine"]

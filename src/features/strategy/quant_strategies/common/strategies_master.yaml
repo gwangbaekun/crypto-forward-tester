@@ -1,0 +1,21 @@
+# 전략 메타 — btc_forwardtest
+# tradingview_mcp strategies_master.yaml 과 동일 구조
+#
+# 필드:
+#   enabled:        false면 tick loop 미포함
+#   monitoring:     대시보드 자동 polling 여부
+#   tick_interval:  서버 background tick 주기 (초)
+#   timeframes:     fetch할 TF 목록
+#   tick.module:    realtime_feed 모듈 경로
+#   tick.fn:        호출할 함수명
+
+atr_breakout:
+  enabled: true
+  monitoring: true
+  tick_interval: 60
+  timeframes: ["5m", "15m", "1h", "4h"]
+  strategy_tag: atr_breakout
+  binance_live: false
+  tick:
+    module: features.strategy.quant_strategies.atr_breakout.realtime_feed
+    fn: get_state
