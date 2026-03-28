@@ -239,8 +239,55 @@ body {
 }
 
 .charts-block__meta {
-  margin: 0 0 1rem;
+  margin: 0 0 0.65rem;
   font-size: 0.8rem;
+}
+
+.verify-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.65rem 1rem;
+  margin-bottom: 1rem;
+}
+
+.btn-verify {
+  background: var(--surface2);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 0.4rem 0.85rem;
+  font-size: 0.85rem;
+  font-family: inherit;
+  cursor: pointer;
+}
+
+.btn-verify:hover {
+  border-color: rgba(88, 166, 255, 0.45);
+}
+
+.btn-verify:disabled {
+  opacity: 0.55;
+  cursor: wait;
+}
+
+.verify-liq-status {
+  font-size: 0.8rem;
+}
+
+.verify-liq-result {
+  margin: 0 0 1rem;
+  padding: 0.85rem 1rem;
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  font-size: 0.72rem;
+  line-height: 1.45;
+  overflow-x: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-height: 320px;
+  overflow-y: auto;
 }
 
 .chart-grid {

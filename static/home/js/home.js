@@ -500,6 +500,66 @@
     schedule();
   }
 
+  function verifyLiqUrl() {
+    const sym = symbolSelect ? symbolSelect.value || "BTCUSDT" : "BTCUSDT";
+    return "/api/verify/liq-consistency?symbol=" + encodeURIComponent(sym);
+  }
+
+  const btnVerify = document.getElementById("btn-verify-liq");
+  const verifyStatus = document.getElementById("verify-liq-status");
+  const verifyPre = document.getElementById("verify-liq-result");
+
+  async function runVerifyLiq() {
+    if (!btnVerify || !verifyPre) return;
+    btnVerify.disabled = true;
+    if (verifyStatus) verifyStatus.textContent = "검증 중 (REST 여러 번 호출)…";
+    verifyPre.hidden = true;
+    verifyPre.textContent = "";
+    try {
+      const res = await fetch(verifyLiqUrl(), { cache: "no-store" });
+      const data = await res.json();
+      var lines = [];
+      lines.push("HTTP " + res.status);
+      lines.push("");
+      var c1 = data.checks && data.checks.cache_vs_fresh;
+      var c2 = data.checks && data.checks.cache_vs_binance_klines;
+      if (c1 && c1.ok) {
+        lines.push("[1] 캐시 vs 방금 REST 재빌드");
+        lines.push("  종가 일치율: " + (c1.close && c1.close.match_rate) + " (" + (c1.close && c1.close.compared) + "봉 비교)");
+        lines.push("  OI 일치율:   " + (c1.oi && c1.oi.match_rate) + " (" + (c1.oi && c1.oi.compared) + "봉 비교)");
+        lines.push("  테이커Δ 일치율: " + (c1.cvd_delta && c1.cvd_delta.match_rate) + " (" + (c1.cvd_delta && c1.cvd_delta.compared) + "봉 비교)");
+        lines.push("  상위5 구간 지문 동일: " + (c1.zones_top5_fingerprint_match ? "예" : "아니오"));
+        if (c1.cached_updated_at) lines.push("  캐시 시각: " + c1.cached_updated_at);
+      } else if (c1) {
+        lines.push("[1] 캐시 vs fresh: " + (c1.reason || "fail") + " — " + (c1.detail || ""));
+      }
+      lines.push("");
+      if (c2 && c2.ok) {
+        lines.push("[2] 캐시 마지막 " + c2.last_bars + "봉 종가 vs Binance klines");
+        lines.push("  종가 일치율: " + c2.close_match_rate + " (" + c2.compared + "봉 비교)");
+        if (c2.mismatch_count > 0) lines.push("  불일치 인덱스(캐시 tail): " + JSON.stringify(c2.mismatch_index_sample));
+      } else if (c2) {
+        lines.push("[2] 거래소 klines: " + (c2.reason || "fail"));
+      }
+      lines.push("");
+      lines.push(JSON.stringify(data, null, 2));
+      verifyPre.textContent = lines.join("\n");
+      verifyPre.hidden = false;
+      if (verifyStatus) verifyStatus.textContent = "완료";
+    } catch (e) {
+      if (verifyStatus) verifyStatus.textContent = "실패";
+      verifyPre.textContent = String(e);
+      verifyPre.hidden = false;
+      console.error(e);
+    } finally {
+      btnVerify.disabled = false;
+    }
+  }
+
+  if (btnVerify) {
+    btnVerify.addEventListener("click", runVerifyLiq);
+  }
+
   if (symbolSelect) {
     symbolSelect.addEventListener("change", function () {
       restart();

@@ -7,6 +7,7 @@ from fastapi import APIRouter, Query
 from fastapi.responses import HTMLResponse, JSONResponse
 
 from common.liq_series_cache import LIQ_RETAIN_BARS, LIQ_WINDOW, get_chart_payload_or_fetch
+from common.liq_verify import run_liq_consistency_checks
 from common.utils import render_template
 from features.home.market_stream import build_market_stream_payload
 
@@ -47,3 +48,12 @@ async def charts_liq_json(symbol: str = Query("BTCUSDT", description="1h 시계�
             status_code=503,
         )
     return payload
+
+
+@router.get("/api/verify/liq-consistency")
+async def verify_liq_consistency(
+    symbol: str = Query("BTCUSDT", description="캐시 vs REST 재빌드·Binance klines 샘플 일치율"),
+):
+    """데이터 일치 검증: (1) 캐시 vs 방금 빌드 (2) 캐시 마지막 N봉 종가 vs 거래소 klines."""
+    sym = (symbol or "BTCUSDT").strip().upper() or "BTCUSDT"
+    return await run_liq_consistency_checks(sym)

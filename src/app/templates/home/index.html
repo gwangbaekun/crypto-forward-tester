@@ -37,6 +37,11 @@
         backtest과 동일: 1h 캔들 + OI + 테이커 불균형, window {{ liq_window }}, Redis에 최대 {{ liq_retain_bars }}봉(2×window) 캐시
       </p>
       <p id="chart-meta" class="muted charts-block__meta">차트 로드 중…</p>
+      <div class="verify-row">
+        <button type="button" id="btn-verify-liq" class="btn-verify">데이터 일치 확인</button>
+        <span id="verify-liq-status" class="verify-liq-status muted" aria-live="polite"></span>
+      </div>
+      <pre id="verify-liq-result" class="verify-liq-result" hidden></pre>
       <div class="chart-grid">
         <article class="chart-card" data-chart-step="1">
           <h3 class="chart-card__label">종가 (1h)</h3>

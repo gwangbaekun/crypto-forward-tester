@@ -47,3 +47,5 @@ docker compose up --build
 | GET | `/api/strategy/market-snapshot?symbol=BTCUSDT` | 실시간 마크/펀딩 등 (`build_market_stream_payload`, 홈 폴링과 동일 데이터) |
 
 청산 구간은 **backtest `data/oi_liq_map.py`의 `build_oi_liq_map`** 과 동일 알고리즘; 입력만 DB 대신 Binance REST 1h+OI+테이커 프록시입니다.
+
+- **데이터 일치 검증:** `GET /api/verify/liq-consistency?symbol=BTCUSDT` — (1) 캐시 vs REST 재빌드 일치율 (2) 캐시 마지막 12봉 종가 vs Binance `klines`. 홈 화면 **데이터 일치 확인** 버튼과 동일.
