@@ -85,12 +85,17 @@ def compute_signal(
     higher_key = (higher_tf or tfm["higher_tf"]).strip()
     pe = get_signal_params_for_tf(entry_key)
     ph = get_signal_params_for_tf(higher_key)
-    vol_avg_w = int(pe["vol_avg_window"])
-    vol_mult = float(pe["vol_mult"])
-    zone_gap = int(pe["zone_gap"])
-    cvd_accel_w = int(pe["cvd_accel_window"])
+    vol_avg_w    = int(pe["vol_avg_window"])
+    vol_mult     = float(pe["vol_mult"])
+    zone_gap     = int(pe["zone_gap"])
+    cvd_accel_w  = int(pe["cvd_accel_window"])
     cvd_higher_w = int(ph["cvd_higher_window"])
-    conf_thr = int(pe["confidence_threshold"])
+    conf_thr     = int(pe["confidence_threshold"])
+
+    sc_exp    = int(pe.get("score_explosion",  3))
+    sc_solo   = int(pe.get("score_solo",       1))
+    sc_cvd    = int(pe.get("score_cvd_accel",  2))
+    sc_cvd_hi = int(pe.get("score_cvd_higher", 1))
 
     bars_entry = _bars_from_sweep(sweep_by_tf.get(entry_key) or {})
     bars_higher = _bars_from_sweep(sweep_by_tf.get(higher_key) or {})
@@ -99,32 +104,34 @@ def compute_signal(
     if not bars_entry:
         return _no_signal(f"{entry_key} 데이터 없음", level_map=level_map, entry_tf=entry_key, higher_tf=higher_key)
 
+    # bars[-1] = 마지막 완성봉 (kline_bundle 에서 미완성봉 제거됨)
+    # current_price = WS 실시간가 → 봉 마감 후 현재 시장가로 진입
     vr = _vol_ratio(bars_entry, vol_avg_w)
     is_exp = vr >= vol_mult
     is_solo = _is_solo(bars_entry, zone_gap, vol_mult, vol_avg_w) if is_exp else False
     cdir = _candle_dir(bars_entry)
     accel = _cvd_accel(bars_entry, cvd_accel_w)
     cvd_hi = _cvd_sum(bars_higher, cvd_higher_w)
-    entry = _f(bars_entry[-1].get("close", 0)) or current_price
+    entry = current_price or _f(bars_entry[-1].get("close", 0))
 
     bull = bear = 0
     reasons: List[str] = []
 
     if is_exp:
         if cdir == "up":
-            bull += 3
+            bull += sc_exp
             reasons.append(f"[EXP] 상승폭발봉 vr={vr:.2f}x ✅")
         else:
-            bear += 3
+            bear += sc_exp
             reasons.append(f"[EXP] 하락폭발봉 vr={vr:.2f}x ✅")
     else:
         reasons.append(f"[EXP] 미달 vr={vr:.2f}x < {vol_mult}x")
 
     if is_solo:
         if cdir == "up":
-            bull += 1
+            bull += sc_solo
         else:
-            bear += 1
+            bear += sc_solo
         reasons.append(f"[SOLO] 단독봉 ✅ (직전 {zone_gap}봉 내 폭발 없음)")
     elif is_exp:
         reasons.append("[SOLO] 클러스터봉 — 단독봉 아님")
@@ -132,19 +139,19 @@ def compute_signal(
     accel_dir = "up" if accel > 0 else "dn"
     if is_exp and accel_dir == cdir:
         if cdir == "up":
-            bull += 2
+            bull += sc_cvd
         else:
-            bear += 2
+            bear += sc_cvd
         reasons.append(f"[CVD_ACCEL] 가속 일치 {accel:+.0f} ✅")
     elif is_exp:
         reasons.append(f"[CVD_ACCEL] 가속 역방향 {accel:+.0f} ❌")
 
     cvd_lbl = f"CVD_{higher_key}"
     if cvd_hi > 0:
-        bull += 1
+        bull += sc_cvd_hi
         reasons.append(f"[{cvd_lbl}] {higher_key} CVD↑ {cvd_hi:.0f}")
     elif cvd_hi < 0:
-        bear += 1
+        bear += sc_cvd_hi
         reasons.append(f"[{cvd_lbl}] {higher_key} CVD↓ {cvd_hi:.0f}")
 
     tpsl_params = get_tpsl_params()
@@ -197,7 +204,8 @@ def compute_signal(
         out["position_meta"] = _position_meta_for_entry(tpsl_params)
         return out
 
-    reasons.append(f"[대기] bull={bull} bear={bear} — 임계값({conf_thr}) 미달")
+    max_score = sc_exp + sc_solo + sc_cvd + sc_cvd_hi
+    reasons.append(f"[대기] bull={bull} bear={bear} — 임계값({conf_thr}/{max_score}) 미달")
     return {**_no_signal(None, level_map=level_map, entry_tf=entry_key, higher_tf=higher_key), **common}
 
 

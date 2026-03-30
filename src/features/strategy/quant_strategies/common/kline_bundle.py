@@ -126,6 +126,8 @@ async def _fetch_bundle(symbol: str, tfs: List[str], bar_limit: int) -> SimpleNa
                     "cvd_delta": 2.0 * tb - vol,
                 }
             )
+        if len(data) > 1:
+            data = data[:-1]
         return tf, {"data": data}
 
     # kline fetch (TF별) + liq level_map fetch 를 동시에 실행

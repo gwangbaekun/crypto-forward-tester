@@ -1,32 +1,32 @@
-# CVD Explosion — btc_backtest 와 동일 (forward test 전용 복사본)
 strategy_id: cvd_explosion
-strategy_name: "CVD Explosion"
-
+strategy_name: CVD Explosion
 timeframes:
-  all: ["1h", "4h"]
-  entry_tf: "1h"
-  higher_tf: "4h"
-
+  all:
+  - 1h
+  - 4h
+  entry_tf: 1h
+  higher_tf: 4h
 signal:
   vol_avg_window: 20
   vol_mult: 2.5
   zone_gap: 3
   cvd_accel_window: 3
   cvd_higher_window: 10
+  confidence_threshold: 5
   scoring:
     explosion: 3
     solo: 1
     cvd_accel: 2
     cvd_higher: 1
-  confidence_threshold: 5
-
 tpsl:
   mode: magnet_rr
   rr_ratio: 1.5
   risk_pct: 1.0
-  sl_max_pct: 1.2
-
+  sl_max_pct: 1.0
+  sl_lift_mode: always
+  sl_lift_min_intensity: HIGH
+  sl_lift_rank_le: 2
 exit: {}
-
 forward_test:
-  entry_source: ["engine"]
+  entry_source:
+  - engine

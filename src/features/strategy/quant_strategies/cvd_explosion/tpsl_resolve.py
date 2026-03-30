@@ -33,7 +33,17 @@ def _f(v: Any) -> float:
         return 0.0
 
 
-# ── 가격 기반 헬퍼 (exit_check.py 의 TP advance 에서 사용 — 변경 없음) ──────────
+# ── 가격 기반 헬퍼 ──────────────────────────────────────────────────────────
+
+def _nearest_magnet_above(level_map: List[Dict], price: float) -> Optional[float]:
+    candidates = [_f(m.get("price")) for m in level_map if _f(m.get("price")) > price]
+    return min(candidates) if candidates else None
+
+
+def _nearest_magnet_below(level_map: List[Dict], price: float) -> Optional[float]:
+    candidates = [_f(m.get("price")) for m in level_map if 0 < _f(m.get("price")) < price]
+    return max(candidates) if candidates else None
+
 
 def next_magnet_strictly_above(level_map: List[Dict], ref: float) -> Optional[float]:
     candidates = [_f(m.get("price")) for m in level_map if _f(m.get("price")) > ref]
@@ -43,38 +53,6 @@ def next_magnet_strictly_above(level_map: List[Dict], ref: float) -> Optional[fl
 def next_magnet_strictly_below(level_map: List[Dict], ref: float) -> Optional[float]:
     candidates = [_f(m.get("price")) for m in level_map if 0 < _f(m.get("price")) < ref]
     return max(candidates) if candidates else None
-
-
-# ── intensity-aware 존 선택 (초기 TP/SL 결정에 사용) ─────────────────────────
-
-def _best_magnet_above(level_map: List[Dict], price: float) -> Optional[float]:
-    """
-    price 위의 존 중 가장 중요한 것을 반환.
-    우선순위: intensity(CRITICAL → LOW) → 가격 근접도(가까운 것 우선).
-    """
-    candidates = [m for m in level_map if _f(m.get("price")) > price]
-    if not candidates:
-        return None
-    candidates.sort(key=lambda m: (
-        _INTENSITY_PRIORITY.get(m.get("intensity") or "", 4),
-        _f(m.get("price")) - price,
-    ))
-    return _f(candidates[0].get("price"))
-
-
-def _best_magnet_below(level_map: List[Dict], price: float) -> Optional[float]:
-    """
-    price 아래의 존 중 가장 중요한 것을 반환.
-    우선순위: intensity(CRITICAL → LOW) → 가격 근접도(가까운 것 우선).
-    """
-    candidates = [m for m in level_map if 0 < _f(m.get("price")) < price]
-    if not candidates:
-        return None
-    candidates.sort(key=lambda m: (
-        _INTENSITY_PRIORITY.get(m.get("intensity") or "", 4),
-        price - _f(m.get("price")),
-    ))
-    return _f(candidates[0].get("price"))
 
 
 def _clamp_sl_to_max_risk(
@@ -99,18 +77,18 @@ def _resolve_magnet(
     side: str, entry: float, level_map: List[Dict], params: Dict[str, Any]
 ) -> Tuple[Optional[float], Optional[float]]:
     """
-    intensity-aware magnet 선택.
+    현재가에서 가장 가까운 magnet 선택 (기존 백테스트와 동일 로직).
     level_map 이 비거나 magnet 을 찾지 못하면 fixed_rr 로 자동 폴백.
     """
     if not level_map:
         return _resolve_fixed_rr(side, entry, level_map, params)
 
     if side == "long":
-        tp = _best_magnet_above(level_map, entry)
-        sl = _best_magnet_below(level_map, entry)
+        tp = _nearest_magnet_above(level_map, entry)
+        sl = _nearest_magnet_below(level_map, entry)
     else:
-        tp = _best_magnet_below(level_map, entry)
-        sl = _best_magnet_above(level_map, entry)
+        tp = _nearest_magnet_below(level_map, entry)
+        sl = _nearest_magnet_above(level_map, entry)
 
     if tp is None or sl is None:
         # 한쪽 방향에 magnet 이 없는 엣지 케이스 → fixed_rr 폴백
