@@ -149,30 +149,34 @@ def compute_signal(
 
     tpsl_params = get_tpsl_params()
 
+    ref_long_tp, ref_long_sl   = resolve_tpsl("long",  entry, level_map, tpsl_params)
+    ref_short_tp, ref_short_sl = resolve_tpsl("short", entry, level_map, tpsl_params)
+
     common = {
-        "bull_score":   bull,
-        "bear_score":   bear,
-        "vol_ratio":    round(vr, 3),
-        "is_explosion": is_exp,
-        "is_solo":      is_solo,
-        "cvd_accel":    round(accel, 1),
-        "cvd_higher":   round(cvd_hi, 1),
+        "bull_score":    bull,
+        "bear_score":    bear,
+        "vol_ratio":     round(vr, 3),
+        "is_explosion":  is_exp,
+        "is_solo":       is_solo,
+        "cvd_accel":     round(accel, 1),
+        "cvd_higher":    round(cvd_hi, 1),
         "cvd_higher_tf": higher_key,
-        "entry_tf":     entry_key,
-        "higher_tf":    higher_key,
-        "level_map":    level_map,
-        "tpsl_mode":    tpsl_mode_label(tpsl_params),
-        "signal_mode":  "cvd_exp_v1",
-        "reasons":      reasons,
+        "entry_tf":      entry_key,
+        "higher_tf":     higher_key,
+        "level_map":     level_map,
+        "tpsl_mode":     tpsl_mode_label(tpsl_params),
+        "signal_mode":   "cvd_exp_v1",
+        "reasons":       reasons,
+        "ref_long_tp":   ref_long_tp,
+        "ref_long_sl":   ref_long_sl,
+        "ref_short_tp":  ref_short_tp,
+        "ref_short_sl":  ref_short_sl,
     }
 
     if bull >= conf_thr and bull > bear:
-        tp, sl = resolve_tpsl("long", entry, level_map, tpsl_params)
+        tp, sl = ref_long_tp, ref_long_sl  
         if tp is None or sl is None:
-            if tpsl_params.get("mode") == "fixed_rr":
-                reasons.append("[대기] LONG TP/SL 산출 실패 (tpsl.risk_pct / rr_ratio 확인)")
-            else:
-                reasons.append("[대기] LONG liq map 없음 또는 TP/SL 부족 — liq cache 필요")
+            reasons.append("[대기] LONG TP/SL 산출 실패 — tpsl 파라미터 확인")
             return {**_no_signal(None, level_map=level_map, entry_tf=entry_key, higher_tf=higher_key), **common}
         reasons.append(
             f"[진입] LONG  confidence={bull}/7  mode={common['tpsl_mode']}  TP={tp:,.2f}  SL={sl:,.2f}"
@@ -182,12 +186,9 @@ def compute_signal(
         return out
 
     if bear >= conf_thr and bear > bull:
-        tp, sl = resolve_tpsl("short", entry, level_map, tpsl_params)
+        tp, sl = ref_short_tp, ref_short_sl  
         if tp is None or sl is None:
-            if tpsl_params.get("mode") == "fixed_rr":
-                reasons.append("[대기] SHORT TP/SL 산출 실패 (tpsl.risk_pct / rr_ratio 확인)")
-            else:
-                reasons.append("[대기] SHORT liq map 없음 또는 TP/SL 부족 — liq cache 필요")
+            reasons.append("[대기] SHORT TP/SL 산출 실패 — tpsl 파라미터 확인")
             return {**_no_signal(None, level_map=level_map, entry_tf=entry_key, higher_tf=higher_key), **common}
         reasons.append(
             f"[진입] SHORT confidence={bear}/7  mode={common['tpsl_mode']}  TP={tp:,.2f}  SL={sl:,.2f}"

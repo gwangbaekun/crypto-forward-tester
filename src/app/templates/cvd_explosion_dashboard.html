@@ -10,6 +10,7 @@
     </script>
     <link rel="stylesheet" href="/static/css/dashboard_common.css">
     <script src="/static/js/forward_test_dashboard.js?v=2"></script>
+    <script src="https://unpkg.com/lightweight-charts@4.2.2/dist/lightweight-charts.standalone.production.js"></script>
 </head>
 <body>
 <div class="container">
@@ -37,6 +38,21 @@
                 <option value="BTCUSDT">BTCUSDT</option>
                 <option value="ETHUSDT">ETHUSDT</option>
             </select>
+        </div>
+    </div>
+
+    <div class="card" id="chart-card">
+        <div class="card-title" style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
+            <span>가격 차트 (1h)</span>
+            <button id="chart-toggle-btn" onclick="toggleChart()" style="font-size:0.72rem;padding:3px 9px;">접기</button>
+        </div>
+        <div id="chart-wrap">
+            <div id="price-chart" style="height:240px;border-radius:6px;overflow:hidden;"></div>
+            <div id="vol-chart"   style="height:72px;margin-top:3px;border-radius:6px;overflow:hidden;"></div>
+            <div style="display:flex;justify-content:space-between;padding:3px 2px 0;font-size:0.68rem;color:var(--text-secondary);">
+                <span>▲▼ = 폭발봉 (≥ <span id="chart-vol-mult">2.5</span>x)</span>
+                <span>Vol Ratio — 적색: 폭발 / 주황선: 임계값</span>
+            </div>
         </div>
     </div>
 
@@ -93,10 +109,112 @@
     var running = false;
     window.__CVD_EXPLOSION_SYMBOL = SYMBOL;
 
+    // ── 차트 ──────────────────────────────────────────────────────────────────
+    var _priceChart = null, _volChart = null;
+    var _candleSeries = null, _volSeries = null, _threshSeries = null;
+    var _chartOpen = true;
+
+    function toggleChart() {
+        _chartOpen = !_chartOpen;
+        document.getElementById('chart-wrap').style.display = _chartOpen ? '' : 'none';
+        document.getElementById('chart-toggle-btn').textContent = _chartOpen ? '접기' : '펼치기';
+    }
+    window.toggleChart = toggleChart;
+
+    function _darkOpts(h) {
+        return {
+            layout: { background: { color: '#161b22' }, textColor: '#8b949e' },
+            grid:   { vertLines: { color: '#21262d' }, horzLines: { color: '#21262d' } },
+            crosshair: { mode: 1 },
+            rightPriceScale: { borderColor: '#30363d' },
+            timeScale: { borderColor: '#30363d', timeVisible: true, secondsVisible: false },
+            height: h,
+            handleScroll: true,
+            handleScale: true,
+        };
+    }
+
+    function _initCharts() {
+        if (_priceChart) return;
+        var LC = window.LightweightCharts;
+        if (!LC) return;
+
+        _priceChart = LC.createChart(document.getElementById('price-chart'), _darkOpts(240));
+        _candleSeries = _priceChart.addCandlestickSeries({
+            upColor: '#26a69a', downColor: '#ef5350',
+            borderUpColor: '#26a69a', borderDownColor: '#ef5350',
+            wickUpColor: '#26a69a', wickDownColor: '#ef5350',
+        });
+
+        _volChart = LC.createChart(document.getElementById('vol-chart'), _darkOpts(72));
+        _volChart.timeScale().applyOptions({ visible: false });
+        _volSeries = _volChart.addHistogramSeries({ priceScaleId: 'right', base: 0 });
+        _threshSeries = _volChart.addLineSeries({
+            color: '#f0883e', lineWidth: 1, lineStyle: 2,  // 주황 점선 임계값
+            priceScaleId: 'right', lastValueVisible: false, priceLineVisible: false,
+        });
+
+        // 두 차트 timescale 동기화
+        function _sync(src, dst) {
+            src.timeScale().subscribeVisibleLogicalRangeChange(function(range) {
+                if (range) dst.timeScale().setVisibleLogicalRange(range);
+            });
+        }
+        _sync(_priceChart, _volChart);
+        _sync(_volChart, _priceChart);
+    }
+
+    function _loadChart() {
+        if (!_chartOpen) return;
+        _initCharts();
+        if (!_candleSeries) return;
+
+        fetch('/quant/cvd_explosion/chart_data?symbol=' + SYMBOL + '&limit=120')
+            .then(function(r) { return r.json(); })
+            .then(function(d) {
+                var bars = d.bars || [];
+                var mult = d.vol_mult || 2.5;
+                document.getElementById('chart-vol-mult').textContent = mult;
+
+                // 캔들
+                _candleSeries.setData(bars.map(function(b) {
+                    return { time: b.time, open: b.open, high: b.high, low: b.low, close: b.close };
+                }));
+
+                // 폭발봉 마커
+                var markers = bars
+                    .filter(function(b) { return b.is_explosion; })
+                    .map(function(b) {
+                        var up = b.close >= b.open;
+                        return {
+                            time:     b.time,
+                            position: up ? 'belowBar' : 'aboveBar',
+                            color:    up ? '#26a69a' : '#ef5350',
+                            shape:    up ? 'arrowUp' : 'arrowDown',
+                            text:     b.vol_ratio.toFixed(1) + 'x',
+                        };
+                    });
+                _candleSeries.setMarkers(markers);
+
+                // vol ratio 히스토그램
+                _volSeries.setData(bars.map(function(b) {
+                    return { time: b.time, value: b.vol_ratio, color: b.is_explosion ? '#ef5350cc' : '#30363d' };
+                }));
+
+                // 임계값 선
+                _threshSeries.setData(bars.map(function(b) {
+                    return { time: b.time, value: mult };
+                }));
+            })
+            .catch(function() {});
+    }
+
     function onSymbolChange() {
         SYMBOL = document.getElementById('symbol-sel').value;
         window.__CVD_EXPLOSION_SYMBOL = SYMBOL;
         document.getElementById('symbol-label').textContent = SYMBOL;
+        // 심볼 변경 시 차트 시리즈 초기화 후 재로드
+        if (_candleSeries) { _candleSeries.setData([]); _volSeries.setData([]); _threshSeries.setData([]); }
         loadOnce();
     }
     window.onSymbolChange = onSymbolChange;
@@ -118,6 +236,7 @@
     window.toggleMonitor = toggleMonitor;
 
     function loadOnce() {
+        _loadChart();
         fetch('/quant/cvd_explosion/realtime_state?symbol=' + SYMBOL)
             .then(function(r) { return r.json(); })
             .then(function(d) {
@@ -165,8 +284,21 @@
         document.getElementById('m-acc').textContent = sig.cvd_accel != null ? sig.cvd_accel : '—';
         var htf = sig.cvd_higher_tf || '';
         document.getElementById('m-hi').textContent = (htf ? htf + ' ' : '') + (sig.cvd_higher != null ? sig.cvd_higher : '—');
-        document.getElementById('m-tp').textContent = sig.tp != null ? Number(sig.tp).toLocaleString() : '—';
-        document.getElementById('m-sl').textContent = sig.sl != null ? Number(sig.sl).toLocaleString() : '—';
+        // 진입 신호 있으면 실제 TP/SL, 대기 중이면 방향별 참조 레벨 표시
+        var dispTp, dispSl;
+        if (signal === 'long') {
+            dispTp = sig.tp; dispSl = sig.sl;
+        } else if (signal === 'short') {
+            dispTp = sig.tp; dispSl = sig.sl;
+        } else {
+            // 대기: bull/bear 점수로 우세 방향 판단 후 참조 레벨 표시
+            var dominant = (bull >= bear) ? 'long' : 'short';
+            dispTp = dominant === 'long' ? sig.ref_long_tp : sig.ref_short_tp;
+            dispSl = dominant === 'long' ? sig.ref_long_sl : sig.ref_short_sl;
+        }
+        var fmtLv = function(v) { return v != null ? Number(v).toLocaleString(undefined,{minimumFractionDigits:0}) : '—'; };
+        document.getElementById('m-tp').textContent = fmtLv(dispTp);
+        document.getElementById('m-sl').textContent = fmtLv(dispSl);
 
         var reasons = sig.reasons || [];
         var ul = document.getElementById('reasons-list');
