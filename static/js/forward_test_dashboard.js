@@ -27,7 +27,7 @@
   function formatTradeDate(iso) {
     if (!iso) return "—";
     try {
-      var formatter = new Intl.DateTimeFormat("ko-KR", {
+      var formatter = new Intl.DateTimeFormat("en-US", {
         timeZone: "Asia/Seoul",
         month: "2-digit",
         day: "2-digit",
@@ -88,7 +88,7 @@
       if (!tradesListEl) return;
       var total = trades.length;
       if (total === 0) {
-        tradesListEl.innerHTML = "<span style='color:var(--text-secondary);'>거래 내역 없음</span>";
+        tradesListEl.innerHTML = "<span style='color:var(--text-secondary);'>No trades yet</span>";
         if (pagerEl) pagerEl.innerHTML = "";
         return;
       }
@@ -115,16 +115,16 @@
 
       tradesListEl.innerHTML =
         "<table class='trades-table'><thead><tr>" +
-        "<th>시작</th><th>종료</th><th>방향</th><th>진입</th><th>청산</th><th>수익률</th><th>시간</th>" +
+        "<th>Open</th><th>Close</th><th>Side</th><th>Entry</th><th>Exit</th><th>PnL %</th><th>Dur</th>" +
         "</tr></thead><tbody>" + rows + "</tbody></table>";
 
       if (!pagerEl) return;
       var prevDisabled = page <= 1;
       var nextDisabled = page >= totalPages;
       pagerEl.innerHTML = [
-        "<button type='button' class='trades-pager' " + (prevDisabled ? "disabled" : "") + " data-page='" + (page - 1) + "'>이전</button>",
+        "<button type='button' class='trades-pager' " + (prevDisabled ? "disabled" : "") + " data-page='" + (page - 1) + "'>Prev</button>",
         "<span style='color:var(--text-secondary);'>" + page + " / " + totalPages + "</span>",
-        "<button type='button' class='trades-pager' " + (nextDisabled ? "disabled" : "") + " data-page='" + (page + 1) + "'>다음</button>",
+        "<button type='button' class='trades-pager' " + (nextDisabled ? "disabled" : "") + " data-page='" + (page + 1) + "'>Next</button>",
       ].join("");
 
       pagerEl.querySelectorAll("button[data-page]").forEach(function (b) {
@@ -151,12 +151,12 @@
       var html = "";
 
       if (halted) {
-        html += "<div style='padding:8px;background:rgba(218,54,51,0.15);border:1px solid rgba(218,54,51,0.4);border-radius:6px;margin-bottom:10px;font-size:0.85rem;color:var(--accent-red);'>⛔ 거래 중단됨 (엣지 검증 실패)</div>";
+        html += "<div style='padding:8px;background:rgba(218,54,51,0.15);border:1px solid rgba(218,54,51,0.4);border-radius:6px;margin-bottom:10px;font-size:0.85rem;color:var(--accent-red);'>⛔ Trading halted (edge validation failed)</div>";
       }
 
       html += "<div style='display:flex;gap:16px;align-items:center;margin-bottom:10px;flex-wrap:wrap;'>" +
         "<div>" +
-          "<div style='font-size:0.75rem;color:var(--text-secondary);display:flex;align-items:center;gap:6px;'>누적 수익률" +
+          "<div style='font-size:0.75rem;color:var(--text-secondary);display:flex;align-items:center;gap:6px;'>Cumulative PnL" +
             "<select data-forward-leverage style='background:var(--card-bg);border:1px solid var(--border-color);color:var(--text-secondary);font-size:0.7rem;border-radius:4px;padding:1px 4px;'>" +
               "<option value='1'" + (leverage === 1 ? " selected" : "") + ">1x</option>" +
               "<option value='2'" + (leverage === 2 ? " selected" : "") + ">2x</option>" +
@@ -164,12 +164,12 @@
             "</select>" +
           "</div>" +
           "<div style='font-size:1.2rem;font-weight:bold;color:" + pnlColor(effPnl) + ";'>" + (effPnl >= 0 ? "+" : "") + effPnl.toFixed(4) + "%</div>" +
-          "<div style='font-size:0.7rem;color:var(--text-secondary);'>1x 기준: " + (pnl >= 0 ? "+" : "") + pnl + "%</div>" +
+          "<div style='font-size:0.7rem;color:var(--text-secondary);'>1x basis: " + (pnl >= 0 ? "+" : "") + pnl + "%</div>" +
         "</div>" +
-        "<div><div style='font-size:0.75rem;color:var(--text-secondary);'>승/패/총</div>" +
+        "<div><div style='font-size:0.75rem;color:var(--text-secondary);'>W / L / Total</div>" +
           "<div style='font-size:0.95rem;font-weight:bold;'><span style='color:var(--accent-green);'>" + win + "</span> / <span style='color:var(--accent-red);'>" + loss + "</span> / " + total + "</div></div>" +
         (ev.profit_factor != null ? "<div><div style='font-size:0.75rem;color:var(--text-secondary);'>Profit Factor</div><div style='font-size:0.95rem;font-weight:bold;color:" + (Number(ev.profit_factor) >= 1.2 ? "var(--accent-green)" : "var(--accent-red)") + ";'>" + esc(ev.profit_factor) + "</div></div>" : "") +
-        (ev.rolling_win_rate != null ? "<div><div style='font-size:0.75rem;color:var(--text-secondary);'>이동승률</div><div style='font-size:0.95rem;font-weight:bold;'>" + (Number(ev.rolling_win_rate) * 100).toFixed(1) + "%</div></div>" : "") +
+        (ev.rolling_win_rate != null ? "<div><div style='font-size:0.75rem;color:var(--text-secondary);'>Rolling win %</div><div style='font-size:0.95rem;font-weight:bold;'>" + (Number(ev.rolling_win_rate) * 100).toFixed(1) + "%</div></div>" : "") +
       "</div>";
 
       if (pos) {
@@ -184,7 +184,7 @@
         var pnlStr = "";
         if (unrealizedPct != null && isFinite(unrealizedPct)) {
           pnlStr = " &nbsp;<strong style='color:" + pnlColor(unrealizedPct) + ";'>" + (unrealizedPct >= 0 ? "+" : "") + Number(unrealizedPct).toFixed(2) + "%</strong>";
-          if (curPrice != null) pnlStr = " · 현재가 " + fmtPrice(curPrice) + pnlStr;
+          if (curPrice != null) pnlStr = " · mark " + fmtPrice(curPrice) + pnlStr;
         }
 
         var tpsl = pos.tpsl || {};
@@ -198,9 +198,9 @@
         }
         var slHtml = slVal != null
           ? "<span style='color:#e74c3c;'>SL " + fmtPrice(slVal) + "</span>" +
-            (lockedPct != null ? " <span style='color:var(--accent-green);font-size:0.76em;'>🔒 +" + lockedPct.toFixed(2) + "% 확정</span>" : "")
+            (lockedPct != null ? " <span style='color:var(--accent-green);font-size:0.76em;'>🔒 +" + lockedPct.toFixed(2) + "% locked</span>" : "")
           : "";
-        var tpHtml = tp1Val != null ? "<span style='color:var(--accent-green);'>목표 " + fmtPrice(tp1Val) + "</span>" : "";
+        var tpHtml = tp1Val != null ? "<span style='color:var(--accent-green);'>Target " + fmtPrice(tp1Val) + "</span>" : "";
         var tpslLine = (slHtml || tpHtml)
           ? "<div style='margin-top:5px;font-size:0.78rem;display:flex;gap:6px;align-items:center;flex-wrap:wrap;'>" +
               slHtml +
@@ -210,17 +210,17 @@
           : "";
 
         html += "<div style='background:rgba(0,0,0,0.2);padding:8px 10px;border-radius:6px;margin-bottom:10px;font-size:0.85rem;border:1px solid var(--border-color);border-left:3px solid " + pc + ";'>" +
-          "현재 포지션: <strong style='color:" + pc + ";'>" + esc((pos.side || "").toUpperCase()) + "</strong> @ " + fmtPrice(pos.entry_price) +
+          "Open position: <strong style='color:" + pc + ";'>" + esc((pos.side || "").toUpperCase()) + "</strong> @ " + fmtPrice(pos.entry_price) +
           (pos.trigger_tfs ? " <span style='color:var(--text-secondary);font-size:0.8em;'>(" + esc(pos.trigger_tfs) + " " + confDots(pos.confidence) + ")</span>" : "") +
           pnlStr +
           tpslLine +
           "</div>";
       } else {
-        html += "<div style='font-size:0.8rem;color:var(--text-secondary);margin-bottom:10px;'>현재 포지션 없음 — 조건 충족 시 자동 진입</div>";
+        html += "<div style='font-size:0.8rem;color:var(--text-secondary);margin-bottom:10px;'>No open position — enters when conditions match</div>";
       }
 
       if (recent.length) {
-        html += "<div style='font-size:0.75rem;border-top:1px solid var(--border-color);padding-top:8px;'>최근 거래: " +
+        html += "<div style='font-size:0.75rem;border-top:1px solid var(--border-color);padding-top:8px;'>Recent trades: " +
           recent.slice(0, 6).map(function (t) {
             var c = (Number(t.pnl_pct || 0)) >= 0 ? "var(--accent-green)" : "var(--accent-red)";
             return "<span style='color:" + c + ";'>" + esc(t.side || "") + " " + ((Number(t.pnl_pct || 0)) >= 0 ? "+" : "") + esc(t.pnl_pct || 0) + "%</span>";
@@ -256,20 +256,20 @@
         .then(function (r) { return r.json(); })
         .then(function (d) {
           if (d && d.error) {
-            statsEl.innerHTML = "<span style='color:var(--text-secondary);font-size:0.85rem;'>Forward Test 통계를 불러올 수 없습니다.</span>";
+            statsEl.innerHTML = "<span style='color:var(--text-secondary);font-size:0.85rem;'>Could not load forward test stats.</span>";
             return;
           }
           renderStats(d || {});
           if (typeof opts.onRendered === "function") opts.onRendered(d || {});
         })
         .catch(function () {
-          statsEl.innerHTML = "<span style='color:var(--text-secondary);font-size:0.85rem;'>Forward Test 통계를 불러올 수 없습니다.</span>";
+          statsEl.innerHTML = "<span style='color:var(--text-secondary);font-size:0.85rem;'>Could not load forward test stats.</span>";
         });
     }
 
     function refreshTrades() {
       var sym = symbolFn();
-      tradesListEl.innerHTML = "<span style='color:var(--text-secondary);'>로딩 중...</span>";
+      tradesListEl.innerHTML = "<span style='color:var(--text-secondary);'>Loading…</span>";
       var tradesUrl = basePath + "/forward_test/trades?symbol=" + encodeURIComponent(sym) + "&limit=" + tradesLimit;
       if (strategyTag) tradesUrl += "&strategy_tag=" + encodeURIComponent(strategyTag);
       return fetch(tradesUrl)
@@ -280,7 +280,7 @@
           renderTradesPage();
         })
         .catch(function () {
-          tradesListEl.innerHTML = "<span style='color:var(--text-secondary);'>거래 목록을 불러올 수 없습니다.</span>";
+          tradesListEl.innerHTML = "<span style='color:var(--text-secondary);'>Could not load trade list.</span>";
           if (pagerEl) pagerEl.innerHTML = "";
         });
     }

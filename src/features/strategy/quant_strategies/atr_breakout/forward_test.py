@@ -42,7 +42,7 @@ class AtrForwardTest(BaseForwardTest):
                 return (
                     current_price,
                     "closed_false_breakout",
-                    f"가격 {current_price:.1f} < box_low {box_low:.1f}",
+                    f"price {current_price:.1f} < box_low {box_low:.1f}",
                 )
         else:
             if sl and current_price >= _f(sl):
@@ -53,7 +53,7 @@ class AtrForwardTest(BaseForwardTest):
                 return (
                     current_price,
                     "closed_false_breakout",
-                    f"가격 {current_price:.1f} > box_high {box_high:.1f}",
+                    f"price {current_price:.1f} > box_high {box_high:.1f}",
                 )
         return None
 

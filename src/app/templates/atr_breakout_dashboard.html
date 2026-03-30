@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="ko">
+<html lang="en">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -9,7 +9,7 @@
       window.ATR_BREAKOUT_MONITORING_START = document.querySelector('meta[name="atr-breakout-monitoring-start"]').getAttribute('content') === 'true';
     </script>
     <link rel="stylesheet" href="/static/css/dashboard_common.css">
-    <script src="/static/js/forward_test_dashboard.js?v=2"></script>
+    <script src="/static/js/forward_test_dashboard.js?v=3"></script>
 </head>
 <body>
 <div class="container">
@@ -25,16 +25,16 @@
             </div>
             <div style="display:flex;align-items:center;gap:10px;">
                 <span class="price-display" id="price">—</span>
-                <a href="/" class="back">← 홈</a>
+                <a href="/" class="back">← Home</a>
             </div>
         </div>
     </div>
 
     <div class="card" style="padding:10px 14px">
         <div class="ctrl">
-            <span class="ctrl-label">모니터링</span>
-            <button id="btn-toggle" class="primary" onclick="toggleMonitor()">시작</button>
-            <button onclick="loadOnce()">새로고침</button>
+            <span class="ctrl-label">Monitor</span>
+            <button id="btn-toggle" class="primary" onclick="toggleMonitor()">Start</button>
+            <button onclick="loadOnce()">Refresh</button>
             <select id="symbol-sel" style="background:var(--card);border:1px solid var(--border);color:var(--text);padding:5px 8px;border-radius:6px;font-size:0.82rem" onchange="onSymbolChange()">
                 <option value="BTCUSDT">BTCUSDT</option>
                 <option value="ETHUSDT">ETHUSDT</option>
@@ -44,16 +44,16 @@
 
     <!-- Signal -->
     <div class="card">
-        <div class="card-title">신호 (ATR 압축 + 이탈)</div>
+        <div class="card-title">Signal (ATR compression + breakout)</div>
         <div class="signal-row">
-            <span class="signal-badge none" id="sig-badge">대기</span>
+            <span class="signal-badge none" id="sig-badge">Idle</span>
             <div class="conf-bar-wrap">
                 <div class="conf-label">Confidence <span id="conf-text">0/7</span></div>
                 <div class="conf-bar"><div class="conf-fill" id="conf-fill" style="width:0%"></div></div>
             </div>
         </div>
         <div class="metrics-grid" style="margin-top:14px">
-            <div class="metric"><span class="metric-key">ATR 압축</span><span class="metric-val" id="m-compress">—</span></div>
+            <div class="metric"><span class="metric-key">ATR squeeze</span><span class="metric-val" id="m-compress">—</span></div>
             <div class="metric"><span class="metric-key">CVD 15m</span><span class="metric-val" id="m-cvd15">—</span></div>
             <div class="metric"><span class="metric-key">CVD 1h</span><span class="metric-val" id="m-cvd1h">—</span></div>
             <div class="metric"><span class="metric-key">TP</span><span class="metric-val" id="m-tp">—</span></div>
@@ -63,7 +63,7 @@
         <div class="box-viz" id="box-viz" style="display:none">
             <div class="box-row">
                 <span class="box-high">▲ Box High: <span id="box-high-val">—</span></span>
-                <span class="box-curr">현재가: <span id="box-curr-val">—</span></span>
+                <span class="box-curr">Mark: <span id="box-curr-val">—</span></span>
                 <span class="box-low">▼ Box Low: <span id="box-low-val">—</span></span>
             </div>
         </div>
@@ -71,28 +71,28 @@
 
     <!-- Reasons -->
     <div class="card">
-        <div class="card-title">채점 상세</div>
+        <div class="card-title">Score breakdown</div>
         <ul class="reasons-list" id="reasons-list"><li>—</li></ul>
     </div>
 
     <!-- Position -->
     <div class="card">
-        <div class="card-title">현재 포지션</div>
-        <div id="pos-content"><p class="no-pos">포지션 없음</p></div>
+        <div class="card-title">Open position</div>
+        <div id="pos-content"><p class="no-pos">No position</p></div>
     </div>
 
     <!-- ── Forward Test (Renaissance UI) ── -->
     <div class="card">
         <div class="step-label">Forward Test</div>
         <div class="card-header">
-            <span>🤖 Forward Test 수익률</span>
+            <span>🤖 Forward test P&amp;L</span>
             <button onclick="location.href='/quant/atr_breakout/forward_test/trades?symbol=' + encodeURIComponent(window.__ATR_BREAKOUT_SYMBOL || 'BTCUSDT')"
-                    style="font-size:0.72rem;padding:3px 8px;">거래 목록 (전체)</button>
+                    style="font-size:0.72rem;padding:3px 8px;">All trades</button>
         </div>
-        <div id="forward-stats" style="min-height:60px;color:var(--text-secondary);">로딩 중...</div>
+        <div id="forward-stats" style="min-height:60px;color:var(--text-secondary);">Loading…</div>
         <div id="forward-trades-box" style="margin-top:14px; padding-top:14px; border-top:1px solid var(--border-color);">
-            <div style="font-size:0.8rem;font-weight:bold;margin-bottom:8px;color:var(--text-primary);">📋 최근 거래</div>
-            <div id="forward-trades-list" style="font-size:0.75rem;color:var(--text-secondary);">로딩 중...</div>
+            <div style="font-size:0.8rem;font-weight:bold;margin-bottom:8px;color:var(--text-primary);">📋 Recent trades</div>
+            <div id="forward-trades-list" style="font-size:0.75rem;color:var(--text-secondary);">Loading…</div>
             <div id="forward-trades-pagination" style="margin-top:8px;display:flex;gap:6px;align-items:center;flex-wrap:wrap;"></div>
         </div>
     </div>
@@ -134,12 +134,12 @@
         running = !running;
         var btn = document.getElementById('btn-toggle');
         if (running) {
-            btn.textContent = '중지'; btn.className = 'active';
+            btn.textContent = 'Stop'; btn.className = 'active';
             document.getElementById('dot').className = 'dot live';
             loadOnce();
             timer = setInterval(loadOnce, 30000);
         } else {
-            btn.textContent = '시작'; btn.className = 'primary';
+            btn.textContent = 'Start'; btn.className = 'primary';
             document.getElementById('dot').className = 'dot';
             clearInterval(timer);
         }
@@ -193,7 +193,7 @@
         var maxConf = isV3Like ? 1 : 7;
 
         var badge = document.getElementById('sig-badge');
-        badge.textContent = signal === 'long' ? '📈 LONG' : signal === 'short' ? '📉 SHORT' : '대기';
+        badge.textContent = signal === 'long' ? '📈 LONG' : signal === 'short' ? '📉 SHORT' : 'Idle';
         badge.className   = 'signal-badge ' + signal;
 
         if (isV3Like) conf = signal === 'none' ? 0 : 1;
@@ -205,7 +205,7 @@
         var compEl = document.getElementById('m-compress');
         compEl.textContent = isV3Like
             ? (comp === true ? '✅ OI↑' : comp === false ? '❌ OI—' : '—')
-            : (comp === true ? '✅ 압축' : comp === false ? '❌ 미압축' : '—');
+            : (comp === true ? '✅ Squeeze' : comp === false ? '❌ No squeeze' : '—');
         compEl.className = 'metric-val' + (comp ? ' up' : '');
 
         // v1/v2: 15m/1h CVD, v3: 단일 CVD
@@ -236,19 +236,19 @@
         // v3일 때 라벨 교체 (표시만) — HTML 구조는 그대로
         if (isV3Like) {
             var titleEl = document.querySelector('.card .card-title');
-            if (titleEl) titleEl.textContent = '신호 (Magnet Zone — OI + CVD)';
+            if (titleEl) titleEl.textContent = 'Signal (Magnet zone — OI + CVD)';
             var keys = document.querySelectorAll('.metrics-grid .metric-key');
             if (keys && keys.length >= 3) {
-                keys[0].textContent = 'OI 증가';
+                keys[0].textContent = 'OI rising';
                 keys[1].textContent = 'CVD';
                 keys[2].textContent = '—';
             }
         } else {
             var titleEl2 = document.querySelector('.card .card-title');
-            if (titleEl2) titleEl2.textContent = '신호 (ATR 압축 + 이탈)';
+            if (titleEl2) titleEl2.textContent = 'Signal (ATR compression + breakout)';
             var keys2 = document.querySelectorAll('.metrics-grid .metric-key');
             if (keys2 && keys2.length >= 3) {
-                keys2[0].textContent = 'ATR 압축';
+                keys2[0].textContent = 'ATR squeeze';
                 keys2[1].textContent = 'CVD 15m';
                 keys2[2].textContent = 'CVD 1h';
             }
@@ -263,7 +263,7 @@
 
     function renderPosition(pos) {
         var el = document.getElementById('pos-content');
-        if (!pos || !pos.entry_price) { el.innerHTML = '<p class="no-pos">포지션 없음</p>'; return; }
+        if (!pos || !pos.entry_price) { el.innerHTML = '<p class="no-pos">No position</p>'; return; }
         var side  = pos.side || '—';
         var entry = pos.entry_price;
         var tp    = pos.tp || pos.tp1_price;
@@ -271,12 +271,12 @@
         var upnl  = pos.unrealized_pnl_pct;
         var cur   = pos.current_price;
         var upnlHtml = upnl != null
-            ? '<div class="pos-item"><span class="pos-key">미실현 PnL</span><span class="pos-val ' + (upnl >= 0 ? 'pos' : 'neg') + '">' + (upnl >= 0 ? '+' : '') + upnl.toFixed(2) + '%</span></div>'
+            ? '<div class="pos-item"><span class="pos-key">Unrealized PnL</span><span class="pos-val ' + (upnl >= 0 ? 'pos' : 'neg') + '">' + (upnl >= 0 ? '+' : '') + upnl.toFixed(2) + '%</span></div>'
             : '';
         el.innerHTML = '<div class="pos-grid">' +
-            '<div class="pos-item"><span class="pos-key">방향</span><span class="pos-val ' + side + '">' + side.toUpperCase() + '</span></div>' +
-            '<div class="pos-item"><span class="pos-key">진입가</span><span class="pos-val">$' + Number(entry).toLocaleString() + '</span></div>' +
-            (cur ? '<div class="pos-item"><span class="pos-key">현재가</span><span class="pos-val">$' + Number(cur).toLocaleString(undefined,{minimumFractionDigits:1}) + '</span></div>' : '') +
+            '<div class="pos-item"><span class="pos-key">Side</span><span class="pos-val ' + side + '">' + side.toUpperCase() + '</span></div>' +
+            '<div class="pos-item"><span class="pos-key">Entry</span><span class="pos-val">$' + Number(entry).toLocaleString() + '</span></div>' +
+            (cur ? '<div class="pos-item"><span class="pos-key">Mark</span><span class="pos-val">$' + Number(cur).toLocaleString(undefined,{minimumFractionDigits:1}) + '</span></div>' : '') +
             upnlHtml +
             '<div class="pos-item"><span class="pos-key">TP</span><span class="pos-val" style="color:var(--green)">' + (tp ? '$' + Number(tp).toLocaleString() : '—') + '</span></div>' +
             '<div class="pos-item"><span class="pos-key">SL</span><span class="pos-val" style="color:var(--red)">' + (sl ? '$' + Number(sl).toLocaleString() : '—') + '</span></div>' +

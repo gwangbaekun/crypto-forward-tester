@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="ko">
+<html lang="en">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -9,7 +9,7 @@
       window.CVD_EXPLOSION_MONITORING_START = document.querySelector('meta[name="cvd-explosion-monitoring-start"]').getAttribute('content') === 'true';
     </script>
     <link rel="stylesheet" href="/static/css/dashboard_common.css">
-    <script src="/static/js/forward_test_dashboard.js?v=2"></script>
+    <script src="/static/js/forward_test_dashboard.js?v=3"></script>
     <script src="https://unpkg.com/lightweight-charts@4.2.2/dist/lightweight-charts.standalone.production.js"></script>
 </head>
 <body>
@@ -24,16 +24,16 @@
             </div>
             <div style="display:flex;align-items:center;gap:10px;">
                 <span class="price-display" id="price">—</span>
-                <a href="/" class="back">← 홈</a>
+                <a href="/" class="back">← Home</a>
             </div>
         </div>
     </div>
 
     <div class="card" style="padding:10px 14px">
         <div class="ctrl">
-            <span class="ctrl-label">모니터링</span>
-            <button id="btn-toggle" class="primary" onclick="toggleMonitor()">시작</button>
-            <button onclick="loadOnce()">새로고침</button>
+            <span class="ctrl-label">Monitor</span>
+            <button id="btn-toggle" class="primary" onclick="toggleMonitor()">Start</button>
+            <button onclick="loadOnce()">Refresh</button>
             <select id="symbol-sel" style="background:var(--card);border:1px solid var(--border);color:var(--text);padding:5px 8px;border-radius:6px;font-size:0.82rem" onchange="onSymbolChange()">
                 <option value="BTCUSDT">BTCUSDT</option>
                 <option value="ETHUSDT">ETHUSDT</option>
@@ -43,23 +43,23 @@
 
     <div class="card" id="chart-card">
         <div class="card-title" style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
-            <span>가격 차트 (1h)</span>
-            <button id="chart-toggle-btn" onclick="toggleChart()" style="font-size:0.72rem;padding:3px 9px;">접기</button>
+            <span>Price chart (1h)</span>
+            <button id="chart-toggle-btn" onclick="toggleChart()" style="font-size:0.72rem;padding:3px 9px;">Collapse</button>
         </div>
         <div id="chart-wrap">
             <div id="price-chart" style="height:240px;border-radius:6px;overflow:hidden;"></div>
             <div id="vol-chart"   style="height:72px;margin-top:3px;border-radius:6px;overflow:hidden;"></div>
             <div style="display:flex;justify-content:space-between;padding:3px 2px 0;font-size:0.68rem;color:var(--text-secondary);">
-                <span>▲▼ = 폭발봉 (≥ <span id="chart-vol-mult">2.5</span>x)</span>
-                <span>Vol Ratio — 적색: 폭발 / 주황선: 임계값</span>
+                <span>▲▼ = explosion bars (≥ <span id="chart-vol-mult">2.5</span>x)</span>
+                <span>Vol ratio — red: explosion / orange: threshold</span>
             </div>
         </div>
     </div>
 
     <div class="card">
-        <div class="card-title">신호 (볼륨 폭발 + CVD)</div>
+        <div class="card-title">Signal (volume explosion + CVD)</div>
         <div class="signal-row">
-            <span class="signal-badge none" id="sig-badge">대기</span>
+            <span class="signal-badge none" id="sig-badge">Idle</span>
             <div class="conf-bar-wrap">
                 <div class="conf-label">Confidence <span id="conf-text">0/7</span></div>
                 <div class="conf-bar"><div class="conf-fill" id="conf-fill" style="width:0%"></div></div>
@@ -67,34 +67,34 @@
         </div>
         <div class="metrics-grid" style="margin-top:14px">
             <div class="metric"><span class="metric-key">Vol x</span><span class="metric-val" id="m-vr">—</span></div>
-            <div class="metric"><span class="metric-key">CVD 가속</span><span class="metric-val" id="m-acc">—</span></div>
-            <div class="metric"><span class="metric-key">상위 TF CVD</span><span class="metric-val" id="m-hi">—</span></div>
+            <div class="metric"><span class="metric-key">CVD accel</span><span class="metric-val" id="m-acc">—</span></div>
+            <div class="metric"><span class="metric-key">Higher TF CVD</span><span class="metric-val" id="m-hi">—</span></div>
             <div class="metric"><span class="metric-key">TP</span><span class="metric-val" id="m-tp">—</span></div>
             <div class="metric"><span class="metric-key">SL</span><span class="metric-val" id="m-sl">—</span></div>
         </div>
     </div>
 
     <div class="card">
-        <div class="card-title">채점 상세</div>
+        <div class="card-title">Score breakdown</div>
         <ul class="reasons-list" id="reasons-list"><li>—</li></ul>
     </div>
 
     <div class="card">
-        <div class="card-title">현재 포지션</div>
-        <div id="pos-content"><p class="no-pos">포지션 없음</p></div>
+        <div class="card-title">Open position</div>
+        <div id="pos-content"><p class="no-pos">No position</p></div>
     </div>
 
     <div class="card">
         <div class="step-label">Forward Test</div>
         <div class="card-header">
-            <span>🤖 Forward Test 수익률</span>
+            <span>🤖 Forward test P&amp;L</span>
             <button onclick="location.href='/quant/cvd_explosion/forward_test/trades?symbol=' + encodeURIComponent(window.__CVD_EXPLOSION_SYMBOL || 'BTCUSDT')"
-                    style="font-size:0.72rem;padding:3px 8px;">거래 목록 (전체)</button>
+                    style="font-size:0.72rem;padding:3px 8px;">All trades</button>
         </div>
-        <div id="forward-stats" style="min-height:60px;color:var(--text-secondary);">로딩 중...</div>
+        <div id="forward-stats" style="min-height:60px;color:var(--text-secondary);">Loading…</div>
         <div id="forward-trades-box" style="margin-top:14px; padding-top:14px; border-top:1px solid var(--border-color);">
-            <div style="font-size:0.8rem;font-weight:bold;margin-bottom:8px;color:var(--text-primary);">📋 최근 거래</div>
-            <div id="forward-trades-list" style="font-size:0.75rem;color:var(--text-secondary);">로딩 중...</div>
+            <div style="font-size:0.8rem;font-weight:bold;margin-bottom:8px;color:var(--text-primary);">📋 Recent trades</div>
+            <div id="forward-trades-list" style="font-size:0.75rem;color:var(--text-secondary);">Loading…</div>
             <div id="forward-trades-pagination" style="margin-top:8px;display:flex;gap:6px;align-items:center;flex-wrap:wrap;"></div>
         </div>
     </div>
@@ -117,7 +117,7 @@
     function toggleChart() {
         _chartOpen = !_chartOpen;
         document.getElementById('chart-wrap').style.display = _chartOpen ? '' : 'none';
-        document.getElementById('chart-toggle-btn').textContent = _chartOpen ? '접기' : '펼치기';
+        document.getElementById('chart-toggle-btn').textContent = _chartOpen ? 'Collapse' : 'Expand';
     }
     window.toggleChart = toggleChart;
 
@@ -223,12 +223,12 @@
         running = !running;
         var btn = document.getElementById('btn-toggle');
         if (running) {
-            btn.textContent = '중지'; btn.className = 'active';
+            btn.textContent = 'Stop'; btn.className = 'active';
             document.getElementById('dot').className = 'dot live';
             loadOnce();
             timer = setInterval(loadOnce, 30000);
         } else {
-            btn.textContent = '시작'; btn.className = 'primary';
+            btn.textContent = 'Start'; btn.className = 'primary';
             document.getElementById('dot').className = 'dot';
             clearInterval(timer);
         }
@@ -273,7 +273,7 @@
             : (signal === 'long' ? bull : signal === 'short' ? bear : Math.max(bull, bear));
 
         var badge = document.getElementById('sig-badge');
-        badge.textContent = signal === 'long' ? '📈 LONG' : signal === 'short' ? '📉 SHORT' : '대기';
+        badge.textContent = signal === 'long' ? '📈 LONG' : signal === 'short' ? '📉 SHORT' : 'Idle';
         badge.className = 'signal-badge ' + signal;
 
         var pct = Math.min(100, (conf / 7) * 100);
@@ -309,7 +309,7 @@
 
     function renderPosition(pos) {
         var el = document.getElementById('pos-content');
-        if (!pos || !pos.entry_price) { el.innerHTML = '<p class="no-pos">포지션 없음</p>'; return; }
+        if (!pos || !pos.entry_price) { el.innerHTML = '<p class="no-pos">No position</p>'; return; }
         var side = pos.side || '—';
         var entry = pos.entry_price;
         var tp = pos.tp || pos.tp1_price;
@@ -317,12 +317,12 @@
         var upnl = pos.unrealized_pnl_pct;
         var cur = pos.current_price;
         var upnlHtml = upnl != null
-            ? '<div class="pos-item"><span class="pos-key">미실현 PnL</span><span class="pos-val ' + (upnl >= 0 ? 'pos' : 'neg') + '">' + (upnl >= 0 ? '+' : '') + upnl.toFixed(2) + '%</span></div>'
+            ? '<div class="pos-item"><span class="pos-key">Unrealized PnL</span><span class="pos-val ' + (upnl >= 0 ? 'pos' : 'neg') + '">' + (upnl >= 0 ? '+' : '') + upnl.toFixed(2) + '%</span></div>'
             : '';
         el.innerHTML = '<div class="pos-grid">' +
-            '<div class="pos-item"><span class="pos-key">방향</span><span class="pos-val ' + side + '">' + side.toUpperCase() + '</span></div>' +
-            '<div class="pos-item"><span class="pos-key">진입가</span><span class="pos-val">$' + Number(entry).toLocaleString() + '</span></div>' +
-            (cur ? '<div class="pos-item"><span class="pos-key">현재가</span><span class="pos-val">$' + Number(cur).toLocaleString(undefined,{minimumFractionDigits:1}) + '</span></div>' : '') +
+            '<div class="pos-item"><span class="pos-key">Side</span><span class="pos-val ' + side + '">' + side.toUpperCase() + '</span></div>' +
+            '<div class="pos-item"><span class="pos-key">Entry</span><span class="pos-val">$' + Number(entry).toLocaleString() + '</span></div>' +
+            (cur ? '<div class="pos-item"><span class="pos-key">Mark</span><span class="pos-val">$' + Number(cur).toLocaleString(undefined,{minimumFractionDigits:1}) + '</span></div>' : '') +
             upnlHtml +
             '<div class="pos-item"><span class="pos-key">TP</span><span class="pos-val" style="color:var(--green)">' + (tp ? '$' + Number(tp).toLocaleString() : '—') + '</span></div>' +
             '<div class="pos-item"><span class="pos-key">SL</span><span class="pos-val" style="color:var(--red)">' + (sl ? '$' + Number(sl).toLocaleString() : '—') + '</span></div>' +

@@ -35,6 +35,7 @@ REDIS_TTL_SEC = int(os.getenv("REDIS_TTL_SEC", "7200"))
 _memory_payload: Dict[str, Dict[str, Any]] = {}
 _memory_lock = asyncio.Lock()
 _redis_client: Any = None
+_redis_disabled_until: float = 0.0
 _sym_fetch_locks: Dict[str, asyncio.Lock] = {}
 _sym_fetch_locks_guard = asyncio.Lock()
 
@@ -46,6 +47,10 @@ def _redis_key(symbol: str) -> str:
 
 async def _get_redis():
     global _redis_client
+    if not REDIS_URL:
+        return None
+    if time.time() < _redis_disabled_until:
+        return None
     if not REDIS_URL:
         return None
     if _redis_client is not None:
@@ -60,6 +65,18 @@ async def _get_redis():
         return None
 
 
+def _disable_redis_temporarily(exc: Exception, *, action: str) -> None:
+    """
+    Redis 연결 실패 시 일정 시간 재시도를 멈추고 메모리 캐시로 폴백한다.
+    Redis가 내려간 환경에서 요청마다 에러 로그가 반복되는 것을 방지한다.
+    """
+    global _redis_client, _redis_disabled_until
+    _redis_client = None
+    backoff_sec = 60.0
+    _redis_disabled_until = time.time() + backoff_sec
+    print(f"[liq_series_cache] redis {action} failed: {exc} (fallback to memory for {int(backoff_sec)}s)")
+
+
 async def _cache_write(symbol: str, payload: Dict[str, Any]) -> None:
     r = await _get_redis()
     if r is not None:
@@ -67,7 +84,7 @@ async def _cache_write(symbol: str, payload: Dict[str, Any]) -> None:
             await r.set(_redis_key(symbol), json.dumps(payload, ensure_ascii=False), ex=REDIS_TTL_SEC)
             return
         except Exception as exc:
-            print(f"[liq_series_cache] redis set failed: {exc}")
+            _disable_redis_temporarily(exc, action="set")
     async with _memory_lock:
         _memory_payload[symbol.upper()] = payload
 
@@ -81,7 +98,7 @@ async def get_cached_chart_payload(symbol: str) -> Optional[Dict[str, Any]]:
             if raw:
                 return json.loads(raw)
         except Exception as exc:
-            print(f"[liq_series_cache] redis get failed: {exc}")
+            _disable_redis_temporarily(exc, action="get")
     async with _memory_lock:
         return _memory_payload.get(sym)
 
