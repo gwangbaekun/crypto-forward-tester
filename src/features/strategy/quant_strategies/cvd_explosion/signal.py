@@ -104,8 +104,6 @@ def compute_signal(
     if not bars_entry:
         return _no_signal(f"{entry_key} 데이터 없음", level_map=level_map, entry_tf=entry_key, higher_tf=higher_key)
 
-    # bars[-1] = 마지막 완성봉 (kline_bundle 에서 미완성봉 제거됨)
-    # current_price = WS 실시간가 → 봉 마감 후 현재 시장가로 진입
     vr = _vol_ratio(bars_entry, vol_avg_w)
     is_exp = vr >= vol_mult
     is_solo = _is_solo(bars_entry, zone_gap, vol_mult, vol_avg_w) if is_exp else False
@@ -170,6 +168,7 @@ def compute_signal(
         "cvd_higher_tf": higher_key,
         "entry_tf":      entry_key,
         "higher_tf":     higher_key,
+        "candle_time":   bars_entry[-1]["time"],
         "level_map":     level_map,
         "tpsl_mode":     tpsl_mode_label(tpsl_params),
         "signal_mode":   "cvd_exp_v1",

@@ -17,6 +17,7 @@ from .exit_check import check_exit
 
 class CvdExplosionForwardTest(BaseForwardTest):
     STRATEGY_TAG = "cvd_explosion"
+    _last_entry_candle_time: Optional[int] = None 
 
     def _extra_position_fields(self, sig: Dict) -> Dict:
         out: Dict[str, Any] = {}
@@ -68,7 +69,9 @@ class CvdExplosionForwardTest(BaseForwardTest):
 
         if self._position is None:
             direction = sig.get("signal") or sig.get("direction")
-            if direction in ("long", "short"):
+            candle_time = sig.get("candle_time")
+            already_entered = (candle_time is not None and candle_time == self._last_entry_candle_time)
+            if direction in ("long", "short") and not already_entered:
                 pos: Dict[str, Any] = {
                     "side":        direction,
                     "entry_price": current_price,
@@ -82,6 +85,7 @@ class CvdExplosionForwardTest(BaseForwardTest):
                 pos.update(self._extra_position_fields(sig))
                 pos["trade_id"] = self._persist_open(symbol, pos, report_text or "")
                 self._position = pos
+                self._last_entry_candle_time = candle_time
                 events.append({"event": "entry", "position": pos})
 
         if events:

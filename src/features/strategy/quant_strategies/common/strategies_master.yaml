@@ -26,7 +26,7 @@ atr_breakout:
 cvd_explosion:
   enabled: true
   monitoring: true
-  tick_interval: 60
+  tick_interval: 10
   timeframes: ["1h", "4h"]
   entry_tf: "1h"
   higher_tf: "4h"
