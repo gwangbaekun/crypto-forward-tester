@@ -126,7 +126,7 @@ def compute_signal(
     bars_1h  = _bars_from_sweep(sweep_by_tf.get("1h")  or {})
 
     if not bars_15m:
-        return _no_signal("15m 데이터 없음")
+        return _no_signal("No 15m data")
 
     # ── ATR 압축 체크 ──────────────────────────────────────────────────
     r_atr = _recent_atr(bars_15m)
@@ -152,16 +152,16 @@ def compute_signal(
     if is_compressed and breakout_up:
         bull_score += 2
         reasons.append(
-            f"[SETUP] 압축+상단이탈 ✅ close={current_close:.1f} > box_high={box_high:.1f}"
+            f"[SETUP] Compressed+Upward Breakout ✅ close={current_close:.1f} > box_high={box_high:.1f}"
         )
     elif is_compressed and breakout_down:
         bear_score += 2
         reasons.append(
-            f"[SETUP] 압축+하단이탈 ✅ close={current_close:.1f} < box_low={box_low:.1f}"
+            f"[SETUP] Compressed+Downward Breakout ✅ close={current_close:.1f} < box_low={box_low:.1f}"
         )
     else:
         reasons.append(
-            f"[SETUP] 미충족 (압축={is_compressed}, breakout={'up' if breakout_up else 'down' if breakout_down else 'none'})"
+            f"[SETUP] Unmet (compressed={is_compressed}, breakout={'up' if breakout_up else 'down' if breakout_down else 'none'})"
         )
 
     # +2: 15m CVD 방향
@@ -186,7 +186,7 @@ def compute_signal(
         move    = current_close - box_low
         tp      = round(current_close + move * TP_MULTIPLIER, 2)
         sl      = round(box_low, 2)
-        reasons.append(f"[진입] LONG  confidence={bull_score}/7  TP={tp:,.2f}  SL={sl:,.2f}")
+        reasons.append(f"[ENTRY] LONG  confidence={bull_score}/7  TP={tp:,.2f}  SL={sl:,.2f}")
         return {
             "signal": "long", "confidence": bull_score,
             "bull_score": bull_score, "bear_score": bear_score,
@@ -202,7 +202,7 @@ def compute_signal(
         move    = box_high - current_close
         tp      = round(current_close - move * TP_MULTIPLIER, 2)
         sl      = round(box_high, 2)
-        reasons.append(f"[진입] SHORT confidence={bear_score}/7  TP={tp:,.2f}  SL={sl:,.2f}")
+        reasons.append(f"[ENTRY] SHORT confidence={bear_score}/7  TP={tp:,.2f}  SL={sl:,.2f}")
         return {
             "signal": "short", "confidence": bear_score,
             "bull_score": bull_score, "bear_score": bear_score,
@@ -215,7 +215,7 @@ def compute_signal(
         }
 
     reasons.append(
-        f"[대기] bull={bull_score} bear={bear_score} — 임계값({CONFIDENCE_THRESHOLD}) 미달"
+        f"[WAIT] bull={bull_score} bear={bear_score} — threshold({CONFIDENCE_THRESHOLD}) unmet"
     )
     return _no_signal(None, extra={
         "bull_score": bull_score, "bear_score": bear_score,
@@ -254,7 +254,7 @@ def compute_signal_v2(
     bars_higher = _bars_from_sweep(sweep_by_tf.get(higher_tf) or {})
 
     if not bars_entry:
-        return {**_no_signal(f"{entry_tf} 데이터 없음"), "level_map": level_map}
+        return {**_no_signal(f"No {entry_tf} data"), "level_map": level_map}
 
     r_atr = _recent_atr(bars_entry)
     h_atr = _hist_atr(bars_entry)
@@ -275,13 +275,13 @@ def compute_signal_v2(
     # +2: SETUP(압축 + 방향 이탈) — ATR/BRK 이중 집계 제거
     if is_compressed and breakout_up:
         bull_score += 2
-        reasons.append(f"[SETUP] 압축+상단이탈 ✅ close={current_close:.1f} > box_high={box_high:.1f}")
+        reasons.append(f"[SETUP] Compressed+Upward Breakout ✅ close={current_close:.1f} > box_high={box_high:.1f}")
     elif is_compressed and breakout_down:
         bear_score += 2
-        reasons.append(f"[SETUP] 압축+하단이탈 ✅ close={current_close:.1f} < box_low={box_low:.1f}")
+        reasons.append(f"[SETUP] Compressed+Downward Breakout ✅ close={current_close:.1f} < box_low={box_low:.1f}")
     else:
         reasons.append(
-            f"[SETUP] 미충족 (압축={is_compressed}, breakout={'up' if breakout_up else 'down' if breakout_down else 'none'})"
+            f"[SETUP] Unmet (compressed={is_compressed}, breakout={'up' if breakout_up else 'down' if breakout_down else 'none'})"
         )
 
     if cvd_entry > 0:
@@ -310,11 +310,11 @@ def compute_signal_v2(
         tp_magnet = _nearest_magnet_above(level_map, current_close)
         sl_magnet = _nearest_magnet_below(level_map, current_close)
         if not tp_magnet or not sl_magnet:
-            reasons.append("[대기] LONG magnet TP/SL 부족")
+            reasons.append("[WAIT] LONG magnet TP/SL missing")
             return {**_no_signal(None, extra=common), "level_map": level_map}
         tp = round(tp_magnet, 2)
         sl = round(sl_magnet, 2)
-        reasons.append(f"[진입] LONG confidence={bull_score}/7 TP={tp:,.2f}(magnet) SL={sl:,.2f}(magnet)")
+        reasons.append(f"[ENTRY] LONG confidence={bull_score}/7 TP={tp:,.2f}(magnet) SL={sl:,.2f}(magnet)")
         return {"signal": "long", "confidence": bull_score, "tp": tp, "sl": sl, **common}
 
     if bear_score >= CONFIDENCE_THRESHOLD and bear_score > bull_score and box_high > 0:
@@ -322,14 +322,14 @@ def compute_signal_v2(
         tp_magnet = _nearest_magnet_below(level_map, current_close)
         sl_magnet = _nearest_magnet_above(level_map, current_close)
         if not tp_magnet or not sl_magnet:
-            reasons.append("[대기] SHORT magnet TP/SL 부족")
+            reasons.append("[WAIT] SHORT magnet TP/SL missing")
             return {**_no_signal(None, extra=common), "level_map": level_map}
         tp = round(tp_magnet, 2)
         sl = round(sl_magnet, 2)
-        reasons.append(f"[진입] SHORT confidence={bear_score}/7 TP={tp:,.2f}(magnet) SL={sl:,.2f}(magnet)")
+        reasons.append(f"[ENTRY] SHORT confidence={bear_score}/7 TP={tp:,.2f}(magnet) SL={sl:,.2f}(magnet)")
         return {"signal": "short", "confidence": bear_score, "tp": tp, "sl": sl, **common}
 
-    reasons.append(f"[대기] bull={bull_score} bear={bear_score} — 임계값({CONFIDENCE_THRESHOLD}) 미달")
+    reasons.append(f"[WAIT] bull={bull_score} bear={bear_score} — threshold({CONFIDENCE_THRESHOLD}) unmet")
     return {**_no_signal(None, extra=common), "level_map": level_map}
 
 
@@ -380,11 +380,11 @@ def compute_signal_v3(
     level_map: List[Dict] = list((magnets or {}).get("level_map") or [])
 
     if not level_map:
-        return {**_no_signal("magnet 데이터 없음"), "level_map": []}
+        return {**_no_signal("No magnet data"), "level_map": []}
 
     bars = _bars_from_sweep(sweep_by_tf.get(entry_tf) or {})
     if not bars:
-        return {**_no_signal(f"{entry_tf} 데이터 없음"), "level_map": level_map}
+        return {**_no_signal(f"No {entry_tf} data"), "level_map": level_map}
 
     nearest_above = _nearest_magnet_above(level_map, current_price)
     nearest_below = _nearest_magnet_below(level_map, current_price)
@@ -393,10 +393,10 @@ def compute_signal_v3(
     cvd   = _cvd_sum(bars)
 
     reasons: List[str] = [
-        f"[MAG] above={nearest_above:,.1f}" if nearest_above else "[MAG] above=없음",
-        f"[MAG] below={nearest_below:,.1f}" if nearest_below else "[MAG] below=없음",
-        f"[OI]  {'증가 ✅' if oi_up else '감소/중립 ❌'}",
-        f"[CVD] {cvd:+.0f} {'↑ ✅' if cvd > 0 else '↓ ✅' if cvd < 0 else '0 (중립)'}",
+        f"[MAG] above={nearest_above:,.1f}" if nearest_above else "[MAG] above=none",
+        f"[MAG] below={nearest_below:,.1f}" if nearest_below else "[MAG] below=none",
+        f"[OI]  {'Increasing ✅' if oi_up else 'Decreasing/Neutral ❌'}",
+        f"[CVD] {cvd:+.0f} {'↑ ✅' if cvd > 0 else '↓ ✅' if cvd < 0 else '0 (Neutral)'}",
     ]
 
     common: Dict[str, Any] = {
@@ -410,21 +410,21 @@ def compute_signal_v3(
     }
 
     if not oi_up:
-        return {**_no_signal(None, extra=common), "reasons": reasons + ["[대기] OI 미증가 — 압축력 없음"]}
+        return {**_no_signal(None, extra=common), "reasons": reasons + ["[WAIT] OI not increasing — no compression"]}
 
     if not nearest_above or not nearest_below:
-        return {**_no_signal(None, extra=common), "reasons": reasons + ["[대기] magnet 양방향 없음"]}
+        return {**_no_signal(None, extra=common), "reasons": reasons + ["[WAIT] magnet missing in both directions"]}
 
     if cvd > 0:
         tp = round(nearest_above, 2)
         sl = round(nearest_below, 2)
-        reasons.append(f"[진입] LONG  TP={tp:,.1f}  SL={sl:,.1f}")
+        reasons.append(f"[ENTRY] LONG  TP={tp:,.1f}  SL={sl:,.1f}")
         return {"signal": "long",  "tp": tp, "sl": sl, "cvd_aligned": True,  "reasons": reasons, **common}
 
     if cvd < 0:
         tp = round(nearest_below, 2)
         sl = round(nearest_above, 2)
-        reasons.append(f"[진입] SHORT TP={tp:,.1f}  SL={sl:,.1f}")
+        reasons.append(f"[ENTRY] SHORT TP={tp:,.1f}  SL={sl:,.1f}")
         return {"signal": "short", "tp": tp, "sl": sl, "cvd_aligned": True,  "reasons": reasons, **common}
 
-    return {**_no_signal(None, extra=common), "reasons": reasons + ["[대기] CVD 중립 — 방향성 없음"]}
+    return {**_no_signal(None, extra=common), "reasons": reasons + ["[WAIT] CVD neutral — no directionality"]}

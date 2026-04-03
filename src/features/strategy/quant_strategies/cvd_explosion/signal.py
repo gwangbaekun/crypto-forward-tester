@@ -102,7 +102,7 @@ def compute_signal(
     level_map: List[Dict] = list((magnets or {}).get("level_map") or [])
 
     if not bars_entry:
-        return _no_signal(f"{entry_key} 데이터 없음", level_map=level_map, entry_tf=entry_key, higher_tf=higher_key)
+        return _no_signal(f"No {entry_key} data", level_map=level_map, entry_tf=entry_key, higher_tf=higher_key)
 
     vr = _vol_ratio(bars_entry, vol_avg_w)
     is_exp = vr >= vol_mult
@@ -118,21 +118,21 @@ def compute_signal(
     if is_exp:
         if cdir == "up":
             bull += sc_exp
-            reasons.append(f"[EXP] 상승폭발봉 vr={vr:.2f}x ✅")
+            reasons.append(f"[EXP] Upward Explosion vr={vr:.2f}x ✅")
         else:
             bear += sc_exp
-            reasons.append(f"[EXP] 하락폭발봉 vr={vr:.2f}x ✅")
+            reasons.append(f"[EXP] Downward Explosion vr={vr:.2f}x ✅")
     else:
-        reasons.append(f"[EXP] 미달 vr={vr:.2f}x < {vol_mult}x")
+        reasons.append(f"[EXP] Unmet vr={vr:.2f}x < {vol_mult}x")
 
     if is_solo:
         if cdir == "up":
             bull += sc_solo
         else:
             bear += sc_solo
-        reasons.append(f"[SOLO] 단독봉 ✅ (직전 {zone_gap}봉 내 폭발 없음)")
+        reasons.append(f"[SOLO] Solo candle ✅ (No explosion in previous {zone_gap} candles)")
     elif is_exp:
-        reasons.append("[SOLO] 클러스터봉 — 단독봉 아님")
+        reasons.append("[SOLO] Cluster candle — not solo")
 
     accel_dir = "up" if accel > 0 else "dn"
     if is_exp and accel_dir == cdir:
@@ -140,9 +140,9 @@ def compute_signal(
             bull += sc_cvd
         else:
             bear += sc_cvd
-        reasons.append(f"[CVD_ACCEL] 가속 일치 {accel:+.0f} ✅")
+        reasons.append(f"[CVD_ACCEL] Acceleration aligned {accel:+.0f} ✅")
     elif is_exp:
-        reasons.append(f"[CVD_ACCEL] 가속 역방향 {accel:+.0f} ❌")
+        reasons.append(f"[CVD_ACCEL] Acceleration reversed {accel:+.0f} ❌")
 
     cvd_lbl = f"CVD_{higher_key}"
     if cvd_hi > 0:
@@ -182,10 +182,10 @@ def compute_signal(
     if bull >= conf_thr and bull > bear:
         tp, sl = ref_long_tp, ref_long_sl  
         if tp is None or sl is None:
-            reasons.append("[대기] LONG TP/SL 산출 실패 — tpsl 파라미터 확인")
+            reasons.append("[WAIT] LONG TP/SL calculation failed — check tpsl parameters")
             return {**_no_signal(None, level_map=level_map, entry_tf=entry_key, higher_tf=higher_key), **common}
         reasons.append(
-            f"[진입] LONG  confidence={bull}/7  mode={common['tpsl_mode']}  TP={tp:,.2f}  SL={sl:,.2f}"
+            f"[ENTRY] LONG  confidence={bull}/7  mode={common['tpsl_mode']}  TP={tp:,.2f}  SL={sl:,.2f}"
         )
         out = {"signal": "long", "confidence": bull, "tp": tp, "sl": sl, **common}
         out["position_meta"] = _position_meta_for_entry(tpsl_params)
@@ -194,17 +194,17 @@ def compute_signal(
     if bear >= conf_thr and bear > bull:
         tp, sl = ref_short_tp, ref_short_sl  
         if tp is None or sl is None:
-            reasons.append("[대기] SHORT TP/SL 산출 실패 — tpsl 파라미터 확인")
+            reasons.append("[WAIT] SHORT TP/SL calculation failed — check tpsl parameters")
             return {**_no_signal(None, level_map=level_map, entry_tf=entry_key, higher_tf=higher_key), **common}
         reasons.append(
-            f"[진입] SHORT confidence={bear}/7  mode={common['tpsl_mode']}  TP={tp:,.2f}  SL={sl:,.2f}"
+            f"[ENTRY] SHORT confidence={bear}/7  mode={common['tpsl_mode']}  TP={tp:,.2f}  SL={sl:,.2f}"
         )
         out = {"signal": "short", "confidence": bear, "tp": tp, "sl": sl, **common}
         out["position_meta"] = _position_meta_for_entry(tpsl_params)
         return out
 
     max_score = sc_exp + sc_solo + sc_cvd + sc_cvd_hi
-    reasons.append(f"[대기] bull={bull} bear={bear} — 임계값({conf_thr}/{max_score}) 미달")
+    reasons.append(f"[WAIT] bull={bull} bear={bear} — threshold({conf_thr}/{max_score}) unmet")
     return {**_no_signal(None, level_map=level_map, entry_tf=entry_key, higher_tf=higher_key), **common}
 
 
