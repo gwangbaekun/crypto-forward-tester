@@ -47,11 +47,10 @@
             <button id="chart-toggle-btn" onclick="toggleChart()" style="font-size:0.72rem;padding:3px 9px;">Collapse</button>
         </div>
         <div id="chart-wrap">
-            <div id="price-chart" style="height:240px;border-radius:6px;overflow:hidden;"></div>
-            <div id="vol-chart"   style="height:72px;margin-top:3px;border-radius:6px;overflow:hidden;"></div>
+            <div id="price-chart" style="height:312px;border-radius:6px;overflow:hidden;"></div>
             <div style="display:flex;justify-content:space-between;padding:3px 2px 0;font-size:0.68rem;color:var(--text-secondary);">
                 <span>▲▼ = explosion bars (≥ <span id="chart-vol-mult">2.5</span>x)</span>
-                <span>Vol ratio — red: explosion / orange: threshold</span>
+                <span>Vol ratio — red: explosion / gray: normal / orange line: threshold</span>
             </div>
         </div>
     </div>
@@ -139,29 +138,36 @@
         var LC = window.LightweightCharts;
         if (!LC) return;
 
+        // 하나의 차트에 캔들과 볼륨을 같이 그리기 위해 볼륨의 price scale 위치 조정
         _priceChart = LC.createChart(document.getElementById('price-chart'), _darkOpts(240));
+        
         _candleSeries = _priceChart.addCandlestickSeries({
             upColor: '#26a69a', downColor: '#ef5350',
             borderUpColor: '#26a69a', borderDownColor: '#ef5350',
             wickUpColor: '#26a69a', wickDownColor: '#ef5350',
         });
 
-        _volChart = LC.createChart(document.getElementById('vol-chart'), _darkOpts(72));
-        _volChart.timeScale().applyOptions({ visible: false });
-        _volSeries = _volChart.addHistogramSeries({ priceScaleId: 'right', base: 0 });
-        _threshSeries = _volChart.addLineSeries({
-            color: '#f0883e', lineWidth: 1, lineStyle: 2,  // 주황 점선 임계값
-            priceScaleId: 'right', lastValueVisible: false, priceLineVisible: false,
+        // 캔들과 같은 차트에 히스토그램 추가
+        _volSeries = _priceChart.addHistogramSeries({ 
+            priceScaleId: 'vol',
+            priceFormat: { type: 'volume' } 
         });
 
-        // 두 차트 timescale 동기화
-        function _sync(src, dst) {
-            src.timeScale().subscribeVisibleLogicalRangeChange(function(range) {
-                if (range) dst.timeScale().setVisibleLogicalRange(range);
-            });
-        }
-        _sync(_priceChart, _volChart);
-        _sync(_volChart, _priceChart);
+        // 볼륨을 차트 하단 20% 공간에만 표시
+        _priceChart.priceScale('vol').applyOptions({
+            scaleMargins: { top: 0.8, bottom: 0 },
+            borderVisible: false,
+        });
+        
+        // 캔들이 볼륨을 가리지 않도록 캔들 영역을 상단 80%로 제한
+        _priceChart.priceScale('right').applyOptions({
+            scaleMargins: { top: 0.1, bottom: 0.25 },
+        });
+
+        _threshSeries = _priceChart.addLineSeries({
+            color: '#f0883e', lineWidth: 1, lineStyle: 2,
+            priceScaleId: 'vol', lastValueVisible: false, priceLineVisible: false,
+        });
     }
 
     function _loadChart() {
@@ -196,9 +202,9 @@
                     });
                 _candleSeries.setMarkers(markers);
 
-                // vol ratio 히스토그램
+                // vol ratio 히스토그램 (한 화면에 통합)
                 _volSeries.setData(bars.map(function(b) {
-                    return { time: b.time, value: b.vol_ratio, color: b.is_explosion ? '#ef5350cc' : '#30363d' };
+                    return { time: b.time, value: b.vol_ratio, color: b.is_explosion ? '#ef535088' : '#30363d88' };
                 }));
 
                 // 임계값 선
@@ -307,13 +313,33 @@
             : '<li>—</li>';
     }
 
+    var _posLines = [];
+    function _clearPositionLines() {
+        if (!_candleSeries) return;
+        _posLines.forEach(function(line) { try { _candleSeries.removePriceLine(line); } catch(e){} });
+        _posLines = [];
+    }
+    function _drawPositionLines(entry, tp, sl) {
+        _clearPositionLines();
+        if (!_candleSeries) return;
+        if (entry) _posLines.push(_candleSeries.createPriceLine({ price: Number(entry), color: '#f1c40f', lineWidth: 2, lineStyle: 2, axisLabelVisible: true, title: 'Entry' }));
+        if (tp) _posLines.push(_candleSeries.createPriceLine({ price: Number(tp), color: '#26a69a', lineWidth: 2, lineStyle: 0, axisLabelVisible: true, title: 'TP' }));
+        if (sl) _posLines.push(_candleSeries.createPriceLine({ price: Number(sl), color: '#ef5350', lineWidth: 2, lineStyle: 0, axisLabelVisible: true, title: 'SL' }));
+    }
+
     function renderPosition(pos) {
         var el = document.getElementById('pos-content');
-        if (!pos || !pos.entry_price) { el.innerHTML = '<p class="no-pos">No position</p>'; return; }
+        if (!pos || !pos.entry_price) { 
+            el.innerHTML = '<p class="no-pos">No position</p>'; 
+            _clearPositionLines();
+            return; 
+        }
         var side = pos.side || '—';
         var entry = pos.entry_price;
         var tp = pos.tp || pos.tp1_price;
         var sl = pos.sl || pos.sl_price;
+
+        _drawPositionLines(entry, tp, sl);
         var upnl = pos.unrealized_pnl_pct;
         var cur = pos.current_price;
         var upnlHtml = upnl != null
