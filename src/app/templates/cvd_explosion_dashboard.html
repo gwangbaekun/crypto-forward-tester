@@ -21,6 +21,7 @@
                 <span class="strategy-tag">CVD Explosion</span>
                 <span class="symbol-badge" id="symbol-label">BTCUSDT</span>
                 <span class="status-dot" id="dot"></span>
+                <span id="health-market-stream" style="display:none;color:var(--accent-red);font-size:0.72rem;">●</span>
             </div>
             <div style="display:flex;align-items:center;gap:10px;">
                 <span class="price-display" id="price">—</span>
@@ -41,17 +42,9 @@
         </div>
     </div>
 
-    <div class="card" style="padding:10px 14px;">
-        <div class="card-title" style="margin-bottom:8px;">Data health</div>
-        <div id="data-health-summary" style="font-size:0.82rem;color:var(--text-secondary);margin-bottom:8px;">
-            실시간 시세 · 수신 대기
-        </div>
-        <div id="data-health-list" style="display:grid;grid-template-columns:1fr;gap:6px;"></div>
-    </div>
-
     <div class="card" id="chart-card">
         <div class="card-title" style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
-            <span id="chart-title-text">Price chart (1h)</span>
+            <span id="chart-title-text">Price chart (1h) <span id="health-chart-data" style="display:none;color:var(--accent-red);font-size:0.72rem;margin-left:6px;">●</span></span>
             <div style="display:flex;gap:8px;align-items:center;">
                 <select id="chart-tf-sel" style="background:var(--card);border:1px solid var(--border);color:var(--text);padding:3px 8px;border-radius:6px;font-size:0.75rem;">
                     <option value="1h">1h</option>
@@ -70,7 +63,7 @@
     </div>
 
     <div class="card">
-        <div class="card-title">Signal (volume explosion + CVD)</div>
+        <div class="card-title">Signal (volume explosion + CVD) <span id="health-realtime-state" style="display:none;color:var(--accent-red);font-size:0.72rem;margin-left:6px;">●</span></div>
         <div class="signal-row">
             <span class="signal-badge none" id="sig-badge">Idle</span>
             <div class="conf-bar-wrap">
@@ -95,7 +88,7 @@
     <div class="card">
         <div class="step-label">Binance position</div>
         <div class="card-header">
-            <span id="cvd-binance-mode-label" style="font-size:0.75rem;color:var(--text-secondary);">Fetching…</span>
+            <span id="cvd-binance-mode-label" style="font-size:0.75rem;color:var(--text-secondary);">Fetching… <span id="health-binance-execute" style="display:none;color:var(--accent-red);font-size:0.72rem;margin-left:4px;">●</span></span>
             <button type="button" onclick="cvdRefreshBinanceStatus()" style="font-size:0.72rem;padding:3px 8px;">Refresh</button>
         </div>
         <div id="cvd-binance-status" style="font-size:0.8rem;margin:8px 0;color:var(--text-secondary);">Fetching…</div>
@@ -104,7 +97,7 @@
     <div class="card">
         <div class="step-label">Forward Test</div>
         <div class="card-header">
-            <span>🤖 Forward test P&amp;L</span>
+            <span>🤖 Forward test P&amp;L <span id="health-forward-stats" style="display:none;color:var(--accent-red);font-size:0.72rem;margin-left:6px;">●</span> <span id="health-forward-trades" style="display:none;color:var(--accent-red);font-size:0.72rem;margin-left:2px;">●</span></span>
             <button onclick="location.href='/quant/cvd_explosion/forward_test/trades?symbol=' + encodeURIComponent(window.__CVD_EXPLOSION_SYMBOL || 'BTCUSDT')"
                     style="font-size:0.72rem;padding:3px 8px;">All trades</button>
         </div>
@@ -140,13 +133,6 @@
     };
     var healthState = {};
 
-    function _fmtClockFromSec(tsSec) {
-        if (!tsSec) return '—';
-        var d = new Date(Number(tsSec) * 1000);
-        if (isNaN(d.getTime())) return '—';
-        return d.toLocaleTimeString(undefined, { hour12: false });
-    }
-
     function _setHealth(key, ok, msg, serverTsSec) {
         var prev = healthState[key] || {};
         healthState[key] = {
@@ -169,46 +155,19 @@
         return 'error';
     }
 
+    function _setHealthDot(elId, isError) {
+        var el = document.getElementById(elId);
+        if (!el) return;
+        el.style.display = isError ? '' : 'none';
+    }
+
     function _renderHealth() {
-        var listEl = document.getElementById('data-health-list');
-        var summaryEl = document.getElementById('data-health-summary');
-        if (!listEl || !summaryEl) return;
-
-        var rows = Object.keys(HEALTH_META).map(function(key) {
-            var meta = HEALTH_META[key];
-            var s = healthState[key] || {};
-            var lvl = _healthLevel(key);
-            var dotColor = lvl === 'ok' ? 'var(--accent-green)'
-                         : lvl === 'warn' ? 'var(--accent-orange)'
-                         : lvl === 'error' ? 'var(--accent-red)'
-                         : 'var(--text-secondary)';
-            var ageText = s.lastOkMs ? (((Date.now() - s.lastOkMs) / 1000).toFixed(1) + 's 전') : '수신 대기';
-            var msgText = s.msg || '수신 대기';
-            return (
-                '<div style="display:flex;align-items:center;justify-content:space-between;gap:10px;padding:6px 8px;background:rgba(255,255,255,0.02);border:1px solid var(--border-color);border-radius:6px;">' +
-                    '<div style="display:flex;align-items:center;gap:8px;min-width:0;">' +
-                        '<span style="width:8px;height:8px;border-radius:50%;display:inline-block;background:' + dotColor + ';"></span>' +
-                        '<span style="font-size:0.8rem;color:var(--text-primary);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">' + meta.label + '</span>' +
-                    '</div>' +
-                    '<div style="font-size:0.76rem;color:var(--text-secondary);text-align:right;white-space:nowrap;">' + msgText + ' · ' + ageText + '</div>' +
-                '</div>'
-            );
-        }).join('');
-        listEl.innerHTML = rows;
-
-        var m = healthState.market_stream || {};
-        var mLvl = _healthLevel('market_stream');
-        if (mLvl === 'ok' || mLvl === 'warn') {
-            var serverClock = _fmtClockFromSec(m.lastServerTsSec);
-            summaryEl.textContent = '실시간 시세 · 갱신 중 (약 ' + HEALTH_POLL_SEC.toFixed(1) + 's) · server ' + serverClock;
-            summaryEl.style.color = 'var(--text-secondary)';
-        } else if (mLvl === 'error') {
-            summaryEl.textContent = '실시간 시세 · 요청 실패 · 재시도 중';
-            summaryEl.style.color = 'var(--accent-red)';
-        } else {
-            summaryEl.textContent = '실시간 시세 · 수신 대기';
-            summaryEl.style.color = 'var(--text-secondary)';
-        }
+        _setHealthDot('health-market-stream', _healthLevel('market_stream') === 'error');
+        _setHealthDot('health-realtime-state', _healthLevel('realtime_state') === 'error');
+        _setHealthDot('health-chart-data', _healthLevel('chart_data') === 'error');
+        _setHealthDot('health-forward-stats', _healthLevel('forward_stats') === 'error');
+        _setHealthDot('health-forward-trades', _healthLevel('forward_trades') === 'error');
+        _setHealthDot('health-binance-execute', _healthLevel('binance_execute') === 'error');
     }
 
     function _pollMarketHealth() {
