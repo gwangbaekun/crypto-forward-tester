@@ -34,7 +34,7 @@ cvd_explosion:
   label: "CVD Explosion"
   emoji: "💣"
   telegram_alerts: true
-  binance_live: false
+  binance_live: true
   tick:
     module: features.strategy.cvd_explosion.realtime_feed
     fn: get_state

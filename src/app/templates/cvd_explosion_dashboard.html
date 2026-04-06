@@ -41,6 +41,14 @@
         </div>
     </div>
 
+    <div class="card" style="padding:10px 14px;">
+        <div class="card-title" style="margin-bottom:8px;">Data health</div>
+        <div id="data-health-summary" style="font-size:0.82rem;color:var(--text-secondary);margin-bottom:8px;">
+            실시간 시세 · 수신 대기
+        </div>
+        <div id="data-health-list" style="display:grid;grid-template-columns:1fr;gap:6px;"></div>
+    </div>
+
     <div class="card" id="chart-card">
         <div class="card-title" style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
             <span>Price chart (1h)</span>
@@ -79,8 +87,12 @@
     </div>
 
     <div class="card">
-        <div class="card-title" id="pos-title">Open position</div>
-        <div id="pos-content"><p class="no-pos">No position</p></div>
+        <div class="step-label">Binance position</div>
+        <div class="card-header">
+            <span id="cvd-binance-mode-label" style="font-size:0.75rem;color:var(--text-secondary);">Fetching…</span>
+            <button type="button" onclick="cvdRefreshBinanceStatus()" style="font-size:0.72rem;padding:3px 8px;">Refresh</button>
+        </div>
+        <div id="cvd-binance-status" style="font-size:0.8rem;margin:8px 0;color:var(--text-secondary);">Fetching…</div>
     </div>
 
     <div class="card">
@@ -105,8 +117,167 @@
     var _params = new URLSearchParams(window.location.search);
     var SYMBOL = _params.get('symbol') || 'BTCUSDT';
     var timer = null;
+    var healthTimer = null;
+    var binanceTimer = null;
     var running = false;
+    var HEALTH_POLL_SEC = 1.0;
+    var BINANCE_POLL_SEC = 2.0;
     window.__CVD_EXPLOSION_SYMBOL = SYMBOL;
+    var HEALTH_META = {
+        market_stream: { label: '실시간 시세', expectSec: 1.0 },
+        realtime_state: { label: '전략 시그널', expectSec: 30.0 },
+        chart_data: { label: '차트 데이터', expectSec: 30.0 },
+        forward_stats: { label: '포워드 통계', expectSec: 30.0 },
+        forward_trades: { label: '포워드 거래목록', expectSec: 30.0 },
+        binance_execute: { label: 'Binance 체결/포지션', expectSec: 2.0 },
+    };
+    var healthState = {};
+
+    function _fmtClockFromSec(tsSec) {
+        if (!tsSec) return '—';
+        var d = new Date(Number(tsSec) * 1000);
+        if (isNaN(d.getTime())) return '—';
+        return d.toLocaleTimeString(undefined, { hour12: false });
+    }
+
+    function _setHealth(key, ok, msg, serverTsSec) {
+        var prev = healthState[key] || {};
+        healthState[key] = {
+            ok: !!ok,
+            msg: msg || (ok ? '정상 수신' : '요청 실패'),
+            lastOkMs: ok ? Date.now() : (prev.lastOkMs || null),
+            lastServerTsSec: serverTsSec != null ? Number(serverTsSec) : (prev.lastServerTsSec || null),
+        };
+        _renderHealth();
+    }
+
+    function _healthLevel(key) {
+        var s = healthState[key];
+        var meta = HEALTH_META[key] || { expectSec: 30.0 };
+        if (!s || !s.lastOkMs) return 'idle';
+        if (s.ok === false) return 'error';
+        var age = (Date.now() - s.lastOkMs) / 1000;
+        if (age <= meta.expectSec * 2.0) return 'ok';
+        if (age <= meta.expectSec * 5.0) return 'warn';
+        return 'error';
+    }
+
+    function _renderHealth() {
+        var listEl = document.getElementById('data-health-list');
+        var summaryEl = document.getElementById('data-health-summary');
+        if (!listEl || !summaryEl) return;
+
+        var rows = Object.keys(HEALTH_META).map(function(key) {
+            var meta = HEALTH_META[key];
+            var s = healthState[key] || {};
+            var lvl = _healthLevel(key);
+            var dotColor = lvl === 'ok' ? 'var(--accent-green)'
+                         : lvl === 'warn' ? 'var(--accent-orange)'
+                         : lvl === 'error' ? 'var(--accent-red)'
+                         : 'var(--text-secondary)';
+            var ageText = s.lastOkMs ? (((Date.now() - s.lastOkMs) / 1000).toFixed(1) + 's 전') : '수신 대기';
+            var msgText = s.msg || '수신 대기';
+            return (
+                '<div style="display:flex;align-items:center;justify-content:space-between;gap:10px;padding:6px 8px;background:rgba(255,255,255,0.02);border:1px solid var(--border-color);border-radius:6px;">' +
+                    '<div style="display:flex;align-items:center;gap:8px;min-width:0;">' +
+                        '<span style="width:8px;height:8px;border-radius:50%;display:inline-block;background:' + dotColor + ';"></span>' +
+                        '<span style="font-size:0.8rem;color:var(--text-primary);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">' + meta.label + '</span>' +
+                    '</div>' +
+                    '<div style="font-size:0.76rem;color:var(--text-secondary);text-align:right;white-space:nowrap;">' + msgText + ' · ' + ageText + '</div>' +
+                '</div>'
+            );
+        }).join('');
+        listEl.innerHTML = rows;
+
+        var m = healthState.market_stream || {};
+        var mLvl = _healthLevel('market_stream');
+        if (mLvl === 'ok' || mLvl === 'warn') {
+            var serverClock = _fmtClockFromSec(m.lastServerTsSec);
+            summaryEl.textContent = '실시간 시세 · 갱신 중 (약 ' + HEALTH_POLL_SEC.toFixed(1) + 's) · server ' + serverClock;
+            summaryEl.style.color = 'var(--text-secondary)';
+        } else if (mLvl === 'error') {
+            summaryEl.textContent = '실시간 시세 · 요청 실패 · 재시도 중';
+            summaryEl.style.color = 'var(--accent-red)';
+        } else {
+            summaryEl.textContent = '실시간 시세 · 수신 대기';
+            summaryEl.style.color = 'var(--text-secondary)';
+        }
+    }
+
+    function _pollMarketHealth() {
+        return fetch('/api/market-stream?symbol=' + SYMBOL, { cache: 'no-store' })
+            .then(function(r) {
+                if (!r.ok) throw new Error('HTTP ' + r.status);
+                return r.json();
+            })
+            .then(function(d) {
+                var lower = (SYMBOL || '').toLowerCase();
+                var row = (((d || {}).marks || {}).symbols || {})[lower];
+                if (row && row.price != null) {
+                    document.getElementById('price').textContent =
+                        '$' + Number(row.price).toLocaleString(undefined, { minimumFractionDigits: 1 });
+                }
+                _setHealth('market_stream', true, '정상 수신', d ? d.server_ts : null);
+            })
+            .catch(function() {
+                _setHealth('market_stream', false, '요청 실패', null);
+            });
+    }
+
+    function _fmtPrice(v) {
+        if (v == null) return '—';
+        return '$' + Number(v).toLocaleString(undefined, { minimumFractionDigits: 1, maximumFractionDigits: 2 });
+    }
+
+    function cvdRefreshBinanceStatus() {
+        var statusEl = document.getElementById('cvd-binance-status');
+        var labelEl = document.getElementById('cvd-binance-mode-label');
+        if (!statusEl || !labelEl) return Promise.resolve();
+
+        return fetch('/quant/cvd_explosion/execute/status?symbol=' + SYMBOL, { cache: 'no-store' })
+            .then(function(r) { return r.json(); })
+            .then(function(data) {
+                if (data && data.error) {
+                    labelEl.textContent = 'Executor disabled';
+                    labelEl.style.color = 'var(--accent-red)';
+                    statusEl.textContent = '❌ ' + data.error;
+                    _setHealth('binance_execute', false, '요청 실패', null);
+                    return;
+                }
+                var isTestnet = !!(data && data.testnet);
+                labelEl.textContent = isTestnet ? '🟡 TESTNET' : '🔴 LIVE';
+                labelEl.style.color = isTestnet ? '#f39c12' : '#e74c3c';
+
+                var pos = data && data.binance_position;
+                if (pos) {
+                    var amt = parseFloat(pos.positionAmt || 0);
+                    var side = amt > 0 ? 'LONG' : 'SHORT';
+                    var size = Math.abs(amt);
+                    var entry = parseFloat(pos.entryPrice || 0);
+                    var mark = parseFloat(data.exchange_price || 0);
+                    var upnl = parseFloat(pos.unRealizedProfit || 0);
+                    statusEl.innerHTML =
+                        '💰 Balance: ' + Number(data.balance_usdt || 0).toFixed(2) + ' USDT' +
+                        ' &nbsp;|&nbsp; 📊 Mark: ' + _fmtPrice(mark) +
+                        '<br>📌 Position: <strong style="color:' + (side === 'LONG' ? 'var(--accent-green)' : 'var(--accent-red)') + ';">' + side + '</strong> ' +
+                        size + ' (entry ' + _fmtPrice(entry) + ')' +
+                        ' &nbsp;|&nbsp; UPNL: <strong style="color:' + (upnl >= 0 ? 'var(--accent-green)' : 'var(--accent-red)') + ';">' + (upnl >= 0 ? '+' : '') + upnl.toFixed(4) + '</strong>';
+                } else {
+                    statusEl.innerHTML =
+                        '💰 Balance: ' + Number(data.balance_usdt || 0).toFixed(2) + ' USDT' +
+                        ' &nbsp;|&nbsp; 📊 Mark: ' + _fmtPrice(data.exchange_price || 0) +
+                        '<br>No open position on Binance';
+                }
+                _setHealth('binance_execute', true, '정상 수신', null);
+            })
+            .catch(function(e) {
+                labelEl.textContent = 'Connection error';
+                labelEl.style.color = 'var(--accent-red)';
+                statusEl.textContent = '❌ Connection failed: ' + (e && e.message ? e.message : e);
+                _setHealth('binance_execute', false, '요청 실패', null);
+            });
+    }
+    window.cvdRefreshBinanceStatus = cvdRefreshBinanceStatus;
 
     // ── 차트 ──────────────────────────────────────────────────────────────────
     var _priceChart = null, _volChart = null;
@@ -211,8 +382,11 @@
                 _threshSeries.setData(bars.map(function(b) {
                     return { time: b.time, value: mult };
                 }));
+                _setHealth('chart_data', true, '정상 수신', null);
             })
-            .catch(function() {});
+            .catch(function() {
+                _setHealth('chart_data', false, '요청 실패', null);
+            });
     }
 
     function onSymbolChange() {
@@ -221,6 +395,8 @@
         document.getElementById('symbol-label').textContent = SYMBOL;
         // 심볼 변경 시 차트 시리즈 초기화 후 재로드
         if (_candleSeries) { _candleSeries.setData([]); _volSeries.setData([]); _threshSeries.setData([]); }
+        healthState = {};
+        _renderHealth();
         loadOnce();
     }
     window.onSymbolChange = onSymbolChange;
@@ -233,15 +409,29 @@
             document.getElementById('dot').className = 'dot live';
             loadOnce();
             timer = setInterval(loadOnce, 30000);
+            if (healthTimer) clearInterval(healthTimer);
+            healthTimer = setInterval(function() {
+                _pollMarketHealth();
+                _renderHealth();
+            }, HEALTH_POLL_SEC * 1000);
+            cvdRefreshBinanceStatus();
+            if (binanceTimer) clearInterval(binanceTimer);
+            binanceTimer = setInterval(cvdRefreshBinanceStatus, BINANCE_POLL_SEC * 1000);
         } else {
             btn.textContent = 'Start'; btn.className = 'primary';
             document.getElementById('dot').className = 'dot';
             clearInterval(timer);
+            clearInterval(healthTimer);
+            healthTimer = null;
+            clearInterval(binanceTimer);
+            binanceTimer = null;
         }
     }
     window.toggleMonitor = toggleMonitor;
 
     function loadOnce() {
+        _pollMarketHealth();
+        cvdRefreshBinanceStatus();
         _loadChart();
         fetch('/quant/cvd_explosion/realtime_state?symbol=' + SYMBOL)
             .then(function(r) { return r.json(); })
@@ -249,7 +439,11 @@
                 document.getElementById('price').textContent = d.current_price
                     ? '$' + Number(d.current_price).toLocaleString(undefined,{minimumFractionDigits:1}) : '—';
                 renderSignal(d.signal || {}, d.current_price);
-            }).catch(function() {});
+                _setHealth('realtime_state', true, '정상 수신', null);
+            })
+            .catch(function() {
+                _setHealth('realtime_state', false, '요청 실패', null);
+            });
 
         if (window.ForwardTestDashboard && !window.__CVD_FWD_INITED) {
             window.__CVD_FWD_INITED = true;
@@ -261,13 +455,16 @@
                 tradesListElId: 'forward-trades-list',
                 tradesPagerElId: 'forward-trades-pagination',
                 pollMs: 30000,
+                onStatsFetch: function(ok) {
+                    _setHealth('forward_stats', !!ok, ok ? '정상 수신' : '요청 실패', null);
+                },
+                onTradesFetch: function(ok) {
+                    _setHealth('forward_trades', !!ok, ok ? '정상 수신' : '요청 실패', null);
+                },
             });
         }
 
-        fetch('/quant/cvd_explosion/forward_test/stats?symbol=' + SYMBOL)
-            .then(function(r) { return r.json(); })
-            .then(function(d) { renderPosition(d.current_position); })
-            .catch(function() {});
+        // Position panel은 Binance 실포지션(execute/status) 기준으로 갱신한다.
     }
     window.loadOnce = loadOnce;
 
@@ -313,58 +510,11 @@
             : '<li>—</li>';
     }
 
-    var _posLines = [];
-    function _clearPositionLines() {
-        if (!_candleSeries) return;
-        _posLines.forEach(function(line) { try { _candleSeries.removePriceLine(line); } catch(e){} });
-        _posLines = [];
-    }
-    function _drawPositionLines(entry, tp, sl) {
-        _clearPositionLines();
-        if (!_candleSeries) return;
-        if (entry) _posLines.push(_candleSeries.createPriceLine({ price: Number(entry), color: '#f1c40f', lineWidth: 2, lineStyle: 2, axisLabelVisible: true, title: 'Entry' }));
-        if (tp) _posLines.push(_candleSeries.createPriceLine({ price: Number(tp), color: '#26a69a', lineWidth: 2, lineStyle: 0, axisLabelVisible: true, title: 'TP' }));
-        if (sl) _posLines.push(_candleSeries.createPriceLine({ price: Number(sl), color: '#ef5350', lineWidth: 2, lineStyle: 0, axisLabelVisible: true, title: 'SL' }));
-    }
-
-    function renderPosition(pos) {
-        var el = document.getElementById('pos-content');
-        var titleEl = document.getElementById('pos-title');
-        
-        if (!pos || !pos.entry_price) { 
-            if (titleEl) titleEl.innerHTML = 'Open position';
-            el.innerHTML = '<p class="no-pos">No position</p>'; 
-            _clearPositionLines();
-            return; 
-        }
-        
-        var side = pos.side || '—';
-        var entry = pos.entry_price;
-        var tp = pos.tp || pos.tp1_price;
-        var sl = pos.sl || pos.sl_price;
-        var upnl = pos.unrealized_pnl_pct;
-        var cur = pos.current_price;
-
-        _drawPositionLines(entry, tp, sl);
-        
-        var sideHtml = '<span class="' + side + '" style="font-weight:bold;text-transform:uppercase;">' + side + '</span>';
-        var entryHtml = '$' + Number(entry).toLocaleString(undefined,{minimumFractionDigits:1});
-        var curHtml = cur ? (' <span style="color:var(--text-secondary)">· mark</span> $' + Number(cur).toLocaleString(undefined,{minimumFractionDigits:1})) : '';
-        var pnlHtml = upnl != null ? (' &nbsp;<span class="' + (upnl >= 0 ? 'pos' : 'neg') + '">' + (upnl >= 0 ? '+' : '') + upnl.toFixed(2) + '%</span>') : '';
-        
-        if (titleEl) {
-            titleEl.innerHTML = 'Open position: ' + sideHtml + ' @ ' + entryHtml + curHtml + pnlHtml;
-        }
-
-        el.innerHTML = '<div class="pos-grid" style="grid-template-columns: 1fr 1fr;">' +
-            '<div class="pos-item" style="align-items:center;padding:4px 0;"><span class="pos-key" style="margin-bottom:4px;">Take Profit (TP)</span><span class="pos-val" style="color:var(--green);font-size:1.05rem;">' + (tp ? '$' + Number(tp).toLocaleString() : '—') + '</span></div>' +
-            '<div class="pos-item" style="align-items:center;padding:4px 0;"><span class="pos-key" style="margin-bottom:4px;">Stop Loss (SL)</span><span class="pos-val" style="color:var(--red);font-size:1.05rem;">' + (sl ? '$' + Number(sl).toLocaleString() : '—') + '</span></div>' +
-            '</div>';
-    }
-
     if (window.CVD_EXPLOSION_MONITORING_START !== false) {
+        _renderHealth();
         toggleMonitor();
     } else {
+        _renderHealth();
         loadOnce();
     }
 })();

@@ -257,13 +257,16 @@
         .then(function (d) {
           if (d && d.error) {
             statsEl.innerHTML = "<span style='color:var(--text-secondary);font-size:0.85rem;'>Could not load forward test stats.</span>";
+            if (typeof opts.onStatsFetch === "function") opts.onStatsFetch(false, d);
             return;
           }
           renderStats(d || {});
           if (typeof opts.onRendered === "function") opts.onRendered(d || {});
+          if (typeof opts.onStatsFetch === "function") opts.onStatsFetch(true, d || {});
         })
         .catch(function () {
           statsEl.innerHTML = "<span style='color:var(--text-secondary);font-size:0.85rem;'>Could not load forward test stats.</span>";
+          if (typeof opts.onStatsFetch === "function") opts.onStatsFetch(false, null);
         });
     }
 
@@ -278,10 +281,12 @@
           trades = Array.isArray(d) ? d : (d && d.trades ? d.trades : []);
           page = 1;
           renderTradesPage();
+          if (typeof opts.onTradesFetch === "function") opts.onTradesFetch(true, d);
         })
         .catch(function () {
           tradesListEl.innerHTML = "<span style='color:var(--text-secondary);'>Could not load trade list.</span>";
           if (pagerEl) pagerEl.innerHTML = "";
+          if (typeof opts.onTradesFetch === "function") opts.onTradesFetch(false, null);
         });
     }
 
