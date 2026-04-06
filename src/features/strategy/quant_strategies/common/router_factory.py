@@ -87,7 +87,7 @@ def make_router(strategy_key: str, default_tfs: str = "15m,1h,4h") -> APIRouter:
         ),
     ):
         try:
-            ft = importlib.import_module(f"features.strategy.quant_strategies.{strategy_key}.forward_test")
+            ft = importlib.import_module(f"features.strategy.quant_strategies.{strategy_key}.engine")
 
             # 공용 엔진 패턴 지원: get_engine_for(tag) 우선, 없으면 get_engine()
             engine = None
@@ -123,7 +123,7 @@ def make_router(strategy_key: str, default_tfs: str = "15m,1h,4h") -> APIRouter:
         ),
     ):
         try:
-            ft = importlib.import_module(f"features.strategy.quant_strategies.{strategy_key}.forward_test")
+            ft = importlib.import_module(f"features.strategy.quant_strategies.{strategy_key}.engine")
 
             engine = None
             if strategy_tag and hasattr(ft, "get_engine_for"):
@@ -162,7 +162,7 @@ def make_router(strategy_key: str, default_tfs: str = "15m,1h,4h") -> APIRouter:
     async def sync_binance(symbol: str = Query("BTCUSDT")):
         """Binance 실제 포지션 ↔ 모듈 상태 강제 동기화 (서버 재시작 후 복구용)."""
         try:
-            ft = importlib.import_module(f"features.strategy.quant_strategies.{strategy_key}.forward_test")
+            ft = importlib.import_module(f"features.strategy.quant_strategies.{strategy_key}.engine")
             result = await ft.get_engine().sync_from_binance(symbol)
             return JSONResponse(result)
         except Exception as e:
@@ -172,7 +172,7 @@ def make_router(strategy_key: str, default_tfs: str = "15m,1h,4h") -> APIRouter:
     async def reset_halt():
         """엣지 검증 실패로 중단된 상태 수동 해제."""
         try:
-            ft = importlib.import_module(f"features.strategy.quant_strategies.{strategy_key}.forward_test")
+            ft = importlib.import_module(f"features.strategy.quant_strategies.{strategy_key}.engine")
             ft.get_engine().reset_edge_halt()
             return JSONResponse({"success": True, "message": "거래 중단 해제 완료."})
         except Exception as e:

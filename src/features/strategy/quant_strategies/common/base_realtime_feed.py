@@ -139,7 +139,7 @@ def _tick_and_notify(
         base = cfg.get("base_strategy") or strategy_key
         strategy_tag = cfg.get("strategy_tag") or strategy_key
 
-        ft = importlib.import_module(f"features.strategy.quant_strategies.{base}.forward_test")
+        ft = importlib.import_module(f"features.strategy.quant_strategies.{base}.engine")
 
         # base_strategy 패턴: get_engine_for(tag) 디스패치 우선
         if strategy_tag != base and hasattr(ft, "get_engine_for"):
@@ -170,7 +170,7 @@ def _update_entry_price_in_db(trade_id: int, fill_price: float) -> None:
     """
     Binance 진입 실체결가(avgPrice)로 DB의 entry_price 덮어쓰기.
 
-    forward_test 엔진은 신호 포착 시점의 WS 가격으로 entry_price를 기록하지만,
+    engine 엔진은 신호 포착 시점의 WS 가격으로 entry_price를 기록하지만,
     실제 Binance market 주문은 수십 초 후 다른 가격에 체결된다.
     이 함수가 호출되면 실체결가로 보정한다 (pnl_pct는 청산 시 재계산되므로 여기선 건드리지 않음).
     """
@@ -206,7 +206,7 @@ def _update_fill_price_in_db(trade_id: int, fill_price: float, entry_price: floa
     """
     Binance 실체결가(avgPrice)로 DB의 exit_price + pnl_pct 덮어쓰기.
 
-    forward_test 엔진은 SL/TP 설정값 또는 현재 WS 가격을 exit_price로 기록하지만,
+    engine 엔진은 SL/TP 설정값 또는 현재 WS 가격을 exit_price로 기록하지만,
     실제 Binance market close는 60초 폴링 지연 + 슬리피지로 다른 가격에 체결된다.
     이 함수가 호출되면 체결 완료 시점의 실가격으로 보정한다.
     """

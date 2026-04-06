@@ -39,5 +39,5 @@ exit:
   # False Breakout: 가격이 box 안쪽으로 재진입 → closed_false_breakout
 
 # ── Forward Test ─────────────────────────────────────────────────────────
-forward_test:
+engine:
   entry_source: ["engine"]
