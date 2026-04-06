@@ -7,7 +7,7 @@ import pathlib
 from functools import lru_cache
 from typing import Any, Dict
 
-from features.strategy.quant_strategies.common.config_loader import load_strategy_config
+from features.strategy.common.config_loader import load_strategy_config
 
 _CONFIG_PATH = pathlib.Path(__file__).parent / "config.yaml"
 

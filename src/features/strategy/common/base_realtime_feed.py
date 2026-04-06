@@ -3,7 +3,7 @@
 
 새 전략의 realtime_feed.py에서 build_state()를 호출하면 됨:
 
-    from features.strategy.quant_strategies.common.base_realtime_feed import build_state
+    from features.strategy.common.base_realtime_feed import build_state
 
     async def get_state(symbol="BTCUSDT", tfs="15m,1h,4h"):
         from .signal import compute_signal
@@ -54,8 +54,8 @@ async def build_state(
         compute_fn:        signal.py의 compute_signal 함수
         extra_bundle_args: bundle → dict 함수. macro/lsr 등 추가 인자가 필요한 전략에서 사용.
     """
-    from features.strategy.quant_strategies.common.config_loader import get_master_config
-    from features.strategy.quant_strategies.common.kline_bundle import build_kline_bundle
+    from features.strategy.common.config_loader import get_master_config
+    from features.strategy.common.kline_bundle import build_kline_bundle
 
     # signal_interval 설정 읽기 (binance_live 전략 전용 최적화)
     master_cfg = (get_master_config() or {}).get(strategy_key) or {}
@@ -133,13 +133,13 @@ def _tick_and_notify(
 ) -> None:
     try:
         import importlib
-        from features.strategy.quant_strategies.common.config_loader import get_master_config
+        from features.strategy.common.config_loader import get_master_config
         master = get_master_config() or {}
         cfg = master.get(strategy_key) or {}
         base = cfg.get("base_strategy") or strategy_key
         strategy_tag = cfg.get("strategy_tag") or strategy_key
 
-        ft = importlib.import_module(f"features.strategy.quant_strategies.{base}.engine")
+        ft = importlib.import_module(f"features.strategy.{base}.engine")
 
         # base_strategy 패턴: get_engine_for(tag) 디스패치 우선
         if strategy_tag != base and hasattr(ft, "get_engine_for"):
@@ -271,7 +271,7 @@ async def _execute_verify_notify(
     print(f"[{strategy_key}] events: {[e.get('event') for e in events]}")
 
     executor = None
-    from features.strategy.quant_strategies.common.config_loader import is_binance_live_enabled
+    from features.strategy.common.config_loader import is_binance_live_enabled
     if is_binance_live_enabled(strategy_key):
         try:
             from common.binance_executor import get_executor
@@ -365,7 +365,7 @@ async def _execute_verify_notify(
                 sync_info["tp_advance"] = None
 
     try:
-        from features.strategy.quant_strategies.common.telegram_notifier import (
+        from features.strategy.common.telegram_notifier import (
             send_event_alerts,
         )
 

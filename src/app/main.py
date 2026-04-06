@@ -11,7 +11,7 @@ from common.binance_price_ws import BinancePriceWS
 from common.liq_series_cache import refresh_loop
 from db.session import init_db
 from features.home.router import router as home_router
-from features.strategy.quant_strategies.router_registry import include_strategy_routers
+from features.strategy.router_registry import include_strategy_routers
 from features.strategy.router import router as strategy_router
 
 
@@ -28,7 +28,7 @@ async def lifespan(_app: FastAPI):
     await startup_binance_price_ws()
     liq_task = asyncio.create_task(refresh_loop())
     try:
-        from features.strategy.quant_strategies.common.strategy_loop import run_all_strategy_loops
+        from features.strategy.common.strategy_loop import run_all_strategy_loops
         strategy_task = asyncio.create_task(run_all_strategy_loops())
     except Exception as exc:
         print(f"[StrategyLoop] startup skipped: {exc}")

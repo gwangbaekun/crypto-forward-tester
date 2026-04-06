@@ -8,7 +8,7 @@
 전략 코드는 아래에 둔다 (예정·합의된 트리):
 
 ```
-src/features/strategy/quant_strategies/
+src/features/strategy/
   common/
     strategies_master.yaml    # 전략 메타 단일 소스 (도입 시)
     router_factory.py
@@ -26,7 +26,7 @@ src/features/strategy/quant_strategies/
     STRATEGY.md
 ```
 
-- Import 예: `from features.strategy.quant_strategies.common.router_factory import make_router`  
+- Import 예: `from features.strategy.common.router_factory import make_router`  
   (`features/strategy/__init__.py` 등으로 패키지 인식 필요.)
 
 ## 데이터 소스 (tradingview 와의 차이)
@@ -51,7 +51,7 @@ src/features/strategy/quant_strategies/
 
 ## 등록
 
-- `src/app/main.py` — `from features.strategy.quant_strategies.<name>.router import router` 후 `app.include_router(...)`
+- `src/app/main.py` — `from features.strategy.<name>.router import router` 후 `app.include_router(...)`
 - (선택) 홈에서 전략 카드·링크 — `templates/` / `static/home/`
 
 ## Forward test + DB

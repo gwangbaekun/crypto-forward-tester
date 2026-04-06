@@ -1,1 +1,1 @@
-# Quant strategy integration (HTTP API)
+"""Quant strategy implementations (forward test, signals)."""

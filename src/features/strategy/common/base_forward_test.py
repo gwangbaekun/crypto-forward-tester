@@ -11,7 +11,7 @@ BaseForwardTest — 전략 Forward Test 추상 기반 클래스.
 
 사용 예:
 
-    from features.strategy.quant_strategies.common.base_forward_test import BaseForwardTest, get_engine_for, _f
+    from features.strategy.common.base_forward_test import BaseForwardTest, get_engine_for, _f
 
     class AtrForwardTest(BaseForwardTest):
         STRATEGY_TAG = "atr_breakout"
@@ -435,7 +435,7 @@ class BaseForwardTest(ABC):
             except Exception:
                 pass
 
-        from features.strategy.quant_strategies.common.pnl import (
+        from features.strategy.common.pnl import (
             compound_total_pnl_with_fee,
             total_pnl_including_unrealized,
         )

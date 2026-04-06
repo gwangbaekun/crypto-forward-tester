@@ -16,7 +16,7 @@ from typing import Any, Dict, Optional
 def _build_registry() -> Dict[str, Dict[str, Any]]:
     """strategies_master.yaml → enabled 전략 레지스트리 구성."""
     try:
-        from features.strategy.quant_strategies.common.config_loader import get_master_config
+        from features.strategy.common.config_loader import get_master_config
         master = get_master_config()
     except Exception as e:
         print(f"[StrategyLoop] master config 로드 실패: {e}")

@@ -2,7 +2,7 @@
 전략 라우터 자동 등록 — strategies_master.yaml 주도.
 
 main.py에서:
-    from features.strategy.quant_strategies.router_registry import include_strategy_routers
+    from features.strategy.router_registry import include_strategy_routers
     include_strategy_routers(app)
 
 새 전략 추가 = strategies_master.yaml + 전략 패키지 추가만 하면 자동 등록.
@@ -14,7 +14,7 @@ import logging
 
 from fastapi import FastAPI
 
-from features.strategy.quant_strategies.common.config_loader import get_master_config
+from features.strategy.common.config_loader import get_master_config
 
 logger = logging.getLogger(__name__)
 
@@ -30,7 +30,7 @@ def include_strategy_routers(app: FastAPI) -> None:
         base = cfg.get("base_strategy") or strategy_key
         try:
             mod = importlib.import_module(
-                f"features.strategy.quant_strategies.{base}.router"
+                f"features.strategy.{base}.router"
             )
             router = getattr(mod, "router", None)
             if router is None:

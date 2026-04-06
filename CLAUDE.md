@@ -63,10 +63,10 @@ market_stream          →  프리미엄/펀딩/24h/OI/LSR/CVD 프록시 (폴링
 
 | 경로 | 역할 (예정) |
 |------|-------------|
-| `src/features/strategy/quant_strategies/common/strategies_master.yaml` | 전략 메타 (enabled, timeframes, …) |
-| `src/features/strategy/quant_strategies/common/router_factory.py` | `make_router()` |
-| `src/features/strategy/quant_strategies/common/base_forward_test.py` | `BaseForwardTest` |
-| `src/features/strategy/quant_strategies/common/base_realtime_feed.py` | `build_state()` — 데이터 소스는 허브 대신 어댑터로 연결 |
+| `src/features/strategy/common/strategies_master.yaml` | 전략 메타 (enabled, timeframes, …) |
+| `src/features/strategy/common/router_factory.py` | `make_router()` |
+| `src/features/strategy/common/base_forward_test.py` | `BaseForwardTest` |
+| `src/features/strategy/common/base_realtime_feed.py` | `build_state()` — 데이터 소스는 허브 대신 어댑터로 연결 |
 
 ---
 

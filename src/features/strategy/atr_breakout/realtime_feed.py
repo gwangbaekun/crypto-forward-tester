@@ -1,5 +1,5 @@
 """ATR Breakout — Realtime Feed (v1)."""
-from features.strategy.quant_strategies.common.base_realtime_feed import build_state
+from features.strategy.common.base_realtime_feed import build_state
 
 
 async def get_state(symbol: str = "BTCUSDT", tfs: str = "5m,15m,1h,4h"):

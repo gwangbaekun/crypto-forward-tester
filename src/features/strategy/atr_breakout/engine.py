@@ -5,7 +5,7 @@ from __future__ import annotations
 
 from typing import Any, Dict, Optional
 
-from features.strategy.quant_strategies.common.base_forward_test import (
+from features.strategy.common.base_forward_test import (
     BaseForwardTest,
     get_engine_for as _make_engine,
     _f,

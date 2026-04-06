@@ -3,11 +3,11 @@ from __future__ import annotations
 
 from typing import Any, Dict
 
-from features.strategy.quant_strategies.common.base_realtime_feed import build_state
+from features.strategy.common.base_realtime_feed import build_state
 
 
 async def get_state(symbol: str = "BTCUSDT", tfs: str = "1h,4h"):
-    from features.strategy.quant_strategies.common.config_loader import get_master_config
+    from features.strategy.common.config_loader import get_master_config
 
     from .config_loader import get_timeframes
     from .signal import compute_signal

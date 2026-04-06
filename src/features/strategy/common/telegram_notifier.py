@@ -26,7 +26,7 @@ def _local_prefix() -> str:
 
 
 def _strategy_meta(strategy_key: str) -> tuple[str, str]:
-    from features.strategy.quant_strategies.common.config_loader import get_master_config
+    from features.strategy.common.config_loader import get_master_config
 
     cfg = get_master_config().get(strategy_key) or {}
     return cfg.get("label") or strategy_key, cfg.get("emoji") or "📊"
@@ -153,7 +153,7 @@ def send_event_alerts(
     if not events:
         return
 
-    from features.strategy.quant_strategies.common.config_loader import (
+    from features.strategy.common.config_loader import (
         is_telegram_alerts_enabled,
     )
 

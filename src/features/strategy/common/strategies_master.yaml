@@ -10,8 +10,8 @@
 #   tick.fn:        호출할 함수명
 
 atr_breakout:
-  enabled: true
-  monitoring: true
+  enabled: false
+  monitoring: false
   tick_interval: 60
   timeframes: ["5m", "15m", "1h", "4h"]
   strategy_tag: atr_breakout
@@ -20,7 +20,7 @@ atr_breakout:
   telegram_alerts: true
   binance_live: false
   tick:
-    module: features.strategy.quant_strategies.atr_breakout.realtime_feed
+    module: features.strategy.atr_breakout.realtime_feed
     fn: get_state
 
 cvd_explosion:
@@ -36,5 +36,5 @@ cvd_explosion:
   telegram_alerts: true
   binance_live: false
   tick:
-    module: features.strategy.quant_strategies.cvd_explosion.realtime_feed
+    module: features.strategy.cvd_explosion.realtime_feed
     fn: get_state

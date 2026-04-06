@@ -3,7 +3,7 @@
 
 새 전략의 router.py:
 
-    from features.strategy.quant_strategies.common.router_factory import make_router
+    from features.strategy.common.router_factory import make_router
     router = make_router("my_strategy", default_tfs="15m,1h,4h")
 
 자동 생성 엔드포인트:
@@ -36,7 +36,7 @@ def make_router(strategy_key: str, default_tfs: str = "15m,1h,4h") -> APIRouter:
 
     @router.get("/dashboard", response_class=HTMLResponse)
     async def dashboard():
-        from features.strategy.quant_strategies.common.config_loader import is_monitoring_start_by_default
+        from features.strategy.common.config_loader import is_monitoring_start_by_default
         return render_template(
             f"{strategy_key}_dashboard.html",
             monitoring_start_by_default=is_monitoring_start_by_default(strategy_key),
@@ -51,7 +51,7 @@ def make_router(strategy_key: str, default_tfs: str = "15m,1h,4h") -> APIRouter:
         # strategy_tag가 있으면 master config의 tick.module/fn + timeframes 사용
         if strategy_tag:
             try:
-                from features.strategy.quant_strategies.common.config_loader import get_master_config
+                from features.strategy.common.config_loader import get_master_config
                 master = get_master_config() or {}
                 tag_cfg = master.get(strategy_tag) or {}
                 tick_cfg = tag_cfg.get("tick") or {}
@@ -68,7 +68,7 @@ def make_router(strategy_key: str, default_tfs: str = "15m,1h,4h") -> APIRouter:
             except Exception:
                 pass  # fallback to default below
 
-        mod = importlib.import_module(f"features.strategy.quant_strategies.{strategy_key}.realtime_feed")
+        mod = importlib.import_module(f"features.strategy.{strategy_key}.realtime_feed")
         # get_state (신규) 또는 get_realtime_state (기존 전략) 모두 지원
         # 버전 함수가 있을 경우 우선 사용 (예: get_state_v2)
         state_fn = None
@@ -87,7 +87,7 @@ def make_router(strategy_key: str, default_tfs: str = "15m,1h,4h") -> APIRouter:
         ),
     ):
         try:
-            ft = importlib.import_module(f"features.strategy.quant_strategies.{strategy_key}.engine")
+            ft = importlib.import_module(f"features.strategy.{strategy_key}.engine")
 
             # 공용 엔진 패턴 지원: get_engine_for(tag) 우선, 없으면 get_engine()
             engine = None
@@ -123,7 +123,7 @@ def make_router(strategy_key: str, default_tfs: str = "15m,1h,4h") -> APIRouter:
         ),
     ):
         try:
-            ft = importlib.import_module(f"features.strategy.quant_strategies.{strategy_key}.engine")
+            ft = importlib.import_module(f"features.strategy.{strategy_key}.engine")
 
             engine = None
             if strategy_tag and hasattr(ft, "get_engine_for"):
@@ -162,7 +162,7 @@ def make_router(strategy_key: str, default_tfs: str = "15m,1h,4h") -> APIRouter:
     async def sync_binance(symbol: str = Query("BTCUSDT")):
         """Binance 실제 포지션 ↔ 모듈 상태 강제 동기화 (서버 재시작 후 복구용)."""
         try:
-            ft = importlib.import_module(f"features.strategy.quant_strategies.{strategy_key}.engine")
+            ft = importlib.import_module(f"features.strategy.{strategy_key}.engine")
             result = await ft.get_engine().sync_from_binance(symbol)
             return JSONResponse(result)
         except Exception as e:
@@ -172,7 +172,7 @@ def make_router(strategy_key: str, default_tfs: str = "15m,1h,4h") -> APIRouter:
     async def reset_halt():
         """엣지 검증 실패로 중단된 상태 수동 해제."""
         try:
-            ft = importlib.import_module(f"features.strategy.quant_strategies.{strategy_key}.engine")
+            ft = importlib.import_module(f"features.strategy.{strategy_key}.engine")
             ft.get_engine().reset_edge_halt()
             return JSONResponse({"success": True, "message": "거래 중단 해제 완료."})
         except Exception as e:
@@ -186,7 +186,7 @@ def make_router(strategy_key: str, default_tfs: str = "15m,1h,4h") -> APIRouter:
     ):
         """특정 TF의 신호 상세 설명 (디버깅 + 검토용)."""
         try:
-            mod = importlib.import_module(f"features.strategy.quant_strategies.{strategy_key}.realtime_feed")
+            mod = importlib.import_module(f"features.strategy.{strategy_key}.realtime_feed")
             state_fn = getattr(mod, "get_state", None) or getattr(mod, "get_realtime_state", None)
             state = await state_fn(symbol=symbol, tfs=timeframes)
             by_tf = state.get("by_tf") or {}
@@ -200,7 +200,7 @@ def make_router(strategy_key: str, default_tfs: str = "15m,1h,4h") -> APIRouter:
     # ── Binance 조건부 ───────────────────────────────────────────────────────
 
     try:
-        from features.strategy.quant_strategies.common.config_loader import is_binance_live_enabled
+        from features.strategy.common.config_loader import is_binance_live_enabled
         _binance_live = is_binance_live_enabled(strategy_key)
     except Exception:
         _binance_live = False
