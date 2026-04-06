@@ -4,7 +4,7 @@ from fastapi.responses import JSONResponse
 
 from features.strategy.common.router_factory import make_router
 
-router = make_router("cvd_explosion", default_tfs="1h,4h")
+router = make_router("cvd_explosion", default_tfs="15m,1h,4h")
 
 
 @router.get("/chart_data", response_class=JSONResponse)
