@@ -38,8 +38,13 @@ def load_config() -> Dict[str, Any]:
 def get_timeframes() -> Dict[str, Any]:
     cfg = load_config()
     tf = cfg.get("timeframes") or {}
+    tp = cfg.get("tpsl") or {}
+    all_tfs = set(tf.get("all") or ["1h", "4h"])
+    if bool(tp.get("m15_structure_stop_enabled", True)):
+        all_tfs.add("15m")
+    
     return {
-        "all":       list(tf.get("all") or ["1h", "4h"]),
+        "all":       sorted(list(all_tfs)),
         "entry_tf":  str(tf.get("entry_tf") or "1h"),
         "higher_tf": str(tf.get("higher_tf") or "4h"),
     }
@@ -60,6 +65,7 @@ def get_signal_params_for_tf(tf: str) -> Dict[str, Any]:
         "score_solo":            int(sc.get("solo",       1)),
         "score_cvd_accel":       int(sc.get("cvd_accel",  2)),
         "score_cvd_higher":      int(sc.get("cvd_higher", 1)),
+        "higher_tf_veto":        bool(sig.get("higher_tf_veto", False)),
     }
     by_tf = sig.get("by_tf") or {}
     ov = by_tf.get(tf) or by_tf.get(str(tf))
@@ -116,6 +122,25 @@ def get_tpsl_params() -> Dict[str, Any]:
     except (TypeError, ValueError):
         sl_lift_rank_le = 2
 
+    try:
+        initial_tp_pct = float(tp.get("initial_tp_pct") or 0.0)
+    except (TypeError, ValueError):
+        initial_tp_pct = 0.0
+
+    try:
+        sl_ratchet_buffer_pct = float(tp.get("sl_ratchet_buffer_pct") or 0.0)
+    except (TypeError, ValueError):
+        sl_ratchet_buffer_pct = 0.0
+    try:
+        m15_structure_lookback_bars = int(tp.get("m15_structure_lookback_bars", 8))
+    except (TypeError, ValueError):
+        m15_structure_lookback_bars = 8
+    try:
+        m15_structure_buffer_pct = float(tp.get("m15_structure_buffer_pct") or 0.05)
+    except (TypeError, ValueError):
+        m15_structure_buffer_pct = 0.05
+    m15_structure_stop_enabled = bool(tp.get("m15_structure_stop_enabled", True))
+
     return {
         "mode":                   mode,
         "rr_ratio":               rr_ratio,
@@ -124,6 +149,11 @@ def get_tpsl_params() -> Dict[str, Any]:
         "sl_lift_mode":           sl_lift_mode,
         "sl_lift_min_intensity":  sl_lift_min_intensity,
         "sl_lift_rank_le":        sl_lift_rank_le,
+        "initial_tp_pct":         initial_tp_pct,
+        "sl_ratchet_buffer_pct":  sl_ratchet_buffer_pct,
+        "m15_structure_stop_enabled": m15_structure_stop_enabled,
+        "m15_structure_lookback_bars": max(2, m15_structure_lookback_bars),
+        "m15_structure_buffer_pct": max(0.0, m15_structure_buffer_pct),
     }
 
 

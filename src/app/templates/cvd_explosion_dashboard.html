@@ -79,7 +79,7 @@
     </div>
 
     <div class="card">
-        <div class="card-title">Open position</div>
+        <div class="card-title" id="pos-title">Open position</div>
         <div id="pos-content"><p class="no-pos">No position</p></div>
     </div>
 
@@ -329,29 +329,36 @@
 
     function renderPosition(pos) {
         var el = document.getElementById('pos-content');
+        var titleEl = document.getElementById('pos-title');
+        
         if (!pos || !pos.entry_price) { 
+            if (titleEl) titleEl.innerHTML = 'Open position';
             el.innerHTML = '<p class="no-pos">No position</p>'; 
             _clearPositionLines();
             return; 
         }
+        
         var side = pos.side || '—';
         var entry = pos.entry_price;
         var tp = pos.tp || pos.tp1_price;
         var sl = pos.sl || pos.sl_price;
-
-        _drawPositionLines(entry, tp, sl);
         var upnl = pos.unrealized_pnl_pct;
         var cur = pos.current_price;
-        var upnlHtml = upnl != null
-            ? '<div class="pos-item"><span class="pos-key">Unrealized PnL</span><span class="pos-val ' + (upnl >= 0 ? 'pos' : 'neg') + '">' + (upnl >= 0 ? '+' : '') + upnl.toFixed(2) + '%</span></div>'
-            : '';
-        el.innerHTML = '<div class="pos-grid">' +
-            '<div class="pos-item"><span class="pos-key">Side</span><span class="pos-val ' + side + '">' + side.toUpperCase() + '</span></div>' +
-            '<div class="pos-item"><span class="pos-key">Entry</span><span class="pos-val">$' + Number(entry).toLocaleString() + '</span></div>' +
-            (cur ? '<div class="pos-item"><span class="pos-key">Mark</span><span class="pos-val">$' + Number(cur).toLocaleString(undefined,{minimumFractionDigits:1}) + '</span></div>' : '') +
-            upnlHtml +
-            '<div class="pos-item"><span class="pos-key">TP</span><span class="pos-val" style="color:var(--green)">' + (tp ? '$' + Number(tp).toLocaleString() : '—') + '</span></div>' +
-            '<div class="pos-item"><span class="pos-key">SL</span><span class="pos-val" style="color:var(--red)">' + (sl ? '$' + Number(sl).toLocaleString() : '—') + '</span></div>' +
+
+        _drawPositionLines(entry, tp, sl);
+        
+        var sideHtml = '<span class="' + side + '" style="font-weight:bold;text-transform:uppercase;">' + side + '</span>';
+        var entryHtml = '$' + Number(entry).toLocaleString(undefined,{minimumFractionDigits:1});
+        var curHtml = cur ? (' <span style="color:var(--text-secondary)">· mark</span> $' + Number(cur).toLocaleString(undefined,{minimumFractionDigits:1})) : '';
+        var pnlHtml = upnl != null ? (' &nbsp;<span class="' + (upnl >= 0 ? 'pos' : 'neg') + '">' + (upnl >= 0 ? '+' : '') + upnl.toFixed(2) + '%</span>') : '';
+        
+        if (titleEl) {
+            titleEl.innerHTML = 'Open position: ' + sideHtml + ' @ ' + entryHtml + curHtml + pnlHtml;
+        }
+
+        el.innerHTML = '<div class="pos-grid" style="grid-template-columns: 1fr 1fr;">' +
+            '<div class="pos-item" style="align-items:center;padding:4px 0;"><span class="pos-key" style="margin-bottom:4px;">Take Profit (TP)</span><span class="pos-val" style="color:var(--green);font-size:1.05rem;">' + (tp ? '$' + Number(tp).toLocaleString() : '—') + '</span></div>' +
+            '<div class="pos-item" style="align-items:center;padding:4px 0;"><span class="pos-key" style="margin-bottom:4px;">Stop Loss (SL)</span><span class="pos-val" style="color:var(--red);font-size:1.05rem;">' + (sl ? '$' + Number(sl).toLocaleString() : '—') + '</span></div>' +
             '</div>';
     }
 
