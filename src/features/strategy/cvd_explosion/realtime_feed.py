@@ -6,7 +6,7 @@ from typing import Any, Dict
 from features.strategy.common.base_realtime_feed import build_state
 
 
-async def get_state(symbol: str = "BTCUSDT", tfs: str = "1h,4h"):
+async def get_state(symbol: str = "BTCUSDT", tfs: str = "1h,4h", ws_only: bool = False):
     from features.strategy.common.config_loader import get_master_config
 
     from .config_loader import get_timeframes
@@ -26,4 +26,5 @@ async def get_state(symbol: str = "BTCUSDT", tfs: str = "1h,4h"):
         tfs,
         compute_signal,
         extra_bundle_args=extra_bundle_args,
+        ws_only=ws_only,
     )

@@ -10,6 +10,7 @@ from __future__ import annotations
 import asyncio
 import importlib
 import os
+import inspect
 from typing import Any, Dict, Optional
 
 
@@ -49,16 +50,43 @@ STRATEGY_REGISTRY: Dict[str, Dict[str, Any]] = _build_registry()
 
 async def _strategy_loop(name: str, cfg: Dict[str, Any], symbol: str) -> None:
     """단일 전략 무한 루프. tick_interval 마다 realtime_feed 호출."""
-    interval = cfg["tick_interval"]
+    base_interval = float(cfg["tick_interval"])
+    fast_exit_interval = float(cfg.get("exit_tick_interval") or 1.0)
     tfs_str = ",".join(str(t) for t in cfg["timeframes"]) if cfg["timeframes"] else "15m,1h"
     while True:
+        loop_interval = base_interval
+        ws_only = False
         try:
             mod = importlib.import_module(cfg["module"])
             fn = getattr(mod, cfg["fn"])
-            await fn(symbol=symbol, tfs=tfs_str, **cfg.get("kwargs", {}))
+
+            # 포지션 보유 중에는 WS 가격 기반 고빈도 청산 감시로 전환.
+            # signal 재계산은 생략해 API 호출을 늘리지 않고 순간 TP/SL 터치를 놓치지 않도록 함.
+            try:
+                eng_mod = importlib.import_module(f"features.strategy.{name}.engine")
+                eng = eng_mod.get_engine()
+                st = eng.get_stats(symbol=symbol) or {}
+                has_open_pos = bool(st.get("current_position"))
+            except Exception:
+                has_open_pos = False
+
+            if has_open_pos:
+                ws_only = True
+                loop_interval = max(0.5, fast_exit_interval)
+
+            kwargs = dict(cfg.get("kwargs", {}))
+            if ws_only:
+                try:
+                    sig = inspect.signature(fn)
+                    if "ws_only" in sig.parameters:
+                        kwargs["ws_only"] = True
+                except Exception:
+                    pass
+
+            await fn(symbol=symbol, tfs=tfs_str, **kwargs)
         except Exception as e:
             print(f"[StrategyLoop:{name}] error: {e}")
-        await asyncio.sleep(interval)
+        await asyncio.sleep(loop_interval)
 
 
 async def run_all_strategy_loops() -> None:

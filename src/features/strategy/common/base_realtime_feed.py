@@ -38,6 +38,7 @@ async def build_state(
     tfs_str: str,
     compute_fn: Callable,
     extra_bundle_args: Optional[Callable] = None,
+    ws_only: bool = False,
 ) -> Dict[str, Any]:
     """
     표준 realtime_feed 구현.
@@ -63,6 +64,25 @@ async def build_state(
 
     cache_key = f"{strategy_key}:{symbol}"
     now = _time.time()
+
+    # ws_only 모드: 포지션 보유 중 빠른 청산 감시용.
+    # 캐시된 signal/state를 재사용하고 WS 가격만 갱신해 tick 수행 (추가 API fetch 없음).
+    if ws_only and cache_key in _signal_cache:
+        cached = _signal_cache[cache_key]
+        try:
+            from common.binance_price_ws import get_cached_price
+            ws_price = get_cached_price(symbol)
+            if ws_price:
+                state = {**cached["state"], "current_price": ws_price}
+                _tick_and_notify(strategy_key, symbol, ws_price, state)
+                return state
+            # WS 순간 공백이면 직전 상태 가격으로라도 로컬 청산 체크 진행
+            fallback_price = cached["state"].get("current_price")
+            state = {**cached["state"], "current_price": fallback_price}
+            _tick_and_notify(strategy_key, symbol, fallback_price, state)
+            return state
+        except Exception:
+            pass  # 캐시/WS 실패 시 아래 full fetch로 fallback
 
     # signal 캐시가 유효하면 WS price만 갱신하고 tick (full API fetch 스킵)
     if signal_interval and cache_key in _signal_cache:

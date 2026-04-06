@@ -8,9 +8,13 @@ router = make_router("cvd_explosion", default_tfs="1h,4h")
 
 
 @router.get("/chart_data", response_class=JSONResponse)
-async def chart_data(symbol: str = Query("BTCUSDT"), limit: int = Query(120)):
+async def chart_data(
+    symbol: str = Query("BTCUSDT"),
+    limit: int = Query(120),
+    tf: str = Query("1h"),
+):
     """
-    1h 캔들 + vol_ratio + cvd_delta 반환 (차트 표시용).
+    선택 TF(기본 1h) 캔들 + vol_ratio + cvd_delta 반환 (차트 표시용).
 
     vol_ratio = 현재봉 볼륨 / 직전 vol_avg_window봉 평균볼륨 (signal.py 와 동일 로직).
     """
@@ -18,13 +22,17 @@ async def chart_data(symbol: str = Query("BTCUSDT"), limit: int = Query(120)):
 
     from .config_loader import get_signal_params_for_tf
 
-    params = get_signal_params_for_tf("1h")
+    tf_norm = (tf or "1h").strip().lower()
+    if tf_norm not in {"15m", "1h", "4h"}:
+        tf_norm = "1h"
+
+    params = get_signal_params_for_tf(tf_norm)
     vol_avg_window = int(params.get("vol_avg_window", 20))
     vol_mult = float(params.get("vol_mult", 2.5))
 
-    df = await fetch_binance_klines(symbol, interval="1h", limit=limit + vol_avg_window + 5)
+    df = await fetch_binance_klines(symbol, interval=tf_norm, limit=limit + vol_avg_window + 5)
     if df is None or df.empty:
-        return JSONResponse({"bars": [], "vol_mult": vol_mult})
+        return JSONResponse({"bars": [], "vol_mult": vol_mult, "tf": tf_norm})
 
     vol = df["Volume"].astype(float)
     # signal.py 와 동일: 직전 vol_avg_window봉 평균 (현재봉 제외)
@@ -50,4 +58,4 @@ async def chart_data(symbol: str = Query("BTCUSDT"), limit: int = Query(120)):
             }
         )
 
-    return JSONResponse({"bars": bars_out[-limit:], "vol_mult": vol_mult})
+    return JSONResponse({"bars": bars_out[-limit:], "vol_mult": vol_mult, "tf": tf_norm})

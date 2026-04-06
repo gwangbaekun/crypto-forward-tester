@@ -9,7 +9,7 @@
       window.CVD_EXPLOSION_MONITORING_START = document.querySelector('meta[name="cvd-explosion-monitoring-start"]').getAttribute('content') === 'true';
     </script>
     <link rel="stylesheet" href="/static/css/dashboard_common.css">
-    <script src="/static/js/forward_test_dashboard.js?v=3"></script>
+    <script src="/static/js/forward_test_dashboard.js?v=4"></script>
     <script src="https://unpkg.com/lightweight-charts@4.2.2/dist/lightweight-charts.standalone.production.js"></script>
 </head>
 <body>
@@ -51,8 +51,14 @@
 
     <div class="card" id="chart-card">
         <div class="card-title" style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
-            <span>Price chart (1h)</span>
-            <button id="chart-toggle-btn" onclick="toggleChart()" style="font-size:0.72rem;padding:3px 9px;">Collapse</button>
+            <span id="chart-title-text">Price chart (1h)</span>
+            <div style="display:flex;gap:8px;align-items:center;">
+                <select id="chart-tf-sel" style="background:var(--card);border:1px solid var(--border);color:var(--text);padding:3px 8px;border-radius:6px;font-size:0.75rem;">
+                    <option value="1h">1h</option>
+                    <option value="15m">15m</option>
+                </select>
+                <button id="chart-toggle-btn" onclick="toggleChart()" style="font-size:0.72rem;padding:3px 9px;">Collapse</button>
+            </div>
         </div>
         <div id="chart-wrap">
             <div id="price-chart" style="height:312px;border-radius:6px;overflow:hidden;"></div>
@@ -122,6 +128,7 @@
     var running = false;
     var HEALTH_POLL_SEC = 1.0;
     var BINANCE_POLL_SEC = 2.0;
+    var CHART_TF = '1h';
     window.__CVD_EXPLOSION_SYMBOL = SYMBOL;
     var HEALTH_META = {
         market_stream: { label: '실시간 시세', expectSec: 1.0 },
@@ -282,6 +289,8 @@
     // ── 차트 ──────────────────────────────────────────────────────────────────
     var _priceChart = null, _volChart = null;
     var _candleSeries = null, _volSeries = null, _threshSeries = null;
+    var _m15SupportSeries = null, _m15ResistanceSeries = null;
+    var _chartTimes = [];
     var _chartOpen = true;
 
     function toggleChart() {
@@ -339,6 +348,40 @@
             color: '#f0883e', lineWidth: 1, lineStyle: 2,
             priceScaleId: 'vol', lastValueVisible: false, priceLineVisible: false,
         });
+        _m15SupportSeries = _priceChart.addLineSeries({
+            color: '#1abc9c', lineWidth: 1, lineStyle: 2, lastValueVisible: false, priceLineVisible: false,
+        });
+        _m15ResistanceSeries = _priceChart.addLineSeries({
+            color: '#e74c3c', lineWidth: 1, lineStyle: 2, lastValueVisible: false, priceLineVisible: false,
+        });
+    }
+
+    function _updateStructureLines(sig) {
+        if (!_m15SupportSeries || !_m15ResistanceSeries) return;
+        if (CHART_TF !== '15m' || !_chartTimes.length) {
+            _m15SupportSeries.setData([]);
+            _m15ResistanceSeries.setData([]);
+            return;
+        }
+        var t0 = _chartTimes[0];
+        var t1 = _chartTimes[_chartTimes.length - 1];
+        var sup = sig && sig.m15_support != null ? Number(sig.m15_support) : null;
+        var res = sig && sig.m15_resistance != null ? Number(sig.m15_resistance) : null;
+        _m15SupportSeries.setData(sup ? [{ time: t0, value: sup }, { time: t1, value: sup }] : []);
+        _m15ResistanceSeries.setData(res ? [{ time: t0, value: res }, { time: t1, value: res }] : []);
+    }
+
+    function _pollForwardHealth() {
+        var qs = '?symbol=' + encodeURIComponent(SYMBOL);
+        fetch('/quant/cvd_explosion/forward_test/stats' + qs)
+            .then(function(r) { return r.json(); })
+            .then(function(d) { _setHealth('forward_stats', !(d && d.error), (d && d.error) ? '요청 실패' : '정상 수신', null); })
+            .catch(function() { _setHealth('forward_stats', false, '요청 실패', null); });
+
+        fetch('/quant/cvd_explosion/forward_test/trades' + qs + '&limit=1')
+            .then(function(r) { return r.json(); })
+            .then(function(d) { _setHealth('forward_trades', !(d && d.error), (d && d.error) ? '요청 실패' : '정상 수신', null); })
+            .catch(function() { _setHealth('forward_trades', false, '요청 실패', null); });
     }
 
     function _loadChart() {
@@ -346,12 +389,14 @@
         _initCharts();
         if (!_candleSeries) return;
 
-        fetch('/quant/cvd_explosion/chart_data?symbol=' + SYMBOL + '&limit=120')
+        document.getElementById('chart-title-text').textContent = 'Price chart (' + CHART_TF + ')';
+        fetch('/quant/cvd_explosion/chart_data?symbol=' + SYMBOL + '&limit=120&tf=' + CHART_TF)
             .then(function(r) { return r.json(); })
             .then(function(d) {
                 var bars = d.bars || [];
                 var mult = d.vol_mult || 2.5;
                 document.getElementById('chart-vol-mult').textContent = mult;
+                _chartTimes = bars.map(function(b) { return b.time; });
 
                 // 캔들
                 _candleSeries.setData(bars.map(function(b) {
@@ -396,6 +441,7 @@
         // 심볼 변경 시 차트 시리즈 초기화 후 재로드
         if (_candleSeries) { _candleSeries.setData([]); _volSeries.setData([]); _threshSeries.setData([]); }
         healthState = {};
+        _chartTimes = [];
         _renderHealth();
         loadOnce();
     }
@@ -432,6 +478,7 @@
     function loadOnce() {
         _pollMarketHealth();
         cvdRefreshBinanceStatus();
+        _pollForwardHealth();
         _loadChart();
         fetch('/quant/cvd_explosion/realtime_state?symbol=' + SYMBOL)
             .then(function(r) { return r.json(); })
@@ -439,6 +486,7 @@
                 document.getElementById('price').textContent = d.current_price
                     ? '$' + Number(d.current_price).toLocaleString(undefined,{minimumFractionDigits:1}) : '—';
                 renderSignal(d.signal || {}, d.current_price);
+                _updateStructureLines(d.signal || {});
                 _setHealth('realtime_state', true, '정상 수신', null);
             })
             .catch(function() {
@@ -511,9 +559,23 @@
     }
 
     if (window.CVD_EXPLOSION_MONITORING_START !== false) {
+        var tfSel = document.getElementById('chart-tf-sel');
+        if (tfSel) {
+            tfSel.addEventListener('change', function() {
+                CHART_TF = tfSel.value || '1h';
+                _loadChart();
+            });
+        }
         _renderHealth();
         toggleMonitor();
     } else {
+        var tfSel2 = document.getElementById('chart-tf-sel');
+        if (tfSel2) {
+            tfSel2.addEventListener('change', function() {
+                CHART_TF = tfSel2.value || '1h';
+                _loadChart();
+            });
+        }
         _renderHealth();
         loadOnce();
     }
