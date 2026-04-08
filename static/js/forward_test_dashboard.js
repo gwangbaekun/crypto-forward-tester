@@ -78,7 +78,7 @@
     var pollMs = opts.pollMs != null ? opts.pollMs : 30 * 1000;
     var tradesLimit = opts.tradesLimit != null ? opts.tradesLimit : 200;
 
-    var leverage = 3;
+    var leverage = 1;
     var trades = [];
     var page = 1;
     var perPage = 10;
