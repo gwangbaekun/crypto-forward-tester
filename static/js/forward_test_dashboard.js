@@ -279,7 +279,6 @@
         .then(function (r) { return r.json(); })
         .then(function (d) {
           trades = Array.isArray(d) ? d : (d && d.trades ? d.trades : []);
-          page = 1;
           renderTradesPage();
           if (typeof opts.onTradesFetch === "function") opts.onTradesFetch(true, d);
         })
