@@ -200,6 +200,15 @@ class BaseForwardTest(ABC):
             sl_init  = position.get("sl")
             tp_init  = position.get("tp")
             entry_ts = position.get("entry_time", 0)
+            # 재시작 복구용 position_meta — 청산 로직에 필요한 모든 필드 직렬화
+            _meta_keys = (
+                "tpsl_mode", "tp_advances", "tp_levels", "sl_levels",
+                "level_map", "sl_ratchet_step", "sl_ratchet_buffer_pct",
+                "slippage_pct", "m15_structure_stop_enabled",
+                "m15_structure_lookback_bars", "m15_structure_buffer_pct",
+            )
+            pos_meta = {k: position[k] for k in _meta_keys if k in position}
+
             trade = ForwardTrade(
                 symbol            = symbol,
                 side              = position["side"],
@@ -215,6 +224,7 @@ class BaseForwardTest(ABC):
                 tp2_price         = None,
                 sl_history        = _json.dumps([{"price": sl_init, "ts": entry_ts}]) if sl_init else None,
                 tp1_history       = _json.dumps([{"price": tp_init, "ts": entry_ts}]) if tp_init else None,
+                position_meta     = _json.dumps(pos_meta) if pos_meta else None,
                 status            = "open",
                 entry_source      = "engine",
                 strategy          = self.STRATEGY_TAG,
@@ -290,6 +300,15 @@ class BaseForwardTest(ABC):
                 "sl":          row.sl_price,
                 "tp":          row.tp1_price,
             }
+            # position_meta 복구 — tpsl_mode, level_map, tp_levels 등 청산 필드 전부
+            if row.position_meta:
+                try:
+                    import json as _json
+                    meta = _json.loads(row.position_meta)
+                    if isinstance(meta, dict):
+                        base.update(meta)
+                except Exception:
+                    pass
             base.update(self._extra_db_fields(row))
             return base
         finally:

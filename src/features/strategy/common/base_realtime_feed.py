@@ -8,6 +8,12 @@
     async def get_state(symbol="BTCUSDT", tfs="15m,1h,4h"):
         from .signal import compute_signal
         return await build_state("my_strategy", symbol, tfs, compute_signal)
+
+── Close-only stop 설계 ──────────────────────────────────────────────────────
+backtest_runner(v1) 과 동일:
+  - 신호 계산 + exit 체크 + 진입 → 1h 봉 마감 시 1회만
+  - 봉 사이 구간(ws_only / signal_interval 캐시)에서는 tick 완전 비활성
+  - check_exit 에 bar_high / bar_low (완성봉 OHLC) 전달 → wick 허위 손절 없음
 """
 from __future__ import annotations
 
@@ -15,21 +21,15 @@ import asyncio
 import time as _time
 from typing import Any, Callable, Dict, List, Optional
 
-# GC로 인한 태스크 중간 취소 방지 — 참조 보관용 전역 set
-# Python asyncio: create_task() 결과를 아무도 참조하지 않으면 GC가 태스크를 수거·취소함
+# GC로 인한 태스크 중간 취소 방지
 _bg_tasks: set = set()
 
-# signal_interval 캐시: full API fetch는 signal_interval 초마다만 수행
-# 그 사이 tick은 WS price만 갱신 → SL/TP 체크만 실행
-_signal_cache: Dict[str, Dict] = {}  # key: "{strategy_key}:{symbol}"
-
-# 마지막으로 신호를 계산한 완성봉 타임스탬프 캐시
-# 봉 타임이 바뀔 때만 compute_fn 재호출 → 진입 신호는 봉 마감 시 1회만 계산
-_last_bar_time: Dict[str, int] = {}  # key: "{strategy_key}:{symbol}"
+# 마지막으로 신호를 계산한 완성봉 타임 캐시
+_signal_cache: Dict[str, Dict] = {}   # key: "{strategy_key}:{symbol}"
+_last_bar_time: Dict[str, int] = {}   # key: "{strategy_key}:{symbol}"
 
 
 def _fire_and_forget(coro) -> asyncio.Task:
-    """create_task + 참조 보관. 완료 시 자동 제거."""
     task = asyncio.create_task(coro)
     _bg_tasks.add(task)
     task.add_done_callback(_bg_tasks.discard)
@@ -47,137 +47,117 @@ async def build_state(
     """
     표준 realtime_feed 구현.
 
-    1. Binance klines로 sweep_by_tf 번들 구성
-    2. compute_fn(current_price, sweep_by_tf, magnets, **extra) 호출
-    3. state dict 구성 후 반환
-    4. tick + Binance 주문 + Telegram 알림을 비동기 태스크로 트리거
-
-    Args:
-        strategy_key:      strategies_master.yaml 키 (e.g. "atr_breakout")
-        symbol:            심볼 (e.g. "BTCUSDT")
-        tfs_str:           쉼표 구분 TF 문자열 (e.g. "15m,1h,4h")
-        compute_fn:        signal.py의 compute_signal 함수
-        extra_bundle_args: bundle → dict 함수. macro/lsr 등 추가 인자가 필요한 전략에서 사용.
+    Close-only stop 원칙:
+      새 1h 봉이 감지될 때만 compute_fn + engine.tick() 실행.
+      봉 사이 구간(ws_only / signal_interval)에서는 tick 을 호출하지 않음.
+      → backtest_runner(v1) 과 exit 타이밍 동일.
     """
     from features.strategy.common.config_loader import get_master_config
     from features.strategy.common.kline_bundle import build_kline_bundle
 
-    # signal_interval 설정 읽기 (binance_live 전략 전용 최적화)
     master_cfg = (get_master_config() or {}).get(strategy_key) or {}
     signal_interval: Optional[int] = master_cfg.get("signal_interval")
-
     cache_key = f"{strategy_key}:{symbol}"
     now = _time.time()
 
-    # ws_only 모드: 포지션 보유 중 빠른 청산 감시 전용.
-    # signal="none" 으로 고정 → 진입 체크 완전 차단, 청산 체크만 수행.
-    # tp/sl/level_map 등 청산에 필요한 필드는 캐시된 signal 에서 유지.
-    if ws_only and cache_key in _signal_cache:
-        cached = _signal_cache[cache_key]
-        try:
-            from common.binance_price_ws import get_cached_price
-            ws_price = get_cached_price(symbol) or cached["state"].get("current_price")
-            if ws_price:
-                cached_sig = cached["state"].get("signal") or {}
-                exit_only_sig = {**cached_sig, "signal": "none"}
-                state = {**cached["state"], "current_price": ws_price, "signal": exit_only_sig}
-                _tick_and_notify(strategy_key, symbol, ws_price, state)
-                return state
-        except Exception:
-            pass  # 캐시/WS 실패 시 아래 full fetch로 fallback
+    # ── ws_only / signal_interval 구간: 다음 봉 마감 전까지 tick 비활성 ────
+    # Close-only stop: 1h 봉 마감 시에만 exit/entry 체크 (backtest v1 동일).
+    # 단, 다음 봉 마감 예상 시각(last_bar_ts + entry_tf_seconds - 30초 버퍼) 이후에는
+    # full fetch로 fall-through → 새 봉 감지 → tick 실행.
+    _entry_tf_sec = {
+        "1m": 60, "3m": 180, "5m": 300, "15m": 900, "30m": 1800,
+        "1h": 3600, "2h": 7200, "4h": 14400, "1d": 86400,
+    }
+    _etf = (get_master_config() or {}).get(strategy_key, {}).get("entry_tf") or "1h"
+    _tf_sec = _entry_tf_sec.get(_etf, 3600)
+    _last_bt = _last_bar_time.get(cache_key, 0)
+    _next_bar_expected = _last_bt + _tf_sec  # 다음 봉 open_time (UTC sec)
+    _near_bar_close = (now >= _next_bar_expected - 30)  # 30초 전부터 full fetch
 
-    # signal 캐시가 유효하면 WS price만 갱신하고 tick (full API fetch 스킵)
-    # ws_only 와 동일하게 signal="none" 고정 → 진입 차단, 청산 체크만
-    if signal_interval and cache_key in _signal_cache:
-        cached = _signal_cache[cache_key]
-        if now - cached["ts"] < signal_interval:
-            try:
-                from common.binance_price_ws import get_cached_price
-                ws_price = get_cached_price(symbol)
-                if ws_price:
-                    cached_sig = cached["state"].get("signal") or {}
-                    exit_only_sig = {**cached_sig, "signal": "none"}
-                    state = {**cached["state"], "current_price": ws_price, "signal": exit_only_sig}
-                    _tick_and_notify(strategy_key, symbol, ws_price, state)
-                    return state
-            except Exception:
-                pass  # WS 실패 시 full fetch로 fallback
+    if ws_only and cache_key in _signal_cache and not _near_bar_close:
+        return _signal_cache[cache_key]["state"]
 
+    if signal_interval and cache_key in _signal_cache and not _near_bar_close:
+        if now - _signal_cache[cache_key]["ts"] < signal_interval:
+            return _signal_cache[cache_key]["state"]
+
+    # ── Full fetch ───────────────────────────────────────────────────────────
     tfs_list = [x.strip() for x in tfs_str.split(",") if x.strip()]
-    bundle = await build_kline_bundle(symbol, tfs_list)
+    bundle   = await build_kline_bundle(symbol, tfs_list)
 
     sweep_by_tf: Dict[str, Any] = {
         tf: bundle.sweep_by_tf.get(tf) or {} for tf in tfs_list
     }
 
-    # ── 완성봉 타임스탬프 감지 ──────────────────────────────────────────────
-    # entry_tf 의 마지막 완성봉(forming 봉 제외: [-2]) 타임 기준.
-    # 봉이 새로 닫힐 때만 compute_fn 을 호출 → 진입 신호는 봉 마감 시 1회만 계산.
-    # 청산 체크는 _tick_and_notify 가 매 tick 수행하므로 무관.
-    entry_tf_key = master_cfg.get("entry_tf") or (tfs_list[1] if len(tfs_list) > 1 else tfs_list[0] if tfs_list else "1h")
+    entry_tf_key = master_cfg.get("entry_tf") or (
+        tfs_list[1] if len(tfs_list) > 1 else tfs_list[0] if tfs_list else "1h"
+    )
     _bars = (sweep_by_tf.get(entry_tf_key) or {}).get("data") or []
-    # 완성봉 = 마지막에서 두 번째 봉 ([-1] 은 현재 형성 중인 봉)
-    completed_bar_time = int(_bars[-2]["time"]) if len(_bars) >= 2 else 0
 
-    bar_cache_key = f"{strategy_key}:{symbol}"
-    new_bar_detected = (completed_bar_time != _last_bar_time.get(bar_cache_key, 0))
+    # 완성봉 = [-2]  ([-1] 은 현재 형성 중인 봉)
+    completed_bar_time = int(_bars[-2]["time"]) if len(_bars) >= 2 else 0
+    new_bar_detected   = (completed_bar_time != _last_bar_time.get(cache_key, 0))
 
     sig: Dict[str, Any] = {}
-    if bundle.price:
-        if new_bar_detected:
-            # ── 새 1h 봉 마감 → 신호 계산 ──────────────────────────────────
-            # backtest_runner: sweep 은 완성봉만 포함, current_price = 봉 close.
-            # 형성 중인 봉([-1]) 제거 → backtest sweep_builder 와 동일 조건.
-            completed_sweep: Dict[str, Any] = {
-                tf: {
-                    **sweep_by_tf.get(tf, {}),
-                    "data": (sweep_by_tf.get(tf) or {}).get("data", [])[:-1],
-                }
-                for tf in tfs_list
+    bar_close_price = bundle.price or 0.0
+    bar_high = bar_close_price
+    bar_low  = bar_close_price
+
+    if bundle.price and new_bar_detected:
+        # ── 새 1h 봉 마감 → 신호 계산 ──────────────────────────────────────
+        # sweep 에서 형성 중인 봉 제거 → backtest sweep_builder 와 동일 조건
+        completed_sweep: Dict[str, Any] = {
+            tf: {
+                **sweep_by_tf.get(tf, {}),
+                "data": (sweep_by_tf.get(tf) or {}).get("data", [])[:-1],
             }
-            # 진입가 기준 = 완성봉 close — backtest current_price 와 동일
-            bar_close_price = float(_bars[-2].get("close") or 0) or bundle.price
+            for tf in tfs_list
+        }
+        bar_close_price = float(_bars[-2].get("close") or 0) or bundle.price
+        bar_high        = float(_bars[-2].get("high")  or 0) or bundle.price
+        bar_low         = float(_bars[-2].get("low")   or 0) or bundle.price
 
-            kwargs: Dict[str, Any] = dict(
-                current_price=bar_close_price,
-                sweep_by_tf=completed_sweep,
-                magnets=bundle.magnets,
-            )
-            if extra_bundle_args:
-                kwargs.update(extra_bundle_args(bundle))
-            try:
-                import asyncio as _asyncio
-                if _asyncio.iscoroutinefunction(compute_fn):
-                    sig = await compute_fn(**kwargs) or {}
-                else:
-                    sig = compute_fn(**kwargs) or {}
-            except Exception as e:
-                sig = {"error": str(e)}
-            _last_bar_time[bar_cache_key] = completed_bar_time
-        else:
-            # ── 같은 봉 진행 중 → 진입 차단, 청산 필드만 유지 ───────────────
-            cached_sig = (_signal_cache.get(cache_key) or {}).get("state", {}).get("signal") or {}
-            sig = {**cached_sig, "signal": "none"}
+        kwargs: Dict[str, Any] = dict(
+            current_price=bar_close_price,
+            sweep_by_tf=completed_sweep,
+            magnets=bundle.magnets,
+        )
+        if extra_bundle_args:
+            kwargs.update(extra_bundle_args(bundle))
+        try:
+            import asyncio as _asyncio
+            if _asyncio.iscoroutinefunction(compute_fn):
+                sig = await compute_fn(**kwargs) or {}
+            else:
+                sig = compute_fn(**kwargs) or {}
+        except Exception as e:
+            sig = {"error": str(e)}
 
-    # by_tf: 실제 fetch한 TF 전체를 반영 (이전엔 "15m"만 하드코딩)
-    entry_tf = master_cfg.get("entry_tf") or (tfs_list[1] if len(tfs_list) > 1 else tfs_list[0] if tfs_list else "15m")
-    by_tf: Dict[str, Any] = {tf: {"signal": sig} for tf in tfs_list}
+        _last_bar_time[cache_key] = completed_bar_time
 
+    elif cache_key in _signal_cache:
+        # 같은 봉 진행 중 — 진입 차단 (tick 도 호출하지 않으므로 사실상 무관)
+        cached_sig = _signal_cache[cache_key]["state"].get("signal") or {}
+        sig = {**cached_sig, "signal": "none"}
+
+    entry_tf = master_cfg.get("entry_tf") or entry_tf_key
     state: Dict[str, Any] = {
         "symbol":        symbol,
-        "current_price": bundle.price,
+        "current_price": bar_close_price,
         "signal":        sig,
-        "by_tf":         by_tf,
+        "by_tf":         {tf: {"signal": sig} for tf in tfs_list},
         "entry_tf":      entry_tf,
+        # backtest 와 동일하게 완성봉 OHLC 전달 → check_exit 에서 wick 허위 손절 방지
+        "bar_high":      bar_high,
+        "bar_low":       bar_low,
     }
 
-    # signal / state 캐시 갱신 (signal_interval 없어도 tick_interval 동안 유효)
-    tick_interval: Optional[int] = master_cfg.get("tick_interval")
-    effective_ttl = signal_interval or tick_interval
-    if effective_ttl:
-        _signal_cache[cache_key] = {"state": state, "ts": now}
+    _signal_cache[cache_key] = {"state": state, "ts": now}
 
-    _tick_and_notify(strategy_key, symbol, bundle.price, state)
+    # tick 은 새 봉 마감 시에만 실행 (Close-only stop)
+    if new_bar_detected and bundle.price:
+        _tick_and_notify(strategy_key, symbol, bar_close_price, state)
+
     return state
 
 
@@ -191,13 +171,12 @@ def _tick_and_notify(
         import importlib
         from features.strategy.common.config_loader import get_master_config
         master = get_master_config() or {}
-        cfg = master.get(strategy_key) or {}
-        base = cfg.get("base_strategy") or strategy_key
+        cfg    = master.get(strategy_key) or {}
+        base   = cfg.get("base_strategy") or strategy_key
         strategy_tag = cfg.get("strategy_tag") or strategy_key
 
         ft = importlib.import_module(f"features.strategy.{base}.engine")
 
-        # base_strategy 패턴: get_engine_for(tag) 디스패치 우선
         if strategy_tag != base and hasattr(ft, "get_engine_for"):
             engine = ft.get_engine_for(strategy_tag)
         else:
@@ -215,7 +194,6 @@ def _tick_and_notify(
 
 
 def _resolve_tp_sl(pos: Dict[str, Any]):
-    """flat(tp/sl) 및 중첩(tpsl.tp1/sl) 구조 모두 지원 — renaissance 호환."""
     tpsl = pos.get("tpsl") or {}
     tp = pos.get("tp") or tpsl.get("tp1") or tpsl.get("tp2")
     sl = pos.get("sl") or tpsl.get("sl")
@@ -223,20 +201,12 @@ def _resolve_tp_sl(pos: Dict[str, Any]):
 
 
 def _update_entry_price_in_db(trade_id: int, fill_price: float) -> None:
-    """
-    Binance 진입 실체결가(avgPrice)로 DB의 entry_price 덮어쓰기.
-
-    engine 엔진은 신호 포착 시점의 WS 가격으로 entry_price를 기록하지만,
-    실제 Binance market 주문은 수십 초 후 다른 가격에 체결된다.
-    이 함수가 호출되면 실체결가로 보정한다 (pnl_pct는 청산 시 재계산되므로 여기선 건드리지 않음).
-    """
     try:
         from db.config import get_engine_url
         if not get_engine_url():
             return
     except Exception:
         return
-
     try:
         from db.session import get_session
         from db.models import ForwardTrade
@@ -259,20 +229,12 @@ def _update_entry_price_in_db(trade_id: int, fill_price: float) -> None:
 
 
 def _update_fill_price_in_db(trade_id: int, fill_price: float, entry_price: float, side: str) -> None:
-    """
-    Binance 실체결가(avgPrice)로 DB의 exit_price + pnl_pct 덮어쓰기.
-
-    engine 엔진은 SL/TP 설정값 또는 현재 WS 가격을 exit_price로 기록하지만,
-    실제 Binance market close는 60초 폴링 지연 + 슬리피지로 다른 가격에 체결된다.
-    이 함수가 호출되면 체결 완료 시점의 실가격으로 보정한다.
-    """
     try:
         from db.config import get_engine_url
         if not get_engine_url():
             return
     except Exception:
         return
-
     try:
         from db.session import get_session
         from db.models import ForwardTrade
@@ -280,18 +242,14 @@ def _update_fill_price_in_db(trade_id: int, fill_price: float, entry_price: floa
         try:
             trade = session.query(ForwardTrade).filter(ForwardTrade.id == trade_id).first()
             if not trade:
-                print(f"[fill_price_db] trade_id={trade_id} 없음 — 업데이트 스킵")
                 return
-            # 이미 다른 값으로 override된 경우 (재시도 방지)
             if trade.exit_price == fill_price:
                 return
-
             entry = float(entry_price or trade.entry_price or 0)
             real_pnl = (
                 (fill_price - entry) / entry * 100 if side == "long"
                 else (entry - fill_price) / entry * 100
             ) if entry > 0 else 0.0
-
             old_exit = trade.exit_price
             old_pnl  = trade.pnl_pct
             trade.exit_price = fill_price
@@ -316,14 +274,6 @@ async def _execute_verify_notify(
     events: List[Dict],
     current_price: Optional[float],
 ) -> None:
-    """
-    Binance 실주문 → DB fill price 보정 → Telegram 알림.
-
-    close 이벤트에서:
-    1. executor.close_position() 호출 → avgPrice(실체결가) 수신
-    2. _update_fill_price_in_db()로 DB exit_price / pnl_pct 덮어쓰기
-    3. Telegram 이벤트 dict의 exit_price도 실체결가로 교체 (알림 정확도)
-    """
     print(f"[{strategy_key}] events: {[e.get('event') for e in events]}")
 
     executor = None
@@ -354,7 +304,6 @@ async def _execute_verify_notify(
                         trade_id = pos.get("trade_id")
                         if trade_id is not None:
                             _update_entry_price_in_db(trade_id, fill_price)
-                        # 알림 dict도 실체결가로 교체
                         ev["position"] = {**pos, "entry_price": fill_price}
                         print(
                             f"[{strategy_key}] ✅ 진입 체결가 보정 — "
@@ -381,10 +330,8 @@ async def _execute_verify_notify(
                     if fill_price > 0:
                         trade_id    = trade.get("trade_id")
                         entry_price = float(trade.get("entry_price") or 0)
-                        # DB 보정 (실체결가로 exit_price / pnl_pct 덮어쓰기)
                         if trade_id is not None:
                             _update_fill_price_in_db(trade_id, fill_price, entry_price, side)
-                        # Telegram 알림 dict도 실체결가로 교체
                         real_pnl = (
                             (fill_price - entry_price) / entry_price * 100 if side == "long"
                             else (entry_price - fill_price) / entry_price * 100
@@ -421,10 +368,7 @@ async def _execute_verify_notify(
                 sync_info["tp_advance"] = None
 
     try:
-        from features.strategy.common.telegram_notifier import (
-            send_event_alerts,
-        )
-
+        from features.strategy.common.telegram_notifier import send_event_alerts
         send_event_alerts(strategy_key, symbol, events, sync_info)
     except Exception as e:
         print(f"[{strategy_key}] Telegram 알림 오류: {e}")

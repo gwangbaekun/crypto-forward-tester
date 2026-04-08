@@ -10,14 +10,18 @@ import os
 from typing import Any, Dict, List, Optional
 
 _REASON_LABEL: Dict[str, str] = {
-    "closed_sl": "🛑 SL 도달",
-    "closed_tp1": "🎯 TP1 도달",
-    "closed_tp2": "🎯 TP2 도달",
-    "closed_tp_final": "🏁 최종 Magnet 도달",
-    "closed_trailing_sl": "🛑 Trailing SL",
-    "closed_reversal": "🔄 반전 청산",
+    "closed_sl":              "🛑 SL 도달",
+    "closed_sl_loss":         "🛑 SL 손절",
+    "closed_sl_profit":       "✅ SL 이익 청산 (래칫)",
+    "closed_tp":              "🎯 TP 도달 (Magnet)",
+    "closed_tp1":             "🎯 TP1 도달",
+    "closed_tp2":             "🎯 TP2 도달",
+    "closed_tp_final":        "🏁 최종 Magnet 도달",
+    "closed_structure_15m":   "📐 15m 구조 손절",
+    "closed_trailing_sl":     "🛑 Trailing SL",
+    "closed_reversal":        "🔄 반전 청산",
     "closed_zscore_reversal": "📉 Z-Score 반전",
-    "closed_manual": "🖐 수동 청산",
+    "closed_manual":          "🖐 수동 청산",
 }
 
 
@@ -43,12 +47,23 @@ def _fmt_entry(
     sl = pos.get("sl") or tpsl.get("sl")
     tfs = pos.get("trigger_tfs") or pos.get("entry_tf") or pos.get("trigger_tf") or ""
     confidence = pos.get("confidence", 0)
-    detail = pos.get("direction_detail") or pos.get("force_type") or ""
+    max_score  = pos.get("max_score")
+    detail     = pos.get("direction_detail") or pos.get("force_type") or ""
+    tpsl_mode  = pos.get("tpsl_mode_label") or pos.get("tpsl_mode") or ""
+    vol_ratio  = pos.get("vol_ratio")
+    cvd_accel  = pos.get("cvd_accel")
+    cvd_higher = pos.get("cvd_higher")
+    cvd_htf    = pos.get("cvd_higher_tf") or ""
+    m15_sup    = pos.get("m15_support")
+    m15_res    = pos.get("m15_resistance")
+    reasons    = pos.get("reasons") or []
 
     side_e = "🟢" if side == "LONG" else "🔴"
     ep_s = f"${ep:,.2f}" if ep else "—"
     tp_s = f"${tp:,.2f}" if tp else "—"
     sl_s = f"${sl:,.2f}" if sl else "—"
+
+    score_s = f"{confidence}/{max_score}" if max_score else str(confidence)
     conf_s = "⭐" * int(min(confidence, 5)) if confidence else ""
 
     lines = [
@@ -61,13 +76,33 @@ def _fmt_entry(
     ]
     if tfs:
         lines.append(f"TF :  <code>{tfs}</code>")
+    if tpsl_mode:
+        lines.append(f"모드:  <code>{tpsl_mode}</code>")
+    if conf_s:
+        lines.append(f"신뢰도:  {conf_s}  <code>({score_s}점)</code>")
+    if vol_ratio is not None:
+        lines.append(f"Vol비율:  <code>{vol_ratio:.2f}x</code>")
+    if cvd_accel is not None:
+        accel_e = "📈" if cvd_accel > 0 else "📉"
+        lines.append(f"CVD가속:  {accel_e} <code>{cvd_accel:+.0f}</code>")
+    if cvd_higher is not None and cvd_htf:
+        hi_e = "📈" if cvd_higher > 0 else "📉"
+        lines.append(f"CVD {cvd_htf}:  {hi_e} <code>{cvd_higher:+.0f}</code>")
+    if m15_sup and m15_res:
+        lines.append(f"15m 구조:  <code>${m15_sup:,.2f}</code> ~ <code>${m15_res:,.2f}</code>")
     if detail:
         lines.append(f"신호:  <code>{detail}</code>")
-    if conf_s:
-        lines.append(f"신뢰도:  {conf_s}")
+    # reasons 목록 (있을 때만)
+    if reasons:
+        lines.append("")
+        lines.append("<b>📋 신호 조건</b>")
+        for r in reasons:
+            lines.append(f"  • {r}")
     if synced is True:
+        lines.append("")
         lines.append("바이낸스: ✅ 체결 확인")
     elif synced is False:
+        lines.append("")
         lines.append("바이낸스: ❌ 미체결 — 확인 필요")
     return "\n".join(lines)
 

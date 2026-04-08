@@ -1,11 +1,10 @@
 """
 CVD Explosion — Forward Test Engine.
 
-backtest_runner.py 구조를 그대로 따름:
-  1. 청산 체크 (매 tick — ws price 기준)
-  2. 진입 체크 (build_state 가 새 1h 봉 마감 시에만 signal 전달, 그 외 "none")
-     - tp > 0 AND sl > 0 필수 (backtest_runner 동일 조건)
-     - just_closed 시 같은 tick 재진입 금지 (backtest just_closed_at 동일)
+backtest_runner.py (v1) 과 완전히 동일한 구조:
+  - exit 체크: 1h 봉 마감 시 1회 (bar_high/bar_low = 완성봉 OHLC)
+  - 진입 체크: exit 이후, same-bar 재진입 금지, tp>0 AND sl>0 필수
+  - 봉 사이 구간에서는 build_state 가 tick 자체를 호출하지 않음
 """
 from __future__ import annotations
 
@@ -28,9 +27,19 @@ class CvdExplosionForwardTest(BaseForwardTest):
         return {}
 
     def _check_exit_signal(
-        self, position: Dict, current_price: float, sig: Dict
+        self,
+        position: Dict,
+        current_price: float,
+        sig: Dict,
+        bar_high: Optional[float] = None,
+        bar_low: Optional[float] = None,
     ) -> Optional[tuple]:
-        return check_exit(position, current_price, sig)
+        # backtest_runner 와 동일: bar_high/bar_low = 완성봉 OHLC 전달
+        return check_exit(
+            position, current_price, sig,
+            bar_high=bar_high,
+            bar_low=bar_low,
+        )
 
     def tick(
         self,
@@ -43,15 +52,22 @@ class CvdExplosionForwardTest(BaseForwardTest):
             return None
 
         sig: Dict[str, Any] = state.get("signal") or {}
+
+        # 완성봉 OHLC — backtest_runner 의 bar_high/bar_low 와 동일
+        bar_high = float(state.get("bar_high") or current_price)
+        bar_low  = float(state.get("bar_low")  or current_price)
+
         events: List[Dict[str, Any]] = []
 
-        # ── 1. 청산 체크 (매 tick) ──────────────────────────────────────────
+        # ── 1. 청산 체크 ─────────────────────────────────────────────────────
         # backtest: check_exit_fn(position, current_price, sig, bar_high, bar_low)
-        # forward:  bar_high/bar_low 없음 → current ws price 로 tick 단위 체크
         just_closed = False
         if self._position is not None:
             prev_adv = int(self._position.get("tp_advances") or 0)
-            result = self._check_exit_signal(self._position, current_price, sig)
+            result = self._check_exit_signal(
+                self._position, current_price, sig,
+                bar_high=bar_high, bar_low=bar_low,
+            )
             if result:
                 exit_price, reason, close_note = result
                 trade = self._close(exit_price, reason, self._position, close_note)
@@ -63,15 +79,10 @@ class CvdExplosionForwardTest(BaseForwardTest):
                 if new_adv > prev_adv:
                     events.append({"event": "tp_advance", "position": dict(self._position)})
 
-        # ── 2. 진입 체크 ────────────────────────────────────────────────────
+        # ── 2. 진입 체크 ─────────────────────────────────────────────────────
         # backtest_runner 조건 그대로:
-        #   position is None
-        #   AND not just_closed  (same-bar close+entry 금지)
-        #   AND direction in ("long","short")
-        #   AND tp > 0 AND sl > 0
-        #
-        # build_state 가 새 1h 봉 마감 시에만 signal="long/short" 전달.
-        # 그 외 모든 tick 은 signal="none" → 아래 조건 자연스럽게 통과 불가.
+        #   position is None AND not just_closed
+        #   AND direction in (long/short) AND tp>0 AND sl>0
         if self._position is None and not just_closed:
             direction = sig.get("signal")
             tp = _f(sig.get("tp") or 0)
@@ -79,19 +90,31 @@ class CvdExplosionForwardTest(BaseForwardTest):
 
             if direction in ("long", "short") and tp > 0 and sl > 0:
                 pos: Dict[str, Any] = {
-                    "side":        direction,
-                    "entry_price": current_price,
-                    "entry_time":  time.time(),
-                    "entry_tf":    sig.get("entry_tf") or "1h",
-                    "confidence":  sig.get("confidence", 0),
-                    "tp":          tp,
-                    "sl":          sl,
-                    "tp_levels":   [tp],
-                    "sl_levels":   [sl],
-                    "entry_state": str(sig.get("reasons", [])),
-                    "level_map":   list(sig.get("level_map") or []),
+                    "side":           direction,
+                    "entry_price":    current_price,
+                    "entry_time":     time.time(),
+                    "entry_tf":       sig.get("entry_tf") or "1h",
+                    "confidence":     sig.get("confidence", 0),
+                    "tp":             tp,
+                    "sl":             sl,
+                    "tp_levels":      [tp],
+                    "sl_levels":      [sl],
+                    "entry_state":    str(sig.get("reasons", [])),
+                    "level_map":      list(sig.get("level_map") or []),
+                    # ── Telegram 알림용 신호 상세 ──────────────────────────
+                    "reasons":        list(sig.get("reasons") or []),
+                    "vol_ratio":      sig.get("vol_ratio"),
+                    "cvd_accel":      sig.get("cvd_accel"),
+                    "cvd_higher":     sig.get("cvd_higher"),
+                    "cvd_higher_tf":  sig.get("cvd_higher_tf"),
+                    "tpsl_mode_label": sig.get("tpsl_mode"),
+                    "m15_support":    sig.get("m15_support"),
+                    "m15_resistance": sig.get("m15_resistance"),
+                    "bull_score":     sig.get("bull_score"),
+                    "bear_score":     sig.get("bear_score"),
+                    "max_score":      sig.get("max_score"),
                 }
-                # position_meta 필드 명시적 복사 — backtest_runner 와 동일 키셋
+                # position_meta — backtest_runner 와 동일 키셋
                 pm = sig.get("position_meta") or {}
                 for k in (
                     "tpsl_mode",

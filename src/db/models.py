@@ -40,6 +40,9 @@ class ForwardTrade(Base):
     sl_history: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     tp1_history: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
 
+    # 재시작 후 포지션 완전 복구용 — tpsl_mode, level_map, tp_levels, sl_levels 등 직렬화
+    position_meta: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+
     status: Mapped[str] = mapped_column(String(32), nullable=False, default="open")
     exit_price: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
     pnl_pct: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
