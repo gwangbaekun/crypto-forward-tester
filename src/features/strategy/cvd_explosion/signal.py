@@ -265,6 +265,8 @@ def compute_signal(
 
     max_score = sc_exp + sc_solo + sc_cvd + sc_cvd_hi
 
+    candle_time = int(bars_entry[-1].get("time", 0)) if bars_entry else 0
+
     # ── 공통 debug 필드 ───────────────────────────────────────────────────
     common = {
         "bull_score":    bull,
@@ -283,6 +285,7 @@ def compute_signal(
         "reasons":       reasons,
         "m15_support":   m15_support,
         "m15_resistance": m15_resistance,
+        "candle_time":   candle_time,
     }
 
     # ── 진입 판단 ─────────────────────────────────────────────────────────

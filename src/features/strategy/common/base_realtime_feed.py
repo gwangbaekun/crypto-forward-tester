@@ -23,6 +23,10 @@ _bg_tasks: set = set()
 # 그 사이 tick은 WS price만 갱신 → SL/TP 체크만 실행
 _signal_cache: Dict[str, Dict] = {}  # key: "{strategy_key}:{symbol}"
 
+# 마지막으로 신호를 계산한 완성봉 타임스탬프 캐시
+# 봉 타임이 바뀔 때만 compute_fn 재호출 → 진입 신호는 봉 마감 시 1회만 계산
+_last_bar_time: Dict[str, int] = {}  # key: "{strategy_key}:{symbol}"
+
 
 def _fire_and_forget(coro) -> asyncio.Task:
     """create_task + 참조 보관. 완료 시 자동 제거."""
@@ -65,26 +69,25 @@ async def build_state(
     cache_key = f"{strategy_key}:{symbol}"
     now = _time.time()
 
-    # ws_only 모드: 포지션 보유 중 빠른 청산 감시용.
-    # 캐시된 signal/state를 재사용하고 WS 가격만 갱신해 tick 수행 (추가 API fetch 없음).
+    # ws_only 모드: 포지션 보유 중 빠른 청산 감시 전용.
+    # signal="none" 으로 고정 → 진입 체크 완전 차단, 청산 체크만 수행.
+    # tp/sl/level_map 등 청산에 필요한 필드는 캐시된 signal 에서 유지.
     if ws_only and cache_key in _signal_cache:
         cached = _signal_cache[cache_key]
         try:
             from common.binance_price_ws import get_cached_price
-            ws_price = get_cached_price(symbol)
+            ws_price = get_cached_price(symbol) or cached["state"].get("current_price")
             if ws_price:
-                state = {**cached["state"], "current_price": ws_price}
+                cached_sig = cached["state"].get("signal") or {}
+                exit_only_sig = {**cached_sig, "signal": "none"}
+                state = {**cached["state"], "current_price": ws_price, "signal": exit_only_sig}
                 _tick_and_notify(strategy_key, symbol, ws_price, state)
                 return state
-            # WS 순간 공백이면 직전 상태 가격으로라도 로컬 청산 체크 진행
-            fallback_price = cached["state"].get("current_price")
-            state = {**cached["state"], "current_price": fallback_price}
-            _tick_and_notify(strategy_key, symbol, fallback_price, state)
-            return state
         except Exception:
             pass  # 캐시/WS 실패 시 아래 full fetch로 fallback
 
     # signal 캐시가 유효하면 WS price만 갱신하고 tick (full API fetch 스킵)
+    # ws_only 와 동일하게 signal="none" 고정 → 진입 차단, 청산 체크만
     if signal_interval and cache_key in _signal_cache:
         cached = _signal_cache[cache_key]
         if now - cached["ts"] < signal_interval:
@@ -92,7 +95,9 @@ async def build_state(
                 from common.binance_price_ws import get_cached_price
                 ws_price = get_cached_price(symbol)
                 if ws_price:
-                    state = {**cached["state"], "current_price": ws_price}
+                    cached_sig = cached["state"].get("signal") or {}
+                    exit_only_sig = {**cached_sig, "signal": "none"}
+                    state = {**cached["state"], "current_price": ws_price, "signal": exit_only_sig}
                     _tick_and_notify(strategy_key, symbol, ws_price, state)
                     return state
             except Exception:
@@ -105,23 +110,54 @@ async def build_state(
         tf: bundle.sweep_by_tf.get(tf) or {} for tf in tfs_list
     }
 
+    # ── 완성봉 타임스탬프 감지 ──────────────────────────────────────────────
+    # entry_tf 의 마지막 완성봉(forming 봉 제외: [-2]) 타임 기준.
+    # 봉이 새로 닫힐 때만 compute_fn 을 호출 → 진입 신호는 봉 마감 시 1회만 계산.
+    # 청산 체크는 _tick_and_notify 가 매 tick 수행하므로 무관.
+    entry_tf_key = master_cfg.get("entry_tf") or (tfs_list[1] if len(tfs_list) > 1 else tfs_list[0] if tfs_list else "1h")
+    _bars = (sweep_by_tf.get(entry_tf_key) or {}).get("data") or []
+    # 완성봉 = 마지막에서 두 번째 봉 ([-1] 은 현재 형성 중인 봉)
+    completed_bar_time = int(_bars[-2]["time"]) if len(_bars) >= 2 else 0
+
+    bar_cache_key = f"{strategy_key}:{symbol}"
+    new_bar_detected = (completed_bar_time != _last_bar_time.get(bar_cache_key, 0))
+
     sig: Dict[str, Any] = {}
     if bundle.price:
-        kwargs: Dict[str, Any] = dict(
-            current_price=bundle.price,
-            sweep_by_tf=sweep_by_tf,
-            magnets=bundle.magnets,
-        )
-        if extra_bundle_args:
-            kwargs.update(extra_bundle_args(bundle))
-        try:
-            import asyncio as _asyncio
-            if _asyncio.iscoroutinefunction(compute_fn):
-                sig = await compute_fn(**kwargs) or {}
-            else:
-                sig = compute_fn(**kwargs) or {}
-        except Exception as e:
-            sig = {"error": str(e)}
+        if new_bar_detected:
+            # ── 새 1h 봉 마감 → 신호 계산 ──────────────────────────────────
+            # backtest_runner: sweep 은 완성봉만 포함, current_price = 봉 close.
+            # 형성 중인 봉([-1]) 제거 → backtest sweep_builder 와 동일 조건.
+            completed_sweep: Dict[str, Any] = {
+                tf: {
+                    **sweep_by_tf.get(tf, {}),
+                    "data": (sweep_by_tf.get(tf) or {}).get("data", [])[:-1],
+                }
+                for tf in tfs_list
+            }
+            # 진입가 기준 = 완성봉 close — backtest current_price 와 동일
+            bar_close_price = float(_bars[-2].get("close") or 0) or bundle.price
+
+            kwargs: Dict[str, Any] = dict(
+                current_price=bar_close_price,
+                sweep_by_tf=completed_sweep,
+                magnets=bundle.magnets,
+            )
+            if extra_bundle_args:
+                kwargs.update(extra_bundle_args(bundle))
+            try:
+                import asyncio as _asyncio
+                if _asyncio.iscoroutinefunction(compute_fn):
+                    sig = await compute_fn(**kwargs) or {}
+                else:
+                    sig = compute_fn(**kwargs) or {}
+            except Exception as e:
+                sig = {"error": str(e)}
+            _last_bar_time[bar_cache_key] = completed_bar_time
+        else:
+            # ── 같은 봉 진행 중 → 진입 차단, 청산 필드만 유지 ───────────────
+            cached_sig = (_signal_cache.get(cache_key) or {}).get("state", {}).get("signal") or {}
+            sig = {**cached_sig, "signal": "none"}
 
     # by_tf: 실제 fetch한 TF 전체를 반영 (이전엔 "15m"만 하드코딩)
     entry_tf = master_cfg.get("entry_tf") or (tfs_list[1] if len(tfs_list) > 1 else tfs_list[0] if tfs_list else "15m")
