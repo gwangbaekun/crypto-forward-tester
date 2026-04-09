@@ -458,7 +458,7 @@ class BaseForwardTest(ABC):
         if self._db_available():
             try:
                 db = self.get_trades_from_db(symbol=symbol)
-                if db:
+                if db is not None:
                     trades = db
             except Exception:
                 pass
