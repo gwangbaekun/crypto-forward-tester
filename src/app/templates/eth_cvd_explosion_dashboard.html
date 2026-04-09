@@ -1,0 +1,544 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>CVD Explosion — Forward Test</title>
+    <meta name="cvd-explosion-monitoring-start" content="{% if monitoring_start_by_default is defined %}{{ monitoring_start_by_default|tojson }}{% else %}true{% endif %}">
+    <script>
+      window.CVD_EXPLOSION_MONITORING_START = document.querySelector('meta[name="cvd-explosion-monitoring-start"]').getAttribute('content') === 'true';
+    </script>
+    <link rel="stylesheet" href="/static/css/dashboard_common.css">
+    <script src="/static/js/forward_test_dashboard.js?v=4"></script>
+    <script src="https://unpkg.com/lightweight-charts@4.2.2/dist/lightweight-charts.standalone.production.js"></script>
+</head>
+<body>
+<div class="container">
+
+    <div class="card" style="padding:12px 14px;">
+        <div class="main-header">
+            <div class="header-left">
+                <span class="strategy-tag">CVD Explosion</span>
+                <span class="symbol-badge" id="symbol-label">ETHUSDT</span>
+                <span class="status-dot" id="dot"></span>
+                <span id="health-market-stream" style="display:none;color:var(--accent-red);font-size:0.72rem;">●</span>
+            </div>
+            <div style="display:flex;align-items:center;gap:10px;">
+                <span class="price-display" id="price">—</span>
+                <a href="/" class="back">← Home</a>
+            </div>
+        </div>
+    </div>
+
+    <div class="card" style="padding:10px 14px">
+        <div class="ctrl">
+            <span class="ctrl-label">Monitor</span>
+            <button id="btn-toggle" class="primary" onclick="toggleMonitor()">Start</button>
+            <button onclick="loadOnce()">Refresh</button>
+            <select id="symbol-sel" style="background:var(--card);border:1px solid var(--border);color:var(--text);padding:5px 8px;border-radius:6px;font-size:0.82rem" onchange="onSymbolChange()">
+                <option value="ETHUSDT">ETHUSDT</option>
+                <option value="ETHUSDT">ETHUSDT</option>
+            </select>
+        </div>
+    </div>
+
+    <div class="card" id="chart-card">
+        <div class="card-title" style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
+            <span id="chart-title-text">Price chart (1h) <span id="health-chart-data" style="display:none;color:var(--accent-red);font-size:0.72rem;margin-left:6px;">●</span></span>
+            <div style="display:flex;gap:8px;align-items:center;">
+                <select id="chart-tf-sel" style="background:var(--card);border:1px solid var(--border);color:var(--text);padding:3px 8px;border-radius:6px;font-size:0.75rem;">
+                    <option value="1h">1h</option>
+                    <option value="15m">15m</option>
+                </select>
+                <button id="chart-toggle-btn" onclick="toggleChart()" style="font-size:0.72rem;padding:3px 9px;">Collapse</button>
+            </div>
+        </div>
+        <div id="chart-wrap">
+            <div id="price-chart" style="height:312px;border-radius:6px;overflow:hidden;"></div>
+            <div style="display:flex;justify-content:space-between;padding:3px 2px 0;font-size:0.68rem;color:var(--text-secondary);">
+                <span>▲▼ = explosion bars (≥ <span id="chart-vol-mult">2.5</span>x)</span>
+                <span>Vol ratio — red: explosion / gray: normal / orange line: threshold</span>
+            </div>
+        </div>
+    </div>
+
+    <div class="card">
+        <div class="card-title">Signal (volume explosion + CVD) <span id="health-realtime-state" style="display:none;color:var(--accent-red);font-size:0.72rem;margin-left:6px;">●</span></div>
+        <div class="signal-row">
+            <span class="signal-badge none" id="sig-badge">Idle</span>
+            <div class="conf-bar-wrap">
+                <div class="conf-label">Confidence <span id="conf-text">0/7</span></div>
+                <div class="conf-bar"><div class="conf-fill" id="conf-fill" style="width:0%"></div></div>
+            </div>
+        </div>
+        <div class="metrics-grid" style="margin-top:14px">
+            <div class="metric"><span class="metric-key">Vol x</span><span class="metric-val" id="m-vr">—</span></div>
+            <div class="metric"><span class="metric-key">CVD accel</span><span class="metric-val" id="m-acc">—</span></div>
+            <div class="metric"><span class="metric-key">Higher TF CVD</span><span class="metric-val" id="m-hi">—</span></div>
+            <div class="metric"><span class="metric-key">TP</span><span class="metric-val" id="m-tp">—</span></div>
+            <div class="metric"><span class="metric-key">SL</span><span class="metric-val" id="m-sl">—</span></div>
+        </div>
+    </div>
+
+    <div class="card">
+        <div class="card-title">Score breakdown</div>
+        <ul class="reasons-list" id="reasons-list"><li>—</li></ul>
+    </div>
+
+    <div class="card">
+        <div class="step-label">Binance position</div>
+        <div class="card-header">
+            <span id="cvd-binance-mode-label" style="font-size:0.75rem;color:var(--text-secondary);">Fetching… <span id="health-binance-execute" style="display:none;color:var(--accent-red);font-size:0.72rem;margin-left:4px;">●</span></span>
+            <button type="button" onclick="cvdRefreshBinanceStatus()" style="font-size:0.72rem;padding:3px 8px;">Refresh</button>
+        </div>
+        <div id="cvd-binance-status" style="font-size:0.8rem;margin:8px 0;color:var(--text-secondary);">Fetching…</div>
+    </div>
+
+    <div class="card">
+        <div class="step-label">Forward Test</div>
+        <div class="card-header">
+            <span>🤖 Forward test P&amp;L <span id="health-forward-stats" style="display:none;color:var(--accent-red);font-size:0.72rem;margin-left:6px;">●</span> <span id="health-forward-trades" style="display:none;color:var(--accent-red);font-size:0.72rem;margin-left:2px;">●</span></span>
+            <button onclick="location.href='/quant/eth_cvd_explosion/forward_test/trades?symbol=' + encodeURIComponent(window.__CVD_EXPLOSION_SYMBOL || 'ETHUSDT')"
+                    style="font-size:0.72rem;padding:3px 8px;">All trades</button>
+        </div>
+        <div id="forward-stats" style="min-height:60px;color:var(--text-secondary);">Loading…</div>
+        <div id="forward-trades-box" style="margin-top:14px; padding-top:14px; border-top:1px solid var(--border-color);">
+            <div style="font-size:0.8rem;font-weight:bold;margin-bottom:8px;color:var(--text-primary);">📋 Recent trades</div>
+            <div id="forward-trades-list" style="font-size:0.75rem;color:var(--text-secondary);">Loading…</div>
+            <div id="forward-trades-pagination" style="margin-top:8px;display:flex;gap:6px;align-items:center;flex-wrap:wrap;"></div>
+        </div>
+    </div>
+
+</div>
+
+<script>
+(function() {
+    var _params = new URLSearchParams(window.location.search);
+    var SYMBOL = _params.get('symbol') || 'ETHUSDT';
+    var timer = null;
+    var healthTimer = null;
+    var binanceTimer = null;
+    var running = false;
+    var HEALTH_POLL_SEC = 1.0;
+    var BINANCE_POLL_SEC = 2.0;
+    var CHART_TF = '1h';
+    window.__CVD_EXPLOSION_SYMBOL = SYMBOL;
+    var HEALTH_META = {
+        market_stream: { label: '실시간 시세', expectSec: 1.0 },
+        realtime_state: { label: '전략 시그널', expectSec: 30.0 },
+        chart_data: { label: '차트 데이터', expectSec: 30.0 },
+        forward_stats: { label: '포워드 통계', expectSec: 30.0 },
+        forward_trades: { label: '포워드 거래목록', expectSec: 30.0 },
+        binance_execute: { label: 'Binance 체결/포지션', expectSec: 2.0 },
+    };
+    var healthState = {};
+
+    function _setHealth(key, ok, msg, serverTsSec) {
+        var prev = healthState[key] || {};
+        healthState[key] = {
+            ok: !!ok,
+            msg: msg || (ok ? '정상 수신' : '요청 실패'),
+            lastOkMs: ok ? Date.now() : (prev.lastOkMs || null),
+            lastServerTsSec: serverTsSec != null ? Number(serverTsSec) : (prev.lastServerTsSec || null),
+        };
+        _renderHealth();
+    }
+
+    function _healthLevel(key) {
+        var s = healthState[key];
+        var meta = HEALTH_META[key] || { expectSec: 30.0 };
+        if (!s || !s.lastOkMs) return 'idle';
+        if (s.ok === false) return 'error';
+        var age = (Date.now() - s.lastOkMs) / 1000;
+        if (age <= meta.expectSec * 2.0) return 'ok';
+        if (age <= meta.expectSec * 5.0) return 'warn';
+        return 'error';
+    }
+
+    function _setHealthDot(elId, isError) {
+        var el = document.getElementById(elId);
+        if (!el) return;
+        el.style.display = isError ? '' : 'none';
+    }
+
+    function _renderHealth() {
+        _setHealthDot('health-market-stream', _healthLevel('market_stream') === 'error');
+        _setHealthDot('health-realtime-state', _healthLevel('realtime_state') === 'error');
+        _setHealthDot('health-chart-data', _healthLevel('chart_data') === 'error');
+        _setHealthDot('health-forward-stats', _healthLevel('forward_stats') === 'error');
+        _setHealthDot('health-forward-trades', _healthLevel('forward_trades') === 'error');
+        _setHealthDot('health-binance-execute', _healthLevel('binance_execute') === 'error');
+    }
+
+    function _pollMarketHealth() {
+        return fetch('/api/market-stream?symbol=' + SYMBOL, { cache: 'no-store' })
+            .then(function(r) {
+                if (!r.ok) throw new Error('HTTP ' + r.status);
+                return r.json();
+            })
+            .then(function(d) {
+                var lower = (SYMBOL || '').toLowerCase();
+                var row = (((d || {}).marks || {}).symbols || {})[lower];
+                if (row && row.price != null) {
+                    document.getElementById('price').textContent =
+                        '$' + Number(row.price).toLocaleString(undefined, { minimumFractionDigits: 1 });
+                }
+                _setHealth('market_stream', true, '정상 수신', d ? d.server_ts : null);
+            })
+            .catch(function() {
+                _setHealth('market_stream', false, '요청 실패', null);
+            });
+    }
+
+    function _fmtPrice(v) {
+        if (v == null) return '—';
+        return '$' + Number(v).toLocaleString(undefined, { minimumFractionDigits: 1, maximumFractionDigits: 2 });
+    }
+
+    function cvdRefreshBinanceStatus() {
+        var statusEl = document.getElementById('cvd-binance-status');
+        var labelEl = document.getElementById('cvd-binance-mode-label');
+        if (!statusEl || !labelEl) return Promise.resolve();
+
+        return fetch('/quant/eth_cvd_explosion/execute/status?symbol=' + SYMBOL, { cache: 'no-store' })
+            .then(function(r) { return r.json(); })
+            .then(function(data) {
+                if (data && data.error) {
+                    labelEl.textContent = 'Executor disabled';
+                    labelEl.style.color = 'var(--accent-red)';
+                    statusEl.textContent = '❌ ' + data.error;
+                    _setHealth('binance_execute', false, '요청 실패', null);
+                    return;
+                }
+                var isTestnet = !!(data && data.testnet);
+                labelEl.textContent = isTestnet ? '🟡 TESTNET' : '🔴 LIVE';
+                labelEl.style.color = isTestnet ? '#f39c12' : '#e74c3c';
+
+                var pos = data && data.binance_position;
+                if (pos) {
+                    var amt = parseFloat(pos.positionAmt || 0);
+                    var side = amt > 0 ? 'LONG' : 'SHORT';
+                    var size = Math.abs(amt);
+                    var entry = parseFloat(pos.entryPrice || 0);
+                    var mark = parseFloat(data.exchange_price || 0);
+                    var upnl = parseFloat(pos.unRealizedProfit || 0);
+                    statusEl.innerHTML =
+                        '💰 Balance: ' + Number(data.balance_usdt || 0).toFixed(2) + ' USDT' +
+                        ' &nbsp;|&nbsp; 📊 Mark: ' + _fmtPrice(mark) +
+                        '<br>📌 Position: <strong style="color:' + (side === 'LONG' ? 'var(--accent-green)' : 'var(--accent-red)') + ';">' + side + '</strong> ' +
+                        size + ' (entry ' + _fmtPrice(entry) + ')' +
+                        ' &nbsp;|&nbsp; UPNL: <strong style="color:' + (upnl >= 0 ? 'var(--accent-green)' : 'var(--accent-red)') + ';">' + (upnl >= 0 ? '+' : '') + upnl.toFixed(4) + '</strong>';
+                } else {
+                    statusEl.innerHTML =
+                        '💰 Balance: ' + Number(data.balance_usdt || 0).toFixed(2) + ' USDT' +
+                        ' &nbsp;|&nbsp; 📊 Mark: ' + _fmtPrice(data.exchange_price || 0) +
+                        '<br>No open position on Binance';
+                }
+                _setHealth('binance_execute', true, '정상 수신', null);
+            })
+            .catch(function(e) {
+                labelEl.textContent = 'Connection error';
+                labelEl.style.color = 'var(--accent-red)';
+                statusEl.textContent = '❌ Connection failed: ' + (e && e.message ? e.message : e);
+                _setHealth('binance_execute', false, '요청 실패', null);
+            });
+    }
+    window.cvdRefreshBinanceStatus = cvdRefreshBinanceStatus;
+
+    // ── 차트 ──────────────────────────────────────────────────────────────────
+    var _priceChart = null, _volChart = null;
+    var _candleSeries = null, _volSeries = null, _threshSeries = null;
+    var _m15SupportSeries = null, _m15ResistanceSeries = null;
+    var _chartTimes = [];
+    var _chartOpen = true;
+
+    function toggleChart() {
+        _chartOpen = !_chartOpen;
+        document.getElementById('chart-wrap').style.display = _chartOpen ? '' : 'none';
+        document.getElementById('chart-toggle-btn').textContent = _chartOpen ? 'Collapse' : 'Expand';
+    }
+    window.toggleChart = toggleChart;
+
+    function _darkOpts(h) {
+        return {
+            layout: { background: { color: '#161b22' }, textColor: '#8b949e' },
+            grid:   { vertLines: { color: '#21262d' }, horzLines: { color: '#21262d' } },
+            crosshair: { mode: 1 },
+            rightPriceScale: { borderColor: '#30363d' },
+            timeScale: { borderColor: '#30363d', timeVisible: true, secondsVisible: false },
+            height: h,
+            handleScroll: true,
+            handleScale: true,
+        };
+    }
+
+    function _initCharts() {
+        if (_priceChart) return;
+        var LC = window.LightweightCharts;
+        if (!LC) return;
+
+        // 하나의 차트에 캔들과 볼륨을 같이 그리기 위해 볼륨의 price scale 위치 조정
+        _priceChart = LC.createChart(document.getElementById('price-chart'), _darkOpts(240));
+        
+        _candleSeries = _priceChart.addCandlestickSeries({
+            upColor: '#26a69a', downColor: '#ef5350',
+            borderUpColor: '#26a69a', borderDownColor: '#ef5350',
+            wickUpColor: '#26a69a', wickDownColor: '#ef5350',
+        });
+
+        // 캔들과 같은 차트에 히스토그램 추가
+        _volSeries = _priceChart.addHistogramSeries({ 
+            priceScaleId: 'vol',
+            priceFormat: { type: 'volume' } 
+        });
+
+        // 볼륨을 차트 하단 20% 공간에만 표시
+        _priceChart.priceScale('vol').applyOptions({
+            scaleMargins: { top: 0.8, bottom: 0 },
+            borderVisible: false,
+        });
+        
+        // 캔들이 볼륨을 가리지 않도록 캔들 영역을 상단 80%로 제한
+        _priceChart.priceScale('right').applyOptions({
+            scaleMargins: { top: 0.1, bottom: 0.25 },
+        });
+
+        _threshSeries = _priceChart.addLineSeries({
+            color: '#f0883e', lineWidth: 1, lineStyle: 2,
+            priceScaleId: 'vol', lastValueVisible: false, priceLineVisible: false,
+        });
+        _m15SupportSeries = _priceChart.addLineSeries({
+            color: '#1abc9c', lineWidth: 1, lineStyle: 2, lastValueVisible: false, priceLineVisible: false,
+        });
+        _m15ResistanceSeries = _priceChart.addLineSeries({
+            color: '#e74c3c', lineWidth: 1, lineStyle: 2, lastValueVisible: false, priceLineVisible: false,
+        });
+    }
+
+    function _updateStructureLines(sig) {
+        if (!_m15SupportSeries || !_m15ResistanceSeries) return;
+        if (CHART_TF !== '15m' || !_chartTimes.length) {
+            _m15SupportSeries.setData([]);
+            _m15ResistanceSeries.setData([]);
+            return;
+        }
+        var t0 = _chartTimes[0];
+        var t1 = _chartTimes[_chartTimes.length - 1];
+        var sup = sig && sig.m15_support != null ? Number(sig.m15_support) : null;
+        var res = sig && sig.m15_resistance != null ? Number(sig.m15_resistance) : null;
+        _m15SupportSeries.setData(sup ? [{ time: t0, value: sup }, { time: t1, value: sup }] : []);
+        _m15ResistanceSeries.setData(res ? [{ time: t0, value: res }, { time: t1, value: res }] : []);
+    }
+
+    function _pollForwardHealth() {
+        var qs = '?symbol=' + encodeURIComponent(SYMBOL);
+        fetch('/quant/eth_cvd_explosion/forward_test/stats' + qs)
+            .then(function(r) { return r.json(); })
+            .then(function(d) { _setHealth('forward_stats', !(d && d.error), (d && d.error) ? '요청 실패' : '정상 수신', null); })
+            .catch(function() { _setHealth('forward_stats', false, '요청 실패', null); });
+
+        fetch('/quant/eth_cvd_explosion/forward_test/trades' + qs + '&limit=1')
+            .then(function(r) { return r.json(); })
+            .then(function(d) { _setHealth('forward_trades', !(d && d.error), (d && d.error) ? '요청 실패' : '정상 수신', null); })
+            .catch(function() { _setHealth('forward_trades', false, '요청 실패', null); });
+    }
+
+    function _loadChart() {
+        if (!_chartOpen) return;
+        _initCharts();
+        if (!_candleSeries) return;
+
+        document.getElementById('chart-title-text').textContent = 'Price chart (' + CHART_TF + ')';
+        fetch('/quant/eth_cvd_explosion/chart_data?symbol=' + SYMBOL + '&limit=120&tf=' + CHART_TF)
+            .then(function(r) { return r.json(); })
+            .then(function(d) {
+                var bars = d.bars || [];
+                var mult = d.vol_mult || 2.5;
+                document.getElementById('chart-vol-mult').textContent = mult;
+                _chartTimes = bars.map(function(b) { return b.time; });
+
+                // 캔들
+                _candleSeries.setData(bars.map(function(b) {
+                    return { time: b.time, open: b.open, high: b.high, low: b.low, close: b.close };
+                }));
+
+                // 폭발봉 마커
+                var markers = bars
+                    .filter(function(b) { return b.is_explosion; })
+                    .map(function(b) {
+                        var up = b.close >= b.open;
+                        return {
+                            time:     b.time,
+                            position: up ? 'belowBar' : 'aboveBar',
+                            color:    up ? '#26a69a' : '#ef5350',
+                            shape:    up ? 'arrowUp' : 'arrowDown',
+                            text:     b.vol_ratio.toFixed(1) + 'x',
+                        };
+                    });
+                _candleSeries.setMarkers(markers);
+
+                // vol ratio 히스토그램 (한 화면에 통합)
+                _volSeries.setData(bars.map(function(b) {
+                    return { time: b.time, value: b.vol_ratio, color: b.is_explosion ? '#ef535088' : '#30363d88' };
+                }));
+
+                // 임계값 선
+                _threshSeries.setData(bars.map(function(b) {
+                    return { time: b.time, value: mult };
+                }));
+                _setHealth('chart_data', true, '정상 수신', null);
+            })
+            .catch(function() {
+                _setHealth('chart_data', false, '요청 실패', null);
+            });
+    }
+
+    function onSymbolChange() {
+        SYMBOL = document.getElementById('symbol-sel').value;
+        window.__CVD_EXPLOSION_SYMBOL = SYMBOL;
+        document.getElementById('symbol-label').textContent = SYMBOL;
+        // 심볼 변경 시 차트 시리즈 초기화 후 재로드
+        if (_candleSeries) { _candleSeries.setData([]); _volSeries.setData([]); _threshSeries.setData([]); }
+        healthState = {};
+        _chartTimes = [];
+        _renderHealth();
+        loadOnce();
+    }
+    window.onSymbolChange = onSymbolChange;
+
+    function toggleMonitor() {
+        running = !running;
+        var btn = document.getElementById('btn-toggle');
+        if (running) {
+            btn.textContent = 'Stop'; btn.className = 'active';
+            document.getElementById('dot').className = 'dot live';
+            loadOnce();
+            timer = setInterval(loadOnce, 30000);
+            if (healthTimer) clearInterval(healthTimer);
+            healthTimer = setInterval(function() {
+                _pollMarketHealth();
+                _renderHealth();
+            }, HEALTH_POLL_SEC * 1000);
+            cvdRefreshBinanceStatus();
+            if (binanceTimer) clearInterval(binanceTimer);
+            binanceTimer = setInterval(cvdRefreshBinanceStatus, BINANCE_POLL_SEC * 1000);
+        } else {
+            btn.textContent = 'Start'; btn.className = 'primary';
+            document.getElementById('dot').className = 'dot';
+            clearInterval(timer);
+            clearInterval(healthTimer);
+            healthTimer = null;
+            clearInterval(binanceTimer);
+            binanceTimer = null;
+        }
+    }
+    window.toggleMonitor = toggleMonitor;
+
+    function loadOnce() {
+        _pollMarketHealth();
+        cvdRefreshBinanceStatus();
+        _pollForwardHealth();
+        _loadChart();
+        fetch('/quant/eth_cvd_explosion/realtime_state?symbol=' + SYMBOL)
+            .then(function(r) { return r.json(); })
+            .then(function(d) {
+                document.getElementById('price').textContent = d.current_price
+                    ? '$' + Number(d.current_price).toLocaleString(undefined,{minimumFractionDigits:1}) : '—';
+                renderSignal(d.signal || {}, d.current_price);
+                _updateStructureLines(d.signal || {});
+                _setHealth('realtime_state', true, '정상 수신', null);
+            })
+            .catch(function() {
+                _setHealth('realtime_state', false, '요청 실패', null);
+            });
+
+        if (window.ForwardTestDashboard && !window.__CVD_FWD_INITED) {
+            window.__CVD_FWD_INITED = true;
+            window.ForwardTestDashboard.init({
+                basePath: '/quant/eth_cvd_explosion',
+                symbolFn: function () { return SYMBOL; },
+                strategyTag: null,
+                statsElId: 'forward-stats',
+                tradesListElId: 'forward-trades-list',
+                tradesPagerElId: 'forward-trades-pagination',
+                pollMs: 30000,
+                onStatsFetch: function(ok) {
+                    _setHealth('forward_stats', !!ok, ok ? '정상 수신' : '요청 실패', null);
+                },
+                onTradesFetch: function(ok) {
+                    _setHealth('forward_trades', !!ok, ok ? '정상 수신' : '요청 실패', null);
+                },
+            });
+        }
+
+        // Position panel은 Binance 실포지션(execute/status) 기준으로 갱신한다.
+    }
+    window.loadOnce = loadOnce;
+
+    function renderSignal(sig, currentPrice) {
+        var signal = sig.signal || 'none';
+        var bull = sig.bull_score || 0;
+        var bear = sig.bear_score || 0;
+        var conf = sig.confidence != null ? Number(sig.confidence)
+            : (signal === 'long' ? bull : signal === 'short' ? bear : Math.max(bull, bear));
+
+        var badge = document.getElementById('sig-badge');
+        badge.textContent = signal === 'long' ? '📈 LONG' : signal === 'short' ? '📉 SHORT' : 'Idle';
+        badge.className = 'signal-badge ' + signal;
+
+        var pct = Math.min(100, (conf / 7) * 100);
+        document.getElementById('conf-text').textContent = conf + '/7';
+        document.getElementById('conf-fill').style.width = pct + '%';
+
+        document.getElementById('m-vr').textContent = sig.vol_ratio != null ? Number(sig.vol_ratio).toFixed(2) + 'x' : '—';
+        document.getElementById('m-acc').textContent = sig.cvd_accel != null ? sig.cvd_accel : '—';
+        var htf = sig.cvd_higher_tf || '';
+        document.getElementById('m-hi').textContent = (htf ? htf + ' ' : '') + (sig.cvd_higher != null ? sig.cvd_higher : '—');
+        // 진입 신호 있으면 실제 TP/SL, 대기 중이면 방향별 참조 레벨 표시
+        var dispTp, dispSl;
+        if (signal === 'long') {
+            dispTp = sig.tp; dispSl = sig.sl;
+        } else if (signal === 'short') {
+            dispTp = sig.tp; dispSl = sig.sl;
+        } else {
+            // 대기: bull/bear 점수로 우세 방향 판단 후 참조 레벨 표시
+            var dominant = (bull >= bear) ? 'long' : 'short';
+            dispTp = dominant === 'long' ? sig.ref_long_tp : sig.ref_short_tp;
+            dispSl = dominant === 'long' ? sig.ref_long_sl : sig.ref_short_sl;
+        }
+        var fmtLv = function(v) { return v != null ? Number(v).toLocaleString(undefined,{minimumFractionDigits:0}) : '—'; };
+        document.getElementById('m-tp').textContent = fmtLv(dispTp);
+        document.getElementById('m-sl').textContent = fmtLv(dispSl);
+
+        var reasons = sig.reasons || [];
+        var ul = document.getElementById('reasons-list');
+        ul.innerHTML = reasons.length
+            ? reasons.map(function(r) { return '<li>' + r + '</li>'; }).join('')
+            : '<li>—</li>';
+    }
+
+    if (window.CVD_EXPLOSION_MONITORING_START !== false) {
+        var tfSel = document.getElementById('chart-tf-sel');
+        if (tfSel) {
+            tfSel.addEventListener('change', function() {
+                CHART_TF = tfSel.value || '1h';
+                _loadChart();
+            });
+        }
+        _renderHealth();
+        toggleMonitor();
+    } else {
+        var tfSel2 = document.getElementById('chart-tf-sel');
+        if (tfSel2) {
+            tfSel2.addEventListener('change', function() {
+                CHART_TF = tfSel2.value || '1h';
+                _loadChart();
+            });
+        }
+        _renderHealth();
+        loadOnce();
+    }
+})();
+</script>
+</body>
+</html>

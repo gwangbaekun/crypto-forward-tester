@@ -1,0 +1,34 @@
+strategy_id: eth_cvd_explosion
+strategy_name: ETH CVD Explosion
+timeframes:
+  all:
+  - 1h
+  - 4h
+  entry_tf: 1h
+  higher_tf: 4h
+signal:
+  vol_avg_window: 20
+  vol_mult: 2.5
+  zone_gap: 3
+  cvd_accel_window: 3
+  cvd_higher_window: 10
+  confidence_threshold: 5
+tpsl:
+  mode: magnet_rr
+  rr_ratio: 1.5
+  risk_pct: 1.0
+  sl_max_pct: 1.0
+  sl_lift_mode: always
+  sl_lift_min_intensity: HIGH
+  sl_lift_rank_le: 2
+  slippage_pct: 0.05
+  m15_structure_stop_enabled: true
+  m15_structure_lookback_bars: 8
+  m15_structure_buffer_pct: 0.05
+  sl_ratchet_step: 1
+  sl_ratchet_buffer_pct: 0.0
+  initial_tp_pct: 0.0
+exit: {}
+engine:
+  entry_source:
+  - engine

@@ -39,3 +39,20 @@ cvd_explosion:
   tick:
     module: features.strategy.cvd_explosion.realtime_feed
     fn: get_state
+
+eth_cvd_explosion:
+  enabled: true
+  monitoring: true
+  tick_interval: 10
+  exit_tick_interval: 1.0
+  timeframes: ["15m", "1h", "4h"]
+  entry_tf: "1h"
+  higher_tf: "4h"
+  strategy_tag: eth_cvd_explosion
+  label: "ETH CVD Explosion"
+  emoji: "🔷"
+  telegram_alerts: true
+  binance_live: false
+  tick:
+    module: features.strategy.eth_cvd_explosion.realtime_feed
+    fn: get_state
