@@ -197,42 +197,38 @@ def make_router(strategy_key: str, default_tfs: str = "15m,1h,4h") -> APIRouter:
         except Exception as e:
             return JSONResponse({"error": str(e)}, status_code=500)
 
-    # ── Binance 조건부 ───────────────────────────────────────────────────────
+    # ── Binance execute/status — 항상 등록, 활성화 여부는 요청 시점에 확인 ────
 
-    try:
+    @router.get("/execute/status", response_class=JSONResponse)
+    async def execute_status(symbol: str = Query("BTCUSDT")):
+        """Binance 계좌 잔고 + 현재 포지션 + 거래소 현재가."""
         from features.strategy.common.config_loader import is_binance_live_enabled
-        _binance_live = is_binance_live_enabled(strategy_key)
-    except Exception:
-        _binance_live = False
-
-    if _binance_live:
-        @router.get("/execute/status", response_class=JSONResponse)
-        async def execute_status(symbol: str = Query("BTCUSDT")):
-            """Binance 계좌 잔고 + 현재 포지션 + 거래소 현재가."""
-            try:
-                import asyncio
-                from common.binance_executor import get_executor
-                ex = get_executor()
-                if not ex:
-                    return JSONResponse(
-                        {"error": "API 키 없음 — executor 비활성화"}, status_code=503
-                    )
-                balance, position, price = await asyncio.gather(
-                    ex.get_usdt_balance(),
-                    ex.get_position(symbol),
-                    ex.get_market_price(symbol),
-                    return_exceptions=True,
+        if not is_binance_live_enabled(strategy_key):
+            return JSONResponse({"enabled": False, "message": "binance_live 비활성화"})
+        try:
+            import asyncio
+            from common.binance_executor import get_executor
+            ex = get_executor()
+            if not ex:
+                return JSONResponse(
+                    {"error": "API 키 없음 — executor 비활성화"}, status_code=503
                 )
-                balance  = balance  if isinstance(balance, float) else 0.0
-                position = position if isinstance(position, dict)  else None
-                price    = price    if isinstance(price, float)    else 0.0
-                return JSONResponse({
-                    "testnet":          ex._testnet,
-                    "balance_usdt":     balance,
-                    "exchange_price":   price,
-                    "binance_position": position,
-                })
-            except Exception as e:
-                return JSONResponse({"error": str(e)}, status_code=500)
+            balance, position, price = await asyncio.gather(
+                ex.get_usdt_balance(),
+                ex.get_position(symbol),
+                ex.get_market_price(symbol),
+                return_exceptions=True,
+            )
+            balance  = balance  if isinstance(balance, float) else 0.0
+            position = position if isinstance(position, dict)  else None
+            price    = price    if isinstance(price, float)    else 0.0
+            return JSONResponse({
+                "testnet":          ex._testnet,
+                "balance_usdt":     balance,
+                "exchange_price":   price,
+                "binance_position": position,
+            })
+        except Exception as e:
+            return JSONResponse({"error": str(e)}, status_code=500)
 
     return router

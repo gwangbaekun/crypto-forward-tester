@@ -26,6 +26,7 @@ atr_breakout:
 cvd_explosion:
   enabled: true
   monitoring: true
+  symbol: "BTCUSDT"
   tick_interval: 10
   exit_tick_interval: 1.0
   timeframes: ["15m", "1h", "4h"]
@@ -35,7 +36,7 @@ cvd_explosion:
   label: "CVD Explosion"
   emoji: "💣"
   telegram_alerts: true
-  binance_live: false
+  binance_live: true
   binance_leverage: 5
   tick:
     module: features.strategy.cvd_explosion.realtime_feed
@@ -44,6 +45,7 @@ cvd_explosion:
 eth_cvd_explosion:
   enabled: true
   monitoring: true
+  symbol: "ETHUSDT"
   tick_interval: 10
   exit_tick_interval: 1.0
   timeframes: ["15m", "1h", "4h"]
@@ -53,7 +55,7 @@ eth_cvd_explosion:
   label: "ETH CVD Explosion"
   emoji: "🔷"
   telegram_alerts: true
-  binance_live: true
+  binance_live: false
   binance_leverage: 5
   tick:
     module: features.strategy.eth_cvd_explosion.realtime_feed

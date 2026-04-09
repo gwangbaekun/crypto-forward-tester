@@ -1,11 +1,22 @@
 # pyright: reportMissingImports=false
 import asyncio
+import logging
 from contextlib import asynccontextmanager
 from pathlib import Path
 
 import uvicorn
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
+
+# access log 에서 폴링성 엔드포인트 필터링 (Railway 로그 절약)
+_MUTE_PATHS = {"/health", "/execute/status"}
+
+class _AccessLogFilter(logging.Filter):
+    def filter(self, record: logging.LogRecord) -> bool:
+        msg = record.getMessage()
+        return not any(p in msg for p in _MUTE_PATHS)
+
+logging.getLogger("uvicorn.access").addFilter(_AccessLogFilter())
 
 from common.binance_price_ws import BinancePriceWS
 from common.liq_series_cache import refresh_loop

@@ -41,6 +41,7 @@ def _build_registry() -> Dict[str, Dict[str, Any]]:
             "kwargs":        tick.get("kwargs") or {},
             "tick_interval": int(cfg.get("tick_interval") or 60),
             "timeframes":    cfg.get("timeframes") or [],
+            "symbol":        cfg.get("symbol") or None,  # 전략별 심볼 (없으면 STRATEGY_SYMBOL 환경변수)
         }
     return registry
 
@@ -98,10 +99,13 @@ async def run_all_strategy_loops() -> None:
         print("[StrategyLoop] 등록된 전략 없음 — 루프 스킵")
         return
 
-    symbol = os.getenv("STRATEGY_SYMBOL", "BTCUSDT").strip().upper() or "BTCUSDT"
+    default_symbol = os.getenv("STRATEGY_SYMBOL", "BTCUSDT").strip().upper() or "BTCUSDT"
     await asyncio.sleep(10)  # 서버 완전 기동 대기
-    print(f"[StrategyLoop] 시작: {list(STRATEGY_REGISTRY.keys())} → symbol={symbol}")
+    print(f"[StrategyLoop] 시작: {list(STRATEGY_REGISTRY.keys())} → default_symbol={default_symbol}")
     await asyncio.gather(
-        *[_strategy_loop(name, cfg, symbol) for name, cfg in STRATEGY_REGISTRY.items()],
+        *[
+            _strategy_loop(name, cfg, cfg.get("symbol") or default_symbol)
+            for name, cfg in STRATEGY_REGISTRY.items()
+        ],
         return_exceptions=True,
     )
