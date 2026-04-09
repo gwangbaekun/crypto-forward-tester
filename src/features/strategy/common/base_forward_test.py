@@ -483,7 +483,7 @@ class BaseForwardTest(ABC):
                     unrealized_pct = (
                         (cur - entry) / entry * 100 if side == "long"
                         else (entry - cur) / entry * 100
-                    ) * self.LEVERAGE
+                    )
                     pos = dict(pos)
                     pos["unrealized_pnl_pct"] = round(unrealized_pct, 4)
                     pos["current_price"]      = cur

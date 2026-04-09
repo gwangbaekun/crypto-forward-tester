@@ -78,7 +78,6 @@
     var pollMs = opts.pollMs != null ? opts.pollMs : 30 * 1000;
     var tradesLimit = opts.tradesLimit != null ? opts.tradesLimit : 200;
 
-    var leverage = 1;
     var trades = [];
     var page = 1;
     var perPage = 10;
@@ -147,7 +146,6 @@
       var ev = d.edge_validation || {};
       var recent = d.recent_trades || [];
 
-      var effPnl = pnl * leverage;
       var html = "";
 
       if (halted) {
@@ -156,15 +154,8 @@
 
       html += "<div style='display:flex;gap:16px;align-items:center;margin-bottom:10px;flex-wrap:wrap;'>" +
         "<div>" +
-          "<div style='font-size:0.75rem;color:var(--text-secondary);display:flex;align-items:center;gap:6px;'>Cumulative PnL" +
-            "<select data-forward-leverage style='background:var(--card-bg);border:1px solid var(--border-color);color:var(--text-secondary);font-size:0.7rem;border-radius:4px;padding:1px 4px;'>" +
-              "<option value='1'" + (leverage === 1 ? " selected" : "") + ">1x</option>" +
-              "<option value='2'" + (leverage === 2 ? " selected" : "") + ">2x</option>" +
-              "<option value='3'" + (leverage === 3 ? " selected" : "") + ">3x</option>" +
-            "</select>" +
-          "</div>" +
-          "<div style='font-size:1.2rem;font-weight:bold;color:" + pnlColor(effPnl) + ";'>" + (effPnl >= 0 ? "+" : "") + effPnl.toFixed(4) + "%</div>" +
-          "<div style='font-size:0.7rem;color:var(--text-secondary);'>1x basis: " + (pnl >= 0 ? "+" : "") + pnl + "%</div>" +
+          "<div style='font-size:0.75rem;color:var(--text-secondary);'>Cumulative PnL</div>" +
+          "<div style='font-size:1.2rem;font-weight:bold;color:" + pnlColor(pnl) + ";'>" + (pnl >= 0 ? "+" : "") + pnl.toFixed(4) + "%</div>" +
         "</div>" +
         "<div><div style='font-size:0.75rem;color:var(--text-secondary);'>W / L / Total</div>" +
           "<div style='font-size:0.95rem;font-weight:bold;'><span style='color:var(--accent-green);'>" + win + "</span> / <span style='color:var(--accent-red);'>" + loss + "</span> / " + total + "</div></div>" +
@@ -237,15 +228,6 @@
 
       statsEl.innerHTML = html;
 
-      var sel = statsEl.querySelector("select[data-forward-leverage]");
-      if (sel) {
-        sel.addEventListener("change", function () {
-          var x = parseFloat(sel.value);
-          if (!x || x <= 0) x = 1;
-          leverage = x;
-          refreshStats();
-        });
-      }
     }
 
     function refreshStats() {
