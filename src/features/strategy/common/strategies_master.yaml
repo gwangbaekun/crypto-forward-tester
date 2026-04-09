@@ -35,7 +35,7 @@ cvd_explosion:
   label: "CVD Explosion"
   emoji: "💣"
   telegram_alerts: true
-  binance_live: true
+  binance_live: false
   binance_leverage: 5
   tick:
     module: features.strategy.cvd_explosion.realtime_feed
@@ -53,7 +53,7 @@ eth_cvd_explosion:
   label: "ETH CVD Explosion"
   emoji: "🔷"
   telegram_alerts: true
-  binance_live: false
+  binance_live: true
   binance_leverage: 5
   tick:
     module: features.strategy.eth_cvd_explosion.realtime_feed
