@@ -33,7 +33,7 @@ import httpx
 
 # ── 설정 ────────────────────────────────────────────────────────────────────
 
-LEVERAGE       = 1       # testnet 테스트용 1x
+LEVERAGE       = 1       # 안전한 fallback — strategies_master.yaml binance_leverage 로 오버라이드됨
 MARGIN_TYPE    = "ISOLATED"
 BALANCE_RATIO  = 0.95    # 잔고의 95% 사용 (수수료 버퍼)
 REQUEST_TIMEOUT = 10     # 초
@@ -161,11 +161,11 @@ class BinanceExecutor:
 
     # ── 레버리지 / 마진 타입 설정 ─────────────────────────────────────────
 
-    async def _ensure_leverage(self, symbol: str) -> None:
-        """레버리지 1x 강제 설정."""
+    async def _ensure_leverage(self, symbol: str, leverage: int = LEVERAGE) -> None:
+        """레버리지 설정."""
         try:
             await self._post("/fapi/v1/leverage", {
-                "symbol": symbol, "leverage": LEVERAGE,
+                "symbol": symbol, "leverage": leverage,
             })
         except Exception as e:
             print(f"[BinanceExecutor] leverage 설정 오류 (무시): {e}")
@@ -186,13 +186,16 @@ class BinanceExecutor:
         symbol: str,
         side: str,              # "long" | "short"
         current_price: float = 0,
+        leverage: Optional[int] = None,
     ) -> Optional[Dict]:
         """
         시장가 진입.
         side="long" → BUY / side="short" → SELL
-        수량 = 가용잔고 × BALANCE_RATIO / 거래소_현재가 (1x 레버리지)
+        수량 = 가용잔고 × BALANCE_RATIO × leverage / 거래소_현재가
+        leverage: None이면 LEVERAGE 상수 사용. strategies_master.yaml binance_leverage 로 주입.
         current_price는 무시 — 항상 거래소(testnet/live) 가격을 직접 조회해 사용.
         """
+        lev = int(leverage) if leverage is not None else LEVERAGE
         if not self._key or not self._secret:
             print("[BinanceExecutor] API 키 없음 — 주문 건너뜀")
             return None
@@ -209,7 +212,7 @@ class BinanceExecutor:
             return None
 
         await self._ensure_margin_type(symbol)
-        await self._ensure_leverage(symbol)
+        await self._ensure_leverage(symbol, lev)
 
         # 거래소(testnet/live) 실제 가격으로 수량 계산 (mainnet WS 가격과 다를 수 있음)
         exchange_price = await self.get_market_price(symbol)
@@ -218,8 +221,8 @@ class BinanceExecutor:
             return None
 
         step = await self.get_step_size(symbol)
-        margin   = balance * BALANCE_RATIO          # 증거금으로 사용할 금액
-        notional = margin * LEVERAGE                # 레버리지 적용 명목가치
+        margin   = balance * BALANCE_RATIO  # 증거금으로 사용할 금액
+        notional = margin * lev             # 레버리지 적용 명목가치
         raw_qty  = notional / exchange_price
         qty      = self._round_qty(raw_qty, step)
 
@@ -236,7 +239,7 @@ class BinanceExecutor:
         }
 
         mode = "TESTNET" if self._testnet else "LIVE"
-        print(f"[BinanceExecutor] 📌 {order_side} {qty} {symbol} @ MARKET ({mode}, price={exchange_price:,.2f}, balance={balance:.2f} USDT, 1x)")
+        print(f"[BinanceExecutor] 📌 {order_side} {qty} {symbol} @ MARKET ({mode}, price={exchange_price:,.2f}, balance={balance:.2f} USDT, {lev}x)")
         try:
             result = await self._post("/fapi/v1/order", params)
             fill_price = float(result.get("avgPrice") or current_price)

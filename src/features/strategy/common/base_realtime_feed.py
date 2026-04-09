@@ -277,7 +277,8 @@ async def _execute_verify_notify(
     print(f"[{strategy_key}] events: {[e.get('event') for e in events]}")
 
     executor = None
-    from features.strategy.common.config_loader import is_binance_live_enabled
+    from features.strategy.common.config_loader import is_binance_live_enabled, get_master_config
+    _binance_leverage = int((get_master_config() or {}).get(strategy_key, {}).get("binance_leverage") or 1)
     if is_binance_live_enabled(strategy_key):
         try:
             from common.binance_executor import get_executor
@@ -297,7 +298,7 @@ async def _execute_verify_notify(
             print(f"[{strategy_key}] 진입 — side={side} tp={tp} sl={sl}")
             if executor and side and current_price:
                 try:
-                    result     = await executor.open_position(symbol, side, current_price)
+                    result     = await executor.open_position(symbol, side, current_price, leverage=_binance_leverage)
                     fill_price = float((result or {}).get("avgPrice") or 0)
                     sync_info["entry"] = fill_price > 0
                     if fill_price > 0:

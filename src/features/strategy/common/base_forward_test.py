@@ -60,9 +60,18 @@ class BaseForwardTest(ABC):
     """
 
     STRATEGY_TAG: str = ""   # 서브클래스에서 반드시 선언
-    LEVERAGE:     float = 1.0  # 레버리지 (equity ROI 계산용). Binance live 전략에서 오버라이드.
+    LEVERAGE:     float = 1.0  # 기본값. strategies_master.yaml binance_leverage 로 런타임 오버라이드.
 
     def __init__(self) -> None:
+        # strategies_master.yaml 의 binance_leverage 를 우선 적용
+        try:
+            from features.strategy.common.config_loader import get_master_config
+            _lev = (get_master_config() or {}).get(self.STRATEGY_TAG, {}).get("binance_leverage")
+            if _lev is not None:
+                self.LEVERAGE = float(_lev)
+        except Exception:
+            pass
+
         self._position: Optional[Dict[str, Any]] = None
         self._closed_trades: List[Dict[str, Any]] = []
         try:
