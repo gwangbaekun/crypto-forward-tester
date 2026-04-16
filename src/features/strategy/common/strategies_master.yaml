@@ -43,8 +43,8 @@ cvd_explosion:
     fn: get_state
 
 eth_cvd_explosion:
-  enabled: true
-  monitoring: true
+  enabled: false
+  monitoring: false
   symbol: "ETHUSDT"
   tick_interval: 10
   exit_tick_interval: 1.0
