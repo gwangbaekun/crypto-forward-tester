@@ -99,6 +99,15 @@ def is_binance_live_enabled(strategy_id: str) -> bool:
     return isinstance(strat, dict) and bool(strat.get("binance_live", False))
 
 
+def is_ctrader_live_enabled(strategy_id: str) -> bool:
+    """
+    해당 전략이 cTrader(FTMO) 실주문 대상인지 여부.
+    strategies_master.yaml 에서 ctrader_live: true 인 전략만 활성.
+    """
+    strat = get_master_config().get(strategy_id)
+    return isinstance(strat, dict) and bool(strat.get("ctrader_live", False))
+
+
 def is_telegram_alerts_enabled(strategy_id: str) -> bool:
     """
     진입/청산 Telegram 알림 여부.

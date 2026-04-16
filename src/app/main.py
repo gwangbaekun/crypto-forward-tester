@@ -21,6 +21,7 @@ logging.getLogger("uvicorn.access").addFilter(_AccessLogFilter())
 from common.binance_price_ws import BinancePriceWS
 from common.liq_series_cache import refresh_loop
 from db.session import init_db
+from features.ctrader.router import router as ctrader_auth_router
 from features.home.router import router as home_router
 from features.strategy.router_registry import include_strategy_routers
 from features.strategy.router import router as strategy_router
@@ -66,6 +67,7 @@ async def health() -> dict:
 
 
 app.include_router(home_router)
+app.include_router(ctrader_auth_router)
 app.include_router(strategy_router)
 include_strategy_routers(app)  # strategies_master.yaml 기반 자동 등록
 

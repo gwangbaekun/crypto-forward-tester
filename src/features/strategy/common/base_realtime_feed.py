@@ -277,7 +277,11 @@ async def _execute_verify_notify(
     print(f"[{strategy_key}] events: {[e.get('event') for e in events]}")
 
     executor = None
-    from features.strategy.common.config_loader import is_binance_live_enabled, get_master_config
+    from features.strategy.common.config_loader import (
+        is_binance_live_enabled,
+        is_ctrader_live_enabled,
+        get_master_config,
+    )
     _binance_leverage = int((get_master_config() or {}).get(strategy_key, {}).get("binance_leverage") or 1)
     if is_binance_live_enabled(strategy_key):
         try:
@@ -285,6 +289,12 @@ async def _execute_verify_notify(
             executor = get_executor()
         except Exception as e:
             print(f"[{strategy_key}] executor 없음: {e}")
+    elif is_ctrader_live_enabled(strategy_key):
+        try:
+            from common.ctrader_executor import get_executor
+            executor = get_executor()
+        except Exception as e:
+            print(f"[{strategy_key}] cTrader executor 없음: {e}")
 
     sync_info: Dict[str, Optional[bool]] = {}
 
