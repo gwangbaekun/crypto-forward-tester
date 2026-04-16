@@ -18,6 +18,25 @@ from features.strategy.common.base_forward_test import (
 )
 
 from .exit_check import check_exit
+from .tpsl_resolve import next_magnet_strictly_above, next_magnet_strictly_below
+
+
+def _init_tp_levels(tp: float, level_map: list, side: str) -> list:
+    """진입 시 tp_levels를 backtest bar 단위와 동일하게 초기화.
+
+    backtest는 bar high/low 범위로 while 루프가 여러 번 돌기 때문에
+    첫 advance 시 tp_levels 길이가 2 이상이 되어 SL이 entry_price 대신 tp1으로 래칫됨.
+    forwardtest는 tick당 1회 advance라 tp_levels=[tp1]만 있으면 target_idx<0 → SL=entry_price.
+    진입 시점에 다음 magnet을 미리 채워서 동일 동작을 보장한다.
+    """
+    levels = [tp]
+    if side == "long":
+        nxt = next_magnet_strictly_above(level_map, tp)
+    else:
+        nxt = next_magnet_strictly_below(level_map, tp)
+    if nxt is not None:
+        levels.append(round(float(nxt), 2))
+    return levels
 
 
 class EthCvdExplosionForwardTest(BaseForwardTest):
@@ -91,7 +110,7 @@ class EthCvdExplosionForwardTest(BaseForwardTest):
                     "confidence":     sig.get("confidence", 0),
                     "tp":             tp,
                     "sl":             sl,
-                    "tp_levels":      [tp],
+                    "tp_levels":      _init_tp_levels(tp, list(sig.get("level_map") or []), direction),
                     "sl_levels":      [sl],
                     "entry_state":    str(sig.get("reasons", [])),
                     "level_map":      list(sig.get("level_map") or []),

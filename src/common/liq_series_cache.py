@@ -311,10 +311,26 @@ async def build_payload_for_symbol(symbol: str) -> Dict[str, Any]:
             },
         }
 
-    window_slice = bars_all[-LIQ_WINDOW :] if len(bars_all) >= LIQ_WINDOW else bars_all
-    last_close = float(window_slice[-1]["close"])
-    liq = build_oi_liq_map(window_slice, current_price=last_close, min_bars=LIQ_MIN_BARS)
-    direction = compute_direction(liq.get("long_liq_zones", []), liq.get("short_liq_zones", []))
+    last_close = float(bars_all[-1]["close"])
+
+    # 3d/2w/1m 3개 윈도우로 각각 liq map 계산 (backtest 프리셋 방식과 동일)
+    # 1h 봉 기준: 3d=72봉, 2w=336봉, 1m=720봉
+    _WINDOW_BARS = {"3d": 72, "2w": 336, "1m": 720}
+    liq_windows: Dict[str, Any] = {}
+    for wkey, wsize in _WINDOW_BARS.items():
+        wslice = bars_all[-wsize:] if len(bars_all) >= wsize else bars_all
+        if len(wslice) < LIQ_MIN_BARS:
+            continue
+        liq_windows[wkey] = build_oi_liq_map(wslice, current_price=last_close, min_bars=LIQ_MIN_BARS)
+
+    # backward-compat: 단일 map 은 1m 윈도우 기준 (없으면 가장 긴 것)
+    liq_single = (
+        liq_windows.get("1m")
+        or liq_windows.get("2w")
+        or liq_windows.get("3d")
+        or {}
+    )
+    direction = compute_direction(liq_single.get("long_liq_zones", []), liq_single.get("short_liq_zones", []))
 
     t_ms = [b["time"] for b in bars_all]
     chart = {
@@ -340,8 +356,9 @@ async def build_payload_for_symbol(symbol: str) -> Dict[str, Any]:
         "meta": meta,
         "chart": chart,
         "liq_latest": {
-            "map": liq,
+            "map": liq_single,        # backward-compat 단일 스냅샷
             "direction": direction,
+            "windows": liq_windows,   # 3d/2w/1m 개별 liq map
         },
     }
 

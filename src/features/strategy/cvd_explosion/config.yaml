@@ -2,19 +2,20 @@ strategy_id: cvd_explosion
 strategy_name: CVD Explosion
 timeframes:
   all:
+  - 15m
   - 1h
-  - 4h
-  entry_tf: 1h
-  higher_tf: 4h
+  entry_tf: 15m
+  higher_tf: 1h
 signal:
   vol_avg_window: 20
-  vol_mult: 2.5
+  vol_mult: 4.0
   zone_gap: 3
   cvd_accel_window: 3
   cvd_higher_window: 10
-  confidence_threshold: 5
+  confidence_threshold: 4
+  higher_tf_veto: true
   scoring:
-    explosion: 3
+    explosion: 2
     solo: 1
     cvd_accel: 2
     cvd_higher: 1
@@ -22,10 +23,13 @@ tpsl:
   mode: magnet_rr
   rr_ratio: 1.5
   risk_pct: 1.0
-  sl_max_pct: 1.0
+  sl_max_pct: 0.9
   sl_lift_mode: always
   sl_lift_min_intensity: HIGH
   sl_lift_rank_le: 2
+  m15_structure_stop_enabled: false
+  sl_ratchet_step: 3
+  sl_ratchet_mode: tp_level
 exit: {}
 engine:
   entry_source:

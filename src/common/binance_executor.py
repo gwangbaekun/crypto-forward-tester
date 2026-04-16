@@ -242,7 +242,11 @@ class BinanceExecutor:
         print(f"[BinanceExecutor] 📌 {order_side} {qty} {symbol} @ MARKET ({mode}, price={exchange_price:,.2f}, balance={balance:.2f} USDT, {lev}x)")
         try:
             result = await self._post("/fapi/v1/order", params)
-            fill_price = float(result.get("avgPrice") or current_price)
+            # Binance Futures Testnet은 마켓 주문 응답에서 avgPrice="0" 반환하는 경우가 있음.
+            # exchange_price(주문 직전 조회한 가격)로 정규화해서 caller가 올바른 체결가를 쓸 수 있게 함.
+            if float(result.get("avgPrice") or 0) <= 0:
+                result["avgPrice"] = str(exchange_price)
+            fill_price = float(result.get("avgPrice", exchange_price))
             print(f"[BinanceExecutor] ✅ 체결: {order_side} {qty} @ ${fill_price:,.2f}")
             return result
         except httpx.HTTPStatusError as e:
@@ -372,6 +376,11 @@ class BinanceExecutor:
             print(f"[BinanceExecutor] 🔔 청산 {close_side} {qty} {symbol} @ MARKET (reduceOnly) 시도 {attempt}/{max_attempts}")
             try:
                 result = await self._post("/fapi/v1/order", params)
+                # Testnet avgPrice="0" 대비: 현재 마크 가격으로 정규화
+                if float(result.get("avgPrice") or 0) <= 0:
+                    mark_price = await self.get_market_price(symbol)
+                    if mark_price > 0:
+                        result["avgPrice"] = str(mark_price)
                 fill_price = float(result.get("avgPrice") or 0)
                 print(f"[BinanceExecutor] ✅ 청산 체결 @ ${fill_price:,.2f}")
                 await self._cancel_open_orders(symbol)

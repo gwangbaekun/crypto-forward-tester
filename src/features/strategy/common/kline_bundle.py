@@ -50,17 +50,50 @@ def _zones_to_level_map(liq_map: Dict) -> List[Dict]:
     return out
 
 
+def _merge_level_maps(level_maps: List[List[Dict]]) -> List[Dict]:
+    """
+    가격 기준 중복 제거 (oi_weight 큰 항목 우선).
+    backtest/src/strategies/cvd_explosion/engine.py 의 _merge_level_maps 와 동일 로직.
+    """
+    merged: Dict[float, Dict] = {}
+    for levels in level_maps:
+        for lvl in levels:
+            try:
+                p = round(float(lvl.get("price") or 0), 1)
+            except (TypeError, ValueError):
+                continue
+            if p <= 0:
+                continue
+            cur = merged.get(p)
+            try:
+                oi_new = float(lvl.get("oi_weight") or 0)
+                oi_cur = float((cur or {}).get("oi_weight") or 0)
+            except (TypeError, ValueError):
+                oi_new = oi_cur = 0.0
+            if cur is None or oi_new > oi_cur:
+                merged[p] = dict(lvl)
+    out = list(merged.values())
+    out.sort(key=lambda x: float(x.get("price") or 0))
+    return out
+
+
 async def _fetch_liq_level_map(symbol: str) -> List[Dict]:
     """
-    liq_series_cache 에서 현재 level_map 조회.
-    캐시 히트 시 즉시 반환, cold start 시 Binance REST on-demand fetch.
+    liq_series_cache 에서 3d/2w/1m 윈도우 level_map 을 병합 반환.
+    백테스트 _load_liq_ts_map_from_presets 와 동일 방식.
     실패 시 빈 리스트 반환 (magnets={} 로 graceful fallback).
     """
     try:
         payload = await get_chart_payload_or_fetch(symbol)
         if not payload or payload.get("error"):
             return []
-        liq_map = (payload.get("liq_latest") or {}).get("map") or {}
+        liq_latest = payload.get("liq_latest") or {}
+        windows = liq_latest.get("windows") or {}
+        if windows:
+            maps = [_zones_to_level_map(windows[k]) for k in ("3d", "2w", "1m") if k in windows]
+            return _merge_level_maps(maps)
+        # fallback: 구버전 캐시(단일 맵)
+        liq_map = liq_latest.get("map") or {}
         return _zones_to_level_map(liq_map)
     except Exception as exc:
         print(f"[kline_bundle] liq fetch 실패 ({symbol}): {exc}")
