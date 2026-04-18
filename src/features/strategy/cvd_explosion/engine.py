@@ -22,21 +22,8 @@ from .tpsl_resolve import next_magnet_strictly_above, next_magnet_strictly_below
 
 
 def _init_tp_levels(tp: float, level_map: list, side: str) -> list:
-    """진입 시 tp_levels를 backtest bar 단위와 동일하게 초기화.
-
-    backtest는 bar high/low 범위로 while 루프가 여러 번 돌기 때문에
-    첫 advance 시 tp_levels 길이가 2 이상이 되어 SL이 entry_price 대신 tp1으로 래칫됨.
-    forwardtest는 tick당 1회 advance라 tp_levels=[tp1]만 있으면 target_idx<0 → SL=entry_price.
-    진입 시점에 다음 magnet을 미리 채워서 동일 동작을 보장한다.
-    """
-    levels = [tp]
-    if side == "long":
-        nxt = next_magnet_strictly_above(level_map, tp)
-    else:
-        nxt = next_magnet_strictly_below(level_map, tp)
-    if nxt is not None:
-        levels.append(round(float(nxt), 2))
-    return levels
+    """backtest_runner 와 동일하게 tp_levels=[tp] 로 초기화."""
+    return [tp]
 
 
 class CvdExplosionForwardTest(BaseForwardTest):
@@ -140,6 +127,8 @@ class CvdExplosionForwardTest(BaseForwardTest):
                     "tp_advances",
                     "sl_ratchet_step",
                     "sl_ratchet_buffer_pct",
+                    "sl_ratchet_mode",
+                    "sl_ratchet_mid_ratio",
                     "slippage_pct",
                     "m15_structure_stop_enabled",
                     "m15_structure_lookback_bars",

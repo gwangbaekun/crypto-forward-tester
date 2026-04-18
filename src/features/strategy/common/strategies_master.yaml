@@ -30,7 +30,7 @@ cvd_explosion:
   tick_interval: 10
   exit_tick_interval: 1.0
   timeframes: ["15m", "1h", "4h"]
-  entry_tf: "1h"
+  entry_tf: "15m"
   higher_tf: "4h"
   strategy_tag: cvd_explosion
   label: "CVD Explosion"

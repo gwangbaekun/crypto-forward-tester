@@ -9,9 +9,10 @@ CVD Explosion — TP/SL 해석기 (모드별로 분기, 이후 모드 추가 시
 
 모드
 ----
-- magnet     : TP/SL 모두 liq nearest (+ 선택 sl_max_pct)
-- magnet_rr  : 진입 TP/SL 은 magnet 과 동일. 청산만 engine 에서 TP advance (다음 마그넷으로 TP만 이동, SL 고정).
-- fixed_rr   : TP/SL 모두 진입가 기준 고정 %
+- magnet        : TP/SL 모두 liq nearest (+ 선택 sl_max_pct)
+- magnet_rr     : 진입 TP/SL 은 magnet 과 동일. 청산만 engine 에서 TP advance (다음 마그넷으로 TP만 이동, SL 고정).
+- magnet_tp_rr  : TP = 가장 가까운 마그넷, SL = TP 거리 ÷ rr_ratio 로 역산 (RR 보장).
+- fixed_rr      : TP/SL 모두 진입가 기준 고정 %
 """
 from __future__ import annotations
 
@@ -19,6 +20,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 MODE_MAGNET = "magnet"
 MODE_MAGNET_RR = "magnet_rr"
+MODE_MAGNET_TP_RR = "magnet_tp_rr"
 MODE_FIXED_RR = "fixed_rr"
 
 
@@ -30,6 +32,17 @@ def _f(v: Any) -> float:
         return x if x == x else 0.0
     except (TypeError, ValueError):
         return 0.0
+
+
+def _positive_float(params: Dict[str, Any], key: str) -> Optional[float]:
+    raw = params.get(key)
+    if raw is None or raw == "":
+        return None
+    try:
+        val = float(raw)
+    except (TypeError, ValueError):
+        return None
+    return val if val > 0 else None
 
 
 def _nearest_magnet_above(level_map: List[Dict], price: float) -> Optional[float]:
@@ -101,12 +114,36 @@ def _resolve_magnet_rr(
     return _resolve_magnet(side, entry, level_map, params)
 
 
+def _resolve_magnet_tp_rr(
+    side: str, entry: float, level_map: List[Dict], params: Dict[str, Any]
+) -> Tuple[Optional[float], Optional[float]]:
+    """TP = 가장 가까운 마그넷, SL = TP 거리 ÷ rr_ratio 역산 → RR 보장."""
+    if not level_map:
+        return None, None
+    if side == "long":
+        tp = _nearest_magnet_above(level_map, entry)
+    else:
+        tp = _nearest_magnet_below(level_map, entry)
+    if tp is None:
+        return None, None
+
+    rr = _positive_float(params, "rr_ratio")
+    if rr is None:
+        return None, None
+
+    tp_dist = abs(float(tp) - entry)
+    sl_dist = tp_dist / rr
+    sl = (entry - sl_dist) if side == "long" else (entry + sl_dist)
+
+    return round(float(tp), 2), round(sl, 2)
+
+
 def _resolve_fixed_rr(
     side: str, entry: float, _level_map: List[Dict], params: Dict[str, Any]
 ) -> Tuple[Optional[float], Optional[float]]:
-    rr = float(params.get("rr_ratio") or 1.5)
-    risk_pct = float(params.get("risk_pct") or 1.0)
-    if entry <= 0 or rr <= 0 or risk_pct <= 0:
+    rr = _positive_float(params, "rr_ratio")
+    risk_pct = _positive_float(params, "risk_pct")
+    if entry <= 0 or rr is None or risk_pct is None:
         return None, None
     risk = entry * (risk_pct / 100.0)
     reward = risk * rr
@@ -134,6 +171,8 @@ def resolve_tpsl(
         return _resolve_fixed_rr(side, entry, level_map, params)
     if mode == MODE_MAGNET_RR:
         return _resolve_magnet_rr(side, entry, level_map, params)
+    if mode == MODE_MAGNET_TP_RR:
+        return _resolve_magnet_tp_rr(side, entry, level_map, params)
     return _resolve_magnet(side, entry, level_map, params)
 
 

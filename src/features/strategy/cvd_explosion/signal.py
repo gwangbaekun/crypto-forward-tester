@@ -24,7 +24,7 @@ from __future__ import annotations
 from typing import Any, Dict, List, Optional
 
 from .config_loader import get_signal_params_for_tf, get_timeframes, get_tpsl_params
-from .tpsl_resolve import MODE_MAGNET_RR, resolve_tpsl, tpsl_mode_label
+from .tpsl_resolve import MODE_MAGNET_RR, MODE_MAGNET_TP_RR, resolve_tpsl, tpsl_mode_label
 
 
 # ── 공통 헬퍼 ─────────────────────────────────────────────────────────────────
@@ -265,8 +265,6 @@ def compute_signal(
 
     max_score = sc_exp + sc_solo + sc_cvd + sc_cvd_hi
 
-    candle_time = int(bars_entry[-1].get("time", 0)) if bars_entry else 0
-
     # ── 공통 debug 필드 ───────────────────────────────────────────────────
     common = {
         "bull_score":    bull,
@@ -285,7 +283,6 @@ def compute_signal(
         "reasons":       reasons,
         "m15_support":   m15_support,
         "m15_resistance": m15_resistance,
-        "candle_time":   candle_time,
     }
 
     # ── 진입 판단 ─────────────────────────────────────────────────────────
@@ -334,11 +331,19 @@ def _position_meta_for_entry(tpsl_params: Dict[str, Any]) -> Dict[str, Any]:
     mode = tpsl_mode_label(tpsl_params)
     meta: Dict[str, Any] = {"tpsl_mode": mode}
     meta["slippage_pct"] = float(tpsl_params.get("slippage_pct") or 0.0)
-    if mode == MODE_MAGNET_RR:
+    if mode in (MODE_MAGNET_RR, MODE_MAGNET_TP_RR):
         meta["tp_advances"] = 0
+        rr_raw = tpsl_params.get("rr_ratio")
+        try:
+            rr_val = float(rr_raw)
+        except (TypeError, ValueError):
+            rr_val = 0.0
+        meta["rr_ratio"] = rr_val if rr_val > 0 else 0.0
         meta["sl_ratchet_step"]           = int(tpsl_params.get("sl_ratchet_step", 1))
         meta["sl_ratchet_buffer_pct"]     = float(tpsl_params.get("sl_ratchet_buffer_pct") or 0.0)
-    meta["m15_structure_stop_enabled"] = bool(tpsl_params.get("m15_structure_stop_enabled", True))
+        meta["sl_ratchet_mode"]           = str(tpsl_params.get("sl_ratchet_mode") or "tp_sl_mid")
+        meta["sl_ratchet_mid_ratio"]      = float(tpsl_params.get("sl_ratchet_mid_ratio") or 0.5)
+    meta["m15_structure_stop_enabled"] = bool(tpsl_params.get("m15_structure_stop_enabled", False))
     meta["m15_structure_lookback_bars"] = int(tpsl_params.get("m15_structure_lookback_bars", 8))
     meta["m15_structure_buffer_pct"] = float(tpsl_params.get("m15_structure_buffer_pct") or 0.05)
     return meta

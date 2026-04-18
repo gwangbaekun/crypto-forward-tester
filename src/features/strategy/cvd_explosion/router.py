@@ -4,17 +4,17 @@ from fastapi.responses import JSONResponse
 
 from features.strategy.common.router_factory import make_router
 
-router = make_router("cvd_explosion", default_tfs="15m,1h,4h")
+router = make_router("cvd_explosion", default_tfs="15m,4h")
 
 
 @router.get("/chart_data", response_class=JSONResponse)
 async def chart_data(
     symbol: str = Query("BTCUSDT"),
     limit: int = Query(120),
-    tf: str = Query("1h"),
+    tf: str = Query("15m"),
 ):
     """
-    선택 TF(기본 1h) 캔들 + vol_ratio + cvd_delta 반환 (차트 표시용).
+    선택 TF(기본 15m) 캔들 + vol_ratio + cvd_delta 반환 (차트 표시용).
 
     vol_ratio = 현재봉 볼륨 / 직전 vol_avg_window봉 평균볼륨 (signal.py 와 동일 로직).
     """
@@ -22,9 +22,9 @@ async def chart_data(
 
     from .config_loader import get_signal_params_for_tf
 
-    tf_norm = (tf or "1h").strip().lower()
-    if tf_norm not in {"15m", "1h", "4h"}:
-        tf_norm = "1h"
+    tf_norm = (tf or "15m").strip().lower()
+    if tf_norm not in {"15m", "4h"}:
+        tf_norm = "15m"
 
     params = get_signal_params_for_tf(tf_norm)
     vol_avg_window = int(params.get("vol_avg_window", 20))

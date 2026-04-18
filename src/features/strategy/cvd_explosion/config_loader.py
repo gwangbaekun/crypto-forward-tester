@@ -42,7 +42,7 @@ def get_timeframes() -> Dict[str, Any]:
     all_tfs = set(tf.get("all") or ["1h", "4h"])
     if bool(tp.get("m15_structure_stop_enabled", True)):
         all_tfs.add("15m")
-    
+
     return {
         "all":       sorted(list(all_tfs)),
         "entry_tf":  str(tf.get("entry_tf") or "1h"),
@@ -109,6 +109,11 @@ def get_tpsl_params() -> Dict[str, Any]:
     except (TypeError, ValueError):
         risk_pct = 1.0
 
+    try:
+        slippage_pct = float(tp.get("slippage_pct") or 0.0)
+    except (TypeError, ValueError):
+        slippage_pct = 0.0
+
     sl_lift_mode = str(tp.get("sl_lift_mode") or "always").strip().lower()
     if sl_lift_mode not in _VALID_SL_LIFT_MODES:
         sl_lift_mode = "always"
@@ -137,6 +142,11 @@ def get_tpsl_params() -> Dict[str, Any]:
         sl_ratchet_step = 1
     sl_ratchet_mode = str(tp.get("sl_ratchet_mode") or "tp_level").strip().lower()
     try:
+        sl_ratchet_mid_ratio = float(tp.get("sl_ratchet_mid_ratio") or 0.5)
+    except (TypeError, ValueError):
+        sl_ratchet_mid_ratio = 0.5
+    sl_ratchet_mid_ratio = max(0.0, min(sl_ratchet_mid_ratio, 1.0))
+    try:
         m15_structure_lookback_bars = int(tp.get("m15_structure_lookback_bars", 8))
     except (TypeError, ValueError):
         m15_structure_lookback_bars = 8
@@ -151,6 +161,7 @@ def get_tpsl_params() -> Dict[str, Any]:
         "rr_ratio":               rr_ratio,
         "risk_pct":               risk_pct,
         "sl_max_pct":             sl_max,
+        "slippage_pct":           slippage_pct,
         "sl_lift_mode":           sl_lift_mode,
         "sl_lift_min_intensity":  sl_lift_min_intensity,
         "sl_lift_rank_le":        sl_lift_rank_le,
@@ -158,6 +169,7 @@ def get_tpsl_params() -> Dict[str, Any]:
         "sl_ratchet_buffer_pct":  sl_ratchet_buffer_pct,
         "sl_ratchet_step":        sl_ratchet_step,
         "sl_ratchet_mode":        sl_ratchet_mode,
+        "sl_ratchet_mid_ratio":   sl_ratchet_mid_ratio,
         "m15_structure_stop_enabled": m15_structure_stop_enabled,
         "m15_structure_lookback_bars": max(2, m15_structure_lookback_bars),
         "m15_structure_buffer_pct": max(0.0, m15_structure_buffer_pct),
