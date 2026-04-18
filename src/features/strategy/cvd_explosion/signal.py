@@ -188,11 +188,11 @@ def compute_signal(
     cvd_higher_w = int(ph["cvd_higher_window"])
     conf_thr     = int(pe["confidence_threshold"])
 
-    # 채점 가중치 (signal_overrides 로 조정 가능)
-    sc_exp    = int(_sig_ov.get("score_explosion",  3))
-    sc_solo   = int(_sig_ov.get("score_solo",       1))
-    sc_cvd    = int(_sig_ov.get("score_cvd_accel",  2))
-    sc_cvd_hi = int(_sig_ov.get("score_cvd_higher", 1))
+    # 채점 가중치 (signal_overrides 우선, 없으면 config.yaml 값)
+    sc_exp    = int(_sig_ov.get("score_explosion",  pe.get("score_explosion",  3)))
+    sc_solo   = int(_sig_ov.get("score_solo",       pe.get("score_solo",       1)))
+    sc_cvd    = int(_sig_ov.get("score_cvd_accel",  pe.get("score_cvd_accel",  2)))
+    sc_cvd_hi = int(_sig_ov.get("score_cvd_higher", pe.get("score_cvd_higher", 1)))
 
     bars_entry  = _bars_from_sweep(sweep_by_tf.get(entry_key)  or {})
     bars_higher = _bars_from_sweep(sweep_by_tf.get(higher_key) or {})

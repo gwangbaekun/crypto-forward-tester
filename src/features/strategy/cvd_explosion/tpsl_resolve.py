@@ -135,6 +135,7 @@ def _resolve_magnet_tp_rr(
     sl_dist = tp_dist / rr
     sl = (entry - sl_dist) if side == "long" else (entry + sl_dist)
 
+    # magnet_tp_rr: RR 보장이 목적이므로 sl_max_pct clamp 없이 rr_ratio만으로 SL 결정
     return round(float(tp), 2), round(sl, 2)
 
 

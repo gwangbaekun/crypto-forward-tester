@@ -75,12 +75,12 @@ def _check_exit_simple(
     bl   = bar_low  if bar_low  else current_price
 
     if side == "long":
-        if tp and bh >= tp:                   
+        if tp and bh >= tp:                     # TP 우선
             return (tp, "closed_tp1", None)
         if sl and bl <= sl:
             return (sl, _sl_reason(position, sl), None)
     elif side == "short":
-        if tp and bl <= tp:                   
+        if tp and bl <= tp:                     # TP 우선
             return (tp, "closed_tp1", None)
         if sl and bh >= sl:
             return (sl, _sl_reason(position, sl), None)

@@ -50,6 +50,7 @@
                     <option value="1h">1h</option>
                     <option value="15m">15m</option>
                 </select>
+                <button id="btn-liq-toggle" onclick="toggleLiqLines()" style="font-size:0.72rem;padding:3px 9px;background:#1a1a3a;border:1px solid #555;color:#ccc;border-radius:4px;cursor:pointer;">Liq: ON</button>
                 <button id="chart-toggle-btn" onclick="toggleChart()" style="font-size:0.72rem;padding:3px 9px;">Collapse</button>
             </div>
         </div>
@@ -57,7 +58,13 @@
             <div id="price-chart" style="height:312px;border-radius:6px;overflow:hidden;"></div>
             <div style="display:flex;justify-content:space-between;padding:3px 2px 0;font-size:0.68rem;color:var(--text-secondary);">
                 <span>▲▼ = explosion bars (≥ <span id="chart-vol-mult">2.5</span>x)</span>
-                <span>Vol ratio — red: explosion / gray: normal / orange line: threshold</span>
+                <span>Vol ratio — red: explosion / gray: normal / orange: threshold</span>
+            </div>
+            <div style="padding:2px 2px 0;font-size:0.67rem;color:var(--text-secondary);">
+                Liq magnet —
+                <span style="color:#ff7043;">━ 3d</span> &nbsp;
+                <span style="color:#ffd740;">━ 2w</span> &nbsp;
+                <span style="color:#42a5f5;">━ 1m</span>
             </div>
         </div>
     </div>
@@ -252,6 +259,60 @@
     var _chartTimes = [];
     var _chartOpen = true;
 
+    // liq magnet price lines
+    var _liqLines = [];
+    var _liqLevelsCache = { "3d": [], "2w": [], "1m": [] };
+    var LIQ_WIN_COLORS = { "3d": "#ff7043", "2w": "#ffd740", "1m": "#42a5f5" };
+    var _liqVisible = true;
+
+    function _clearLiqLines() {
+        _liqLines.forEach(function(pl) { try { _candleSeries.removePriceLine(pl); } catch(e) {} });
+        _liqLines = [];
+    }
+
+    function _drawLiqLines(windowsData) {
+        _clearLiqLines();
+        if (!_candleSeries || !_liqVisible) return;
+        Object.keys(LIQ_WIN_COLORS).forEach(function(wk) {
+            var levels = (windowsData || {})[wk] || [];
+            var color = LIQ_WIN_COLORS[wk];
+            levels.forEach(function(lvl) {
+                if (!lvl.price) return;
+                try {
+                    var pl = _candleSeries.createPriceLine({
+                        price: lvl.price,
+                        color: color,
+                        lineWidth: lvl.intensity === 'CRITICAL' ? 2 : 1,
+                        lineStyle: 3,
+                        axisLabelVisible: false,
+                        title: wk + (lvl.intensity === 'CRITICAL' || lvl.intensity === 'HIGH' ? ' ' + (lvl.intensity || '').slice(0,1) + (lvl.rank != null ? lvl.rank : '') : ''),
+                    });
+                    _liqLines.push(pl);
+                } catch(e) {}
+            });
+        });
+    }
+
+    function toggleLiqLines() {
+        _liqVisible = !_liqVisible;
+        var btn = document.getElementById('btn-liq-toggle');
+        if (btn) btn.textContent = 'Liq: ' + (_liqVisible ? 'ON' : 'OFF');
+        if (_liqVisible) _drawLiqLines(_liqLevelsCache);
+        else _clearLiqLines();
+    }
+    window.toggleLiqLines = toggleLiqLines;
+
+    function _loadLiqLevels() {
+        fetch('/quant/cvd_explosion/liq_levels?symbol=' + SYMBOL)
+            .then(function(r) { return r.json(); })
+            .then(function(d) {
+                if (!d.ok) return;
+                _liqLevelsCache = d.windows || {};
+                _drawLiqLines(_liqLevelsCache);
+            })
+            .catch(function() {});
+    }
+
     function toggleChart() {
         _chartOpen = !_chartOpen;
         document.getElementById('chart-wrap').style.display = _chartOpen ? '' : 'none';
@@ -387,6 +448,8 @@
                     return { time: b.time, value: mult };
                 }));
                 _setHealth('chart_data', true, '정상 수신', null);
+                // liq levels 는 차트 데이터 로드 후 별도 fetch (캔들 시리즈 준비 후)
+                _loadLiqLevels();
             })
             .catch(function() {
                 _setHealth('chart_data', false, '요청 실패', null);
@@ -398,6 +461,8 @@
         window.__CVD_EXPLOSION_SYMBOL = SYMBOL;
         document.getElementById('symbol-label').textContent = SYMBOL;
         // 심볼 변경 시 차트 시리즈 초기화 후 재로드
+        _clearLiqLines();
+        _liqLevelsCache = { "3d": [], "2w": [], "1m": [] };
         if (_candleSeries) { _candleSeries.setData([]); _volSeries.setData([]); _threshSeries.setData([]); }
         healthState = {};
         _chartTimes = [];

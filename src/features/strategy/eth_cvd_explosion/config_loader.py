@@ -132,6 +132,16 @@ def get_tpsl_params() -> Dict[str, Any]:
     except (TypeError, ValueError):
         sl_ratchet_buffer_pct = 0.0
     try:
+        sl_ratchet_step = int(tp.get("sl_ratchet_step", 1))
+    except (TypeError, ValueError):
+        sl_ratchet_step = 1
+    sl_ratchet_mode = str(tp.get("sl_ratchet_mode") or "tp_level").strip().lower()
+    try:
+        sl_ratchet_mid_ratio = float(tp.get("sl_ratchet_mid_ratio") or 0.5)
+    except (TypeError, ValueError):
+        sl_ratchet_mid_ratio = 0.5
+    sl_ratchet_mid_ratio = max(0.0, min(sl_ratchet_mid_ratio, 1.0))
+    try:
         m15_structure_lookback_bars = int(tp.get("m15_structure_lookback_bars", 8))
     except (TypeError, ValueError):
         m15_structure_lookback_bars = 8
@@ -151,6 +161,9 @@ def get_tpsl_params() -> Dict[str, Any]:
         "sl_lift_rank_le":        sl_lift_rank_le,
         "initial_tp_pct":         initial_tp_pct,
         "sl_ratchet_buffer_pct":  sl_ratchet_buffer_pct,
+        "sl_ratchet_step":        sl_ratchet_step,
+        "sl_ratchet_mode":        sl_ratchet_mode,
+        "sl_ratchet_mid_ratio":   sl_ratchet_mid_ratio,
         "m15_structure_stop_enabled": m15_structure_stop_enabled,
         "m15_structure_lookback_bars": max(2, m15_structure_lookback_bars),
         "m15_structure_buffer_pct": max(0.0, m15_structure_buffer_pct),
