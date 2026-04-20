@@ -8,27 +8,32 @@ timeframes:
   higher_tf: 4h
 signal:
   vol_avg_window: 20
-  vol_mult: 2.5
+  vol_mult: 3.5
   zone_gap: 3
   cvd_accel_window: 3
   cvd_higher_window: 10
-  confidence_threshold: 5
+  confidence_threshold: 4
+  higher_tf_veto: false
+  scoring:
+    explosion: 3
+    solo: 1
+    cvd_accel: 2
+    cvd_higher: 1
+  m1_subentry_enabled: false
 tpsl:
-  mode: magnet_rr
-  rr_ratio: 1.5
+  mode: magnet_tp_rr
+  rr_ratio: 2.0
   risk_pct: 1.0
-  sl_max_pct: 1.0
-  sl_lift_mode: always
-  sl_lift_min_intensity: HIGH
-  sl_lift_rank_le: 2
+  sl_max_pct: 0.5
   slippage_pct: 0.05
-  m15_structure_stop_enabled: true
+  m15_structure_stop_enabled: false
   m15_structure_lookback_bars: 8
   m15_structure_buffer_pct: 0.05
-  sl_ratchet_step: 1
+  sl_ratchet_step: 3
   sl_ratchet_buffer_pct: 0.0
-  initial_tp_pct: 0.0
+  sl_ratchet_mode: tp_level
+  sl_ratchet_mid_ratio: 0.5
 exit: {}
-engine:
+forward_test:
   entry_source:
   - engine

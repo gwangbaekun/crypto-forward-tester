@@ -8,6 +8,46 @@ from typing import Any, Dict, List, Optional
 from .signal import _f
 from .tpsl_resolve import MODE_MAGNET_RR, MODE_MAGNET_TP_RR, next_magnet_strictly_above, next_magnet_strictly_below
 
+_INTENSITY_ORDER = ["CRITICAL", "HIGH", "MEDIUM", "LOW"]
+
+
+def _find_magnet_at(level_map: List[Dict], price: float) -> Optional[Dict]:
+    """price에 가장 가까운 마그넷 반환 (1.0 이내)."""
+    best: Optional[Dict] = None
+    best_dist = float("inf")
+    for m in level_map:
+        p = _f(m.get("price"))
+        dist = abs(p - price)
+        if dist < best_dist:
+            best_dist = dist
+            best = m
+    return best if best_dist <= 1.0 else None
+
+
+def _sl_lift_allowed(position: Dict[str, Any], tp_price: float, level_map: List[Dict]) -> bool:
+    """sl_lift_mode 조건에 따라 SL을 올릴 수 있는지 판단."""
+    mode = str(position.get("sl_lift_mode") or "always").strip().lower()
+    if mode == "always":
+        return True
+    if mode == "never":
+        return False
+    magnet = _find_magnet_at(level_map, tp_price)
+    if magnet is None:
+        return True
+    intensity = str(magnet.get("intensity") or "LOW").upper()
+    rank = int(magnet.get("rank") or 999)
+    if mode == "critical_only":
+        return intensity == "CRITICAL"
+    if mode == "min_intensity":
+        min_i = str(position.get("sl_lift_min_intensity") or "HIGH").upper()
+        min_idx = _INTENSITY_ORDER.index(min_i) if min_i in _INTENSITY_ORDER else 1
+        cur_idx = _INTENSITY_ORDER.index(intensity) if intensity in _INTENSITY_ORDER else 3
+        return cur_idx <= min_idx
+    if mode == "rank_le":
+        max_rank = int(position.get("sl_lift_rank_le") or 2)
+        return rank <= max_rank
+    return True
+
 
 def _sl_reason(position: Dict[str, Any], sl_price: float) -> str:
     """SL 청산이 이익인지 손실인지 구분.
@@ -66,8 +106,11 @@ def _check_exit_simple(
     current_price: float,
     bar_high: Optional[float] = None,
     bar_low:  Optional[float] = None,
+    m1_highs: Optional[Any] = None,
+    m1_lows:  Optional[Any] = None,
+    m1_closes: Optional[Any] = None,
 ) -> Optional[tuple]:
-    """SL/TP 단일 구간 청산 (magnet / fixed_rr). TP 우선."""
+    """SL/TP 단일 구간 청산 (magnet / fixed_rr). TP 우선 (m1 resolution 있으면 먼저 터치된 쪽)."""
     side = position.get("side")
     sl   = _f(position.get("sl"))
     tp   = _f(position.get("tp"))
@@ -75,35 +118,47 @@ def _check_exit_simple(
     bl   = bar_low  if bar_low  else current_price
 
     if side == "long":
-        if tp and bh >= tp:                     # TP 우선
+        tp_hit = bool(tp and bh >= tp)
+        sl_hit = bool(sl and bl <= sl)
+        if tp_hit and sl_hit:
+            if m1_highs is not None and m1_lows is not None and len(m1_highs) > 0:
+                for mh, ml in zip(m1_highs, m1_lows):
+                    if sl and ml <= sl:
+                        return (sl, _sl_reason(position, sl), "resolved by 1m (SL first)")
+                    if tp and mh >= tp:
+                        return (tp, "closed_tp1", "resolved by 1m (TP first)")
             return (tp, "closed_tp1", None)
-        if sl and bl <= sl:
+        elif tp_hit:
+            return (tp, "closed_tp1", None)
+        elif sl_hit:
             return (sl, _sl_reason(position, sl), None)
     elif side == "short":
-        if tp and bl <= tp:                     # TP 우선
+        tp_hit = bool(tp and bl <= tp)
+        sl_hit = bool(sl and bh >= sl)
+        if tp_hit and sl_hit:
+            if m1_highs is not None and m1_lows is not None and len(m1_highs) > 0:
+                for mh, ml in zip(m1_highs, m1_lows):
+                    if sl and mh >= sl:
+                        return (sl, _sl_reason(position, sl), "resolved by 1m (SL first)")
+                    if tp and ml <= tp:
+                        return (tp, "closed_tp1", "resolved by 1m (TP first)")
             return (tp, "closed_tp1", None)
-        if sl and bh >= sl:
+        elif tp_hit:
+            return (tp, "closed_tp1", None)
+        elif sl_hit:
             return (sl, _sl_reason(position, sl), None)
 
     return None
 
 
-def _check_exit_magnet_rr(
+def _check_exit_magnet_rr_single(
     position: Dict[str, Any],
     current_price: float,
-    sig: Dict[str, Any],
+    level_map: List[Dict],
     bar_high: Optional[float] = None,
     bar_low:  Optional[float] = None,
 ) -> Optional[tuple]:
-    """
-    magnet_rr 청산 로직.
-
-    TP 터치 시 다음 마그넷으로 advance, SL은 1단계 뒤처져 래칫.
-    TP 우선: 같은 봉에서 TP+SL 둘 다 터치 시 TP를 먼저 처리하고
-             advance 후 새 SL 기준으로 재평가.
-    """
     side      = position.get("side")
-    level_map = list(sig.get("level_map") or [])
     tp        = _f(position.get("tp"))
     sl        = _f(position.get("sl"))
 
@@ -153,11 +208,11 @@ def _check_exit_magnet_rr(
                 if buf_pct > 0:
                     new_sl = new_sl * (1.0 - buf_pct / 100.0)
 
-                position["sl"] = round(max(sl, new_sl), 2)
-                sl = _f(position["sl"])
-
-                if position.get("sl_levels") is not None:
-                    position["sl_levels"].append(sl)
+                if _sl_lift_allowed(position, float(tp), level_map):
+                    position["sl"] = round(max(sl, new_sl), 2)
+                    sl = _f(position["sl"])
+                    if position.get("sl_levels") is not None:
+                        position["sl_levels"].append(sl)
                 position.setdefault("tp_levels", [tp])
                 position["tp"] = round(float(nxt), 2)
                 position["tp_levels"].append(position["tp"])
@@ -218,11 +273,11 @@ def _check_exit_magnet_rr(
                 if buf_pct > 0:
                     new_sl = new_sl * (1.0 + buf_pct / 100.0)
 
-                position["sl"] = round(min(sl, new_sl), 2)
-                sl = _f(position["sl"])
-
-                if position.get("sl_levels") is not None:
-                    position["sl_levels"].append(sl)
+                if _sl_lift_allowed(position, float(tp), level_map):
+                    position["sl"] = round(min(sl, new_sl), 2)
+                    sl = _f(position["sl"])
+                    if position.get("sl_levels") is not None:
+                        position["sl_levels"].append(sl)
                 position.setdefault("tp_levels", [tp])
                 position["tp"] = round(float(nxt), 2)
                 position["tp_levels"].append(position["tp"])
@@ -244,18 +299,44 @@ def _check_exit_magnet_rr(
     return None
 
 
+def _check_exit_magnet_rr(
+    position: Dict[str, Any],
+    current_price: float,
+    sig: Dict[str, Any],
+    bar_high: Optional[float] = None,
+    bar_low:  Optional[float] = None,
+    m1_highs: Optional[Any] = None,
+    m1_lows:  Optional[Any] = None,
+    m1_closes: Optional[Any] = None,
+) -> Optional[tuple]:
+    level_map = list(sig.get("level_map") or [])
+    if m1_highs is not None and m1_lows is not None and m1_closes is not None and len(m1_highs) > 0:
+        for mh, ml, mc in zip(m1_highs, m1_lows, m1_closes):
+            res = _check_exit_magnet_rr_single(position, mc, level_map, mh, ml)
+            if res:
+                return res
+        return None
+    else:
+        return _check_exit_magnet_rr_single(position, current_price, level_map, bar_high, bar_low)
+
+
 def check_exit(
     position: Dict[str, Any],
     current_price: float,
     sig: Dict[str, Any],
     bar_high: Optional[float] = None,
     bar_low:  Optional[float] = None,
+    m1_highs: Optional[Any] = None,
+    m1_lows:  Optional[Any] = None,
+    m1_closes: Optional[Any] = None,
 ) -> Optional[tuple]:
     m15_exit = _check_exit_m15_structure_break(position, current_price, sig)
     if m15_exit is not None:
         return m15_exit
     if position.get("tpsl_mode") in (MODE_MAGNET_RR, MODE_MAGNET_TP_RR):
         return _check_exit_magnet_rr(position, current_price, sig,
-                                      bar_high=bar_high, bar_low=bar_low)
+                                      bar_high=bar_high, bar_low=bar_low,
+                                      m1_highs=m1_highs, m1_lows=m1_lows, m1_closes=m1_closes)
     return _check_exit_simple(position, current_price,
-                               bar_high=bar_high, bar_low=bar_low)
+                               bar_high=bar_high, bar_low=bar_low,
+                               m1_highs=m1_highs, m1_lows=m1_lows, m1_closes=m1_closes)

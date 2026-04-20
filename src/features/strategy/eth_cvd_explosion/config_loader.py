@@ -1,4 +1,4 @@
-"""CVD Explosion — config loader (btc_backtest 동일).
+"""ETH CVD Explosion — config loader.
 
 config.yaml 파일의 수정 시각(mtime)을 감시해 변경 시 자동 리로드.
 backtest 대시보드에서 "SAVE & APPLY" 를 누르면 이 파일이 갱신되고,
@@ -40,9 +40,9 @@ def get_timeframes() -> Dict[str, Any]:
     tf = cfg.get("timeframes") or {}
     tp = cfg.get("tpsl") or {}
     all_tfs = set(tf.get("all") or ["1h", "4h"])
-    if bool(tp.get("m15_structure_stop_enabled", True)):
+    if bool(tp.get("m15_structure_stop_enabled", False)):
         all_tfs.add("15m")
-    
+
     return {
         "all":       sorted(list(all_tfs)),
         "entry_tf":  str(tf.get("entry_tf") or "1h"),
@@ -52,20 +52,43 @@ def get_timeframes() -> Dict[str, Any]:
 
 def get_signal_params_for_tf(tf: str) -> Dict[str, Any]:
     cfg = load_config()
-    sig = cfg.get("signal") or {}
-    sc  = sig.get("scoring") or {}
+    sig = cfg.get("signal")
+    if not isinstance(sig, dict):
+        raise ValueError("config.yaml: 'signal' must be a mapping")
+    sc = sig.get("scoring")
+    if not isinstance(sc, dict):
+        raise ValueError("config.yaml: 'signal.scoring' must be a mapping")
+
+    _sig_keys = (
+        "vol_avg_window",
+        "vol_mult",
+        "zone_gap",
+        "cvd_accel_window",
+        "cvd_higher_window",
+        "confidence_threshold",
+        "higher_tf_veto",
+    )
+    for k in _sig_keys:
+        if k not in sig:
+            raise ValueError(f"config.yaml: signal.{k} is required (no default)")
+
+    _sc_keys = ("explosion", "solo", "cvd_accel", "cvd_higher")
+    for k in _sc_keys:
+        if k not in sc:
+            raise ValueError(f"config.yaml: signal.scoring.{k} is required (no default)")
+
     base = {
-        "vol_avg_window":        int(sig.get("vol_avg_window",       20)),
-        "vol_mult":              float(sig.get("vol_mult",           2.5)),
-        "zone_gap":              int(sig.get("zone_gap",             3)),
-        "cvd_accel_window":      int(sig.get("cvd_accel_window",     3)),
-        "cvd_higher_window":     int(sig.get("cvd_higher_window",    10)),
-        "confidence_threshold":  int(sig.get("confidence_threshold", 5)),
-        "score_explosion":       int(sc.get("explosion",  3)),
-        "score_solo":            int(sc.get("solo",       1)),
-        "score_cvd_accel":       int(sc.get("cvd_accel",  2)),
-        "score_cvd_higher":      int(sc.get("cvd_higher", 1)),
-        "higher_tf_veto":        bool(sig.get("higher_tf_veto", False)),
+        "vol_avg_window":        int(sig["vol_avg_window"]),
+        "vol_mult":              float(sig["vol_mult"]),
+        "zone_gap":              int(sig["zone_gap"]),
+        "cvd_accel_window":      int(sig["cvd_accel_window"]),
+        "cvd_higher_window":     int(sig["cvd_higher_window"]),
+        "confidence_threshold":  int(sig["confidence_threshold"]),
+        "score_explosion":       int(sc["explosion"]),
+        "score_solo":            int(sc["solo"]),
+        "score_cvd_accel":       int(sc["cvd_accel"]),
+        "score_cvd_higher":      int(sc["cvd_higher"]),
+        "higher_tf_veto":        bool(sig["higher_tf_veto"]),
     }
     by_tf = sig.get("by_tf") or {}
     ov = by_tf.get(tf) or by_tf.get(str(tf))
@@ -73,7 +96,12 @@ def get_signal_params_for_tf(tf: str) -> Dict[str, Any]:
         for k in base:
             if k in ov:
                 v = ov[k]
-                base[k] = float(v) if k == "vol_mult" else int(v)
+                if k == "vol_mult":
+                    base[k] = float(v)
+                elif k == "higher_tf_veto":
+                    base[k] = bool(v)
+                else:
+                    base[k] = int(v)
     return base
 
 
@@ -108,6 +136,11 @@ def get_tpsl_params() -> Dict[str, Any]:
         risk_pct = float(tp.get("risk_pct", 1.0))
     except (TypeError, ValueError):
         risk_pct = 1.0
+
+    try:
+        slippage_pct = float(tp.get("slippage_pct") or 0.0)
+    except (TypeError, ValueError):
+        slippage_pct = 0.0
 
     sl_lift_mode = str(tp.get("sl_lift_mode") or "always").strip().lower()
     if sl_lift_mode not in _VALID_SL_LIFT_MODES:
@@ -149,13 +182,14 @@ def get_tpsl_params() -> Dict[str, Any]:
         m15_structure_buffer_pct = float(tp.get("m15_structure_buffer_pct") or 0.05)
     except (TypeError, ValueError):
         m15_structure_buffer_pct = 0.05
-    m15_structure_stop_enabled = bool(tp.get("m15_structure_stop_enabled", True))
+    m15_structure_stop_enabled = bool(tp.get("m15_structure_stop_enabled", False))
 
     return {
         "mode":                   mode,
         "rr_ratio":               rr_ratio,
         "risk_pct":               risk_pct,
         "sl_max_pct":             sl_max,
+        "slippage_pct":           slippage_pct,
         "sl_lift_mode":           sl_lift_mode,
         "sl_lift_min_intensity":  sl_lift_min_intensity,
         "sl_lift_rank_le":        sl_lift_rank_le,

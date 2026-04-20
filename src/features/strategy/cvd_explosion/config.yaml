@@ -2,29 +2,32 @@ strategy_id: cvd_explosion
 strategy_name: CVD Explosion
 timeframes:
   all:
-  - 15m
+  - 1h
   - 4h
-  entry_tf: 15m
+  entry_tf: 1h
   higher_tf: 4h
 signal:
   vol_avg_window: 20
-  vol_mult: 4.0
+  vol_mult: 2.0
   zone_gap: 3
   cvd_accel_window: 3
   cvd_higher_window: 10
   confidence_threshold: 4
-  higher_tf_veto: true
+  higher_tf_veto: false
   scoring:
-    explosion: 2
+    explosion: 3
     solo: 1
     cvd_accel: 2
     cvd_higher: 1
+  # 1m 선진입: 15m 봉 마감 기다리지 않고 1m 폭발봉 감지 시 선진입
+  # false → 기존 동작 (15m 종가 진입)
+  # true  → 해당 15m 봉 내 1m 폭발봉 첫 감지 시점 종가로 진입
   m1_subentry_enabled: true
 tpsl:
-  mode: magnet_rr
-  rr_ratio: 1.5
+  mode: magnet_tp_rr
+  rr_ratio: 2.0
   risk_pct: 1.0
-  sl_max_pct: 0.9
+  sl_max_pct: 0.5
   slippage_pct: 0.05
   m15_structure_stop_enabled: false
   m15_structure_lookback_bars: 8

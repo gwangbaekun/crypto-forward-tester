@@ -99,6 +99,11 @@ def _resolve_magnet(
     if tp is None or sl is None:
         return None, None
 
+    initial_tp_pct = _f(params.get("initial_tp_pct") or 0.0)
+    if initial_tp_pct > 0:
+        tp = float(tp) * (1.0 - initial_tp_pct / 100.0) if side == "long" \
+            else float(tp) * (1.0 + initial_tp_pct / 100.0)
+
     sl_max = params.get("sl_max_pct")
     tp2, sl2 = _clamp_sl_to_max_risk(side, entry, float(tp), float(sl), sl_max)
     if tp2 is None or sl2 is None:
@@ -126,6 +131,10 @@ def _resolve_magnet_tp_rr(
         tp = _nearest_magnet_below(level_map, entry)
     if tp is None:
         return None, None
+
+    initial_tp_pct = _f(params.get("initial_tp_pct") or 0.0)
+    if initial_tp_pct > 0:
+        tp = tp * (1.0 - initial_tp_pct / 100.0) if side == "long" else tp * (1.0 + initial_tp_pct / 100.0)
 
     rr = _positive_float(params, "rr_ratio")
     if rr is None:

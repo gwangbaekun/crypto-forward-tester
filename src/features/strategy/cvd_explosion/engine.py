@@ -11,6 +11,8 @@ from __future__ import annotations
 import time
 from typing import Any, Dict, List, Optional
 
+import numpy as np
+
 from features.strategy.common.base_forward_test import (
     BaseForwardTest,
     get_engine_for as _make_engine,
@@ -39,12 +41,18 @@ class CvdExplosionForwardTest(BaseForwardTest):
         sig: Dict,
         bar_high: Optional[float] = None,
         bar_low: Optional[float] = None,
+        m1_highs: Optional[np.ndarray] = None,
+        m1_lows: Optional[np.ndarray] = None,
+        m1_closes: Optional[np.ndarray] = None,
     ) -> Optional[tuple]:
         # backtest_runner 와 동일: bar_high/bar_low = 완성봉 OHLC 전달
         return check_exit(
             position, current_price, sig,
             bar_high=bar_high,
             bar_low=bar_low,
+            m1_highs=m1_highs,
+            m1_lows=m1_lows,
+            m1_closes=m1_closes,
         )
 
     def tick(
@@ -63,6 +71,10 @@ class CvdExplosionForwardTest(BaseForwardTest):
         bar_high = float(state.get("bar_high") or current_price)
         bar_low  = float(state.get("bar_low")  or current_price)
 
+        m1_highs = state.get("m1_highs")
+        m1_lows = state.get("m1_lows")
+        m1_closes = state.get("m1_closes")
+
         events: List[Dict[str, Any]] = []
 
         # ── 1. 청산 체크 ─────────────────────────────────────────────────────
@@ -73,6 +85,7 @@ class CvdExplosionForwardTest(BaseForwardTest):
             result = self._check_exit_signal(
                 self._position, current_price, sig,
                 bar_high=bar_high, bar_low=bar_low,
+                m1_highs=m1_highs, m1_lows=m1_lows, m1_closes=m1_closes,
             )
             if result:
                 exit_price, reason, close_note = result
@@ -122,20 +135,8 @@ class CvdExplosionForwardTest(BaseForwardTest):
                 }
                 # position_meta — backtest_runner 와 동일 키셋
                 pm = sig.get("position_meta") or {}
-                for k in (
-                    "tpsl_mode",
-                    "tp_advances",
-                    "sl_ratchet_step",
-                    "sl_ratchet_buffer_pct",
-                    "sl_ratchet_mode",
-                    "sl_ratchet_mid_ratio",
-                    "slippage_pct",
-                    "m15_structure_stop_enabled",
-                    "m15_structure_lookback_bars",
-                    "m15_structure_buffer_pct",
-                ):
-                    if k in pm:
-                        pos[k] = pm[k]
+                for k, v in pm.items():
+                    pos[k] = v
 
                 pos["trade_id"] = self._persist_open(symbol, pos, report_text or "")
                 self._position = pos
