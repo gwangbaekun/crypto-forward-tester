@@ -10,7 +10,6 @@ from __future__ import annotations
 import asyncio
 import importlib
 import os
-import inspect
 from typing import Any, Dict, Optional
 
 
@@ -50,44 +49,52 @@ STRATEGY_REGISTRY: Dict[str, Dict[str, Any]] = _build_registry()
 
 
 async def _strategy_loop(name: str, cfg: Dict[str, Any], symbol: str) -> None:
-    """단일 전략 무한 루프. tick_interval 마다 realtime_feed 호출."""
+    """단일 전략 무한 루프.
+
+    포지션 없음: tick_interval 마다 realtime_feed 호출 (bar close 기준 신호 체크).
+    포지션 있음: exit_tick_interval 마다 BinancePriceWS 캐시 가격으로 engine.tick() 직접 호출.
+                 REST 없음 — WS mark price 스트림만 사용.
+    """
     base_interval = float(cfg["tick_interval"])
     fast_exit_interval = float(cfg.get("exit_tick_interval") or 1.0)
     tfs_str = ",".join(str(t) for t in cfg["timeframes"]) if cfg["timeframes"] else "15m,1h"
+
     while True:
-        loop_interval = base_interval
-        ws_only = False
         try:
             mod = importlib.import_module(cfg["module"])
-            fn = getattr(mod, cfg["fn"])
+            fn  = getattr(mod, cfg["fn"])
 
-            # 포지션 보유 중에는 WS 가격 기반 고빈도 청산 감시로 전환.
-            # signal 재계산은 생략해 API 호출을 늘리지 않고 순간 TP/SL 터치를 놓치지 않도록 함.
             try:
                 eng_mod = importlib.import_module(f"features.strategy.{name}.engine")
                 eng = eng_mod.get_engine()
-                st = eng.get_stats(symbol=symbol) or {}
+                st  = eng.get_stats(symbol=symbol) or {}
                 has_open_pos = bool(st.get("current_position"))
             except Exception:
                 has_open_pos = False
+                eng = None
 
-            if has_open_pos:
-                ws_only = True
-                loop_interval = max(0.5, fast_exit_interval)
+            if has_open_pos and eng is not None:
+                # ── 포지션 보유: WS 가격으로 exit 체크 (REST 없음) ────────────
+                from common.binance_price_ws import get_cached_price
+                ws_price = get_cached_price(symbol)
+                if ws_price:
+                    eng.tick(symbol, {
+                        "current_price": ws_price,
+                        "signal":        {},
+                        "bar_high":      ws_price,
+                        "bar_low":       ws_price,
+                    })
+                else:
+                    print(f"[StrategyLoop:{name}] WS price stale for {symbol}, skip exit tick")
+                await asyncio.sleep(max(0.5, fast_exit_interval))
+                continue
 
-            kwargs = dict(cfg.get("kwargs", {}))
-            if ws_only:
-                try:
-                    sig = inspect.signature(fn)
-                    if "ws_only" in sig.parameters:
-                        kwargs["ws_only"] = True
-                except Exception:
-                    pass
+            # ── 포지션 없음: bar close 기준 정상 신호 체크 ──────────────────
+            await fn(symbol=symbol, tfs=tfs_str)
 
-            await fn(symbol=symbol, tfs=tfs_str, **kwargs)
         except Exception as e:
             print(f"[StrategyLoop:{name}] error: {e}")
-        await asyncio.sleep(loop_interval)
+        await asyncio.sleep(base_interval)
 
 
 async def run_all_strategy_loops() -> None:

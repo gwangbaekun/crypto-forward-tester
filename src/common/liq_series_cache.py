@@ -181,19 +181,61 @@ def build_strategy_liq_snapshot(payload: Dict[str, Any], *, include_series: bool
     return out
 
 
-async def fetch_klines(client: httpx.AsyncClient, symbol: str, limit: int, interval: str = "1h") -> List[list]:
-    r = await client.get(
-        "https://fapi.binance.com/fapi/v1/klines",
-        params={"symbol": symbol.upper(), "interval": interval, "limit": min(limit, 1500)},
-    )
+def _interval_to_seconds(interval: str) -> int:
+    """interval 문자열 → 초 단위."""
+    _map = {"1m": 60, "3m": 180, "5m": 300, "15m": 900, "30m": 1800,
+            "1h": 3600, "4h": 14400, "1d": 86400}
+    return _map.get(interval, 3600)
+
+
+def _closed_bar_end_time_ms(interval: str) -> int:
+    """현재 시각 기준 마지막 closed 봉의 close_ms (현재 형성 중인 봉 제외)."""
+    iv_ms = _interval_to_seconds(interval) * 1000
+    now_ms = int(time.time() * 1000)
+    current_bar_open_ms = (now_ms // iv_ms) * iv_ms
+    return current_bar_open_ms - 1  # 현재 봉 open 직전 = 이전 봉 close
+
+
+def _next_trigger_time(interval: str, now: float) -> float:
+    """봉 close 60초 전 trigger 시각 반환 (항상 now 보다 미래)."""
+    iv_sec = _interval_to_seconds(interval)
+    advance = 60  # 봉 close 1분 전
+    bar_close = (int(now) // iv_sec + 1) * iv_sec
+    trigger = bar_close - advance
+    if trigger <= now:
+        trigger += iv_sec
+    return trigger
+
+
+async def fetch_klines(
+    client: httpx.AsyncClient,
+    symbol: str,
+    limit: int,
+    interval: str = "1h",
+    end_time_ms: Optional[int] = None,
+) -> List[list]:
+    params: Dict[str, Any] = {
+        "symbol": symbol.upper(),
+        "interval": interval,
+        "limit": min(limit, 1500),
+    }
+    if end_time_ms is not None:
+        params["endTime"] = end_time_ms
+    r = await client.get("https://fapi.binance.com/fapi/v1/klines", params=params)
     r.raise_for_status()
     return r.json()
 
 
-async def fetch_oi_hist(client: httpx.AsyncClient, symbol: str, need: int, interval: str = "1h") -> List[Dict[str, Any]]:
+async def fetch_oi_hist(
+    client: httpx.AsyncClient,
+    symbol: str,
+    need: int,
+    interval: str = "1h",
+    end_time_ms: Optional[int] = None,
+) -> List[Dict[str, Any]]:
     """openInterestHist, 최대 500개 단위로 과거까지 이어붙임 (시간 오름차순)."""
     chunks: List[List[Dict[str, Any]]] = []
-    end_time: Optional[int] = None
+    end_time: Optional[int] = end_time_ms  # 첫 요청 상한 (None이면 최신)
     sym = symbol.upper()
     collected = 0
     while collected < need:
@@ -324,15 +366,21 @@ def _merge_level_maps(level_maps: List[List[Dict]]) -> List[Dict]:
     return out
 
 
-async def build_payload_for_symbol(symbol: str, interval: str = "1h") -> Dict[str, Any]:
+async def build_payload_for_symbol(
+    symbol: str,
+    interval: str = "1h",
+    exclude_current_bar: bool = True,
+) -> Dict[str, Any]:
     sym = symbol.upper().strip() or "BTCUSDT"
     # 15m 은 1h 대비 4배 봉 → window preset도 4배
     _interval_mult = {"15m": 4, "30m": 2, "5m": 12}.get(interval, 1)
     _window_presets = [(k, v * _interval_mult) for k, v in _WINDOW_PRESETS]
     retain = max(LIQ_RETAIN_BARS * _interval_mult, (LIQ_WINDOW + LIQ_MIN_BARS) * _interval_mult)
+    # 현재 형성 중인 봉 제외 — backtest(closed bars only)와 동일 조건
+    end_ms = _closed_bar_end_time_ms(interval) if exclude_current_bar else None
     t0 = time.time()
     async with httpx.AsyncClient(timeout=45.0) as client:
-        raw_k = await fetch_klines(client, sym, retain, interval=interval)
+        raw_k = await fetch_klines(client, sym, retain, interval=interval, end_time_ms=end_ms)
         if not raw_k:
             return {
                 "symbol": sym,
@@ -341,7 +389,7 @@ async def build_payload_for_symbol(symbol: str, interval: str = "1h") -> Dict[st
             }
         df_k = _klines_to_df(raw_k)
         need_oi = len(df_k)
-        oi_rows = await fetch_oi_hist(client, sym, max(need_oi, LIQ_WINDOW + 10), interval=interval)
+        oi_rows = await fetch_oi_hist(client, sym, max(need_oi, LIQ_WINDOW + 10), interval=interval, end_time_ms=end_ms)
         df = _merge_oi(df_k, oi_rows)
         df = df.dropna(subset=["close"])
         if len(df) > retain:
@@ -468,7 +516,27 @@ def _liq_refresh_targets() -> list[tuple[str, str]]:
 
 
 async def refresh_loop() -> None:
+    """
+    각 (symbol, interval) 별로 봉 close 60초 전(:14/:29/:44/:59 for 15m, :59 for 1h)에
+    liq cache를 재빌드한다. 미완성 봉은 제외(exclude_current_bar=True).
+    """
+    _next: Dict[tuple, float] = {}
     while True:
-        for sym, iv in _liq_refresh_targets():
-            await refresh_symbol(sym, interval=iv)
-        await asyncio.sleep(LIQ_REFRESH_SEC)
+        targets = _liq_refresh_targets()
+        now = time.time()
+        # 신규 target 초기화
+        for sym, iv in targets:
+            key = (sym, iv)
+            if key not in _next:
+                _next[key] = _next_trigger_time(iv, now)
+        # trigger 도달한 항목 refresh
+        active = {(s, i) for s, i in targets}
+        for key in list(active):
+            if now >= _next.get(key, float("inf")):
+                sym, iv = key
+                await refresh_symbol(sym, interval=iv)
+                _next[key] = _next_trigger_time(iv, time.time())
+        # 다음 trigger까지 sleep
+        upcoming = [_next[k] for k in active if k in _next]
+        sleep_sec = max(5.0, min(upcoming) - time.time()) if upcoming else 30.0
+        await asyncio.sleep(sleep_sec)
