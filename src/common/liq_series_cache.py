@@ -217,16 +217,30 @@ async def fetch_klines(
     interval: str = "1h",
     end_time_ms: Optional[int] = None,
 ) -> List[list]:
-    params: Dict[str, Any] = {
-        "symbol": symbol.upper(),
-        "interval": interval,
-        "limit": min(limit, 1500),
-    }
-    if end_time_ms is not None:
-        params["endTime"] = end_time_ms
-    r = await client.get("https://fapi.binance.com/fapi/v1/klines", params=params)
-    r.raise_for_status()
-    return r.json()
+    """limit > 1500 이면 endTime 기반 역순 페이지네이션으로 이어붙임."""
+    MAX_PER_REQ = 1500
+    sym = symbol.upper()
+    all_bars: List[list] = []
+    current_end = end_time_ms
+    remaining = limit
+
+    while remaining > 0:
+        batch = min(remaining, MAX_PER_REQ)
+        params: Dict[str, Any] = {"symbol": sym, "interval": interval, "limit": batch}
+        if current_end is not None:
+            params["endTime"] = current_end
+        r = await client.get("https://fapi.binance.com/fapi/v1/klines", params=params)
+        r.raise_for_status()
+        data: List[list] = r.json()
+        if not data:
+            break
+        all_bars = data + all_bars          # 오래된 데이터를 앞에 붙임
+        remaining -= len(data)
+        current_end = int(data[0][0]) - 1  # 첫 봉 open_time - 1ms → 다음 페이지 상한
+        if len(data) < batch:
+            break
+
+    return all_bars[-limit:] if len(all_bars) > limit else all_bars
 
 
 async def fetch_oi_hist(

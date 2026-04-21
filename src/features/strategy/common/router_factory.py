@@ -48,25 +48,25 @@ def make_router(strategy_key: str, default_tfs: str = "15m,1h,4h") -> APIRouter:
         timeframes: str = Query(default_tfs),
         strategy_tag: str | None = Query(default=None),
     ):
-        # strategy_tag가 있으면 master config의 tick.module/fn + timeframes 사용
-        if strategy_tag:
-            try:
-                from features.strategy.common.config_loader import get_master_config
-                master = get_master_config() or {}
-                tag_cfg = master.get(strategy_tag) or {}
-                tick_cfg = tag_cfg.get("tick") or {}
-                tick_module = tick_cfg.get("module")
-                tick_fn    = tick_cfg.get("fn")
-                if tick_module and tick_fn:
-                    # master config의 timeframes 사용 (클라이언트 값 무시)
-                    cfg_tfs = tag_cfg.get("timeframes") or []
-                    tfs_str = ",".join(str(t) for t in cfg_tfs) if cfg_tfs else timeframes
-                    mod = importlib.import_module(tick_module)
-                    state_fn = getattr(mod, tick_fn)
-                    result = await state_fn(symbol=symbol, tfs=tfs_str)
-                    return JSONResponse(result)
-            except Exception:
-                pass  # fallback to default below
+        # master config의 tick.module/fn 우선 사용 (strategy_tag 없으면 strategy_key로 조회)
+        _effective_tag = strategy_tag or strategy_key
+        try:
+            from features.strategy.common.config_loader import get_master_config
+            master = get_master_config() or {}
+            tag_cfg = master.get(_effective_tag) or {}
+            tick_cfg = tag_cfg.get("tick") or {}
+            tick_module = tick_cfg.get("module")
+            tick_fn    = tick_cfg.get("fn")
+            if tick_module and tick_fn:
+                # master config의 timeframes 사용 (클라이언트 값 무시)
+                cfg_tfs = tag_cfg.get("timeframes") or []
+                tfs_str = ",".join(str(t) for t in cfg_tfs) if cfg_tfs else timeframes
+                mod = importlib.import_module(tick_module)
+                state_fn = getattr(mod, tick_fn)
+                result = await state_fn(symbol=symbol, tfs=tfs_str)
+                return JSONResponse(result)
+        except Exception:
+            pass  # fallback to default below
 
         mod = importlib.import_module(f"features.strategy.{strategy_key}.realtime_feed")
         # get_state (신규) 또는 get_realtime_state (기존 전략) 모두 지원
