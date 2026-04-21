@@ -445,8 +445,30 @@ def _liq_symbols() -> List[str]:
     return [s.strip().upper() for s in os.getenv("LIQ_SYMBOLS", "BTCUSDT,ETHUSDT").split(",") if s.strip()]
 
 
+def _liq_refresh_targets() -> list[tuple[str, str]]:
+    """strategies_master.yaml 에서 enabled 전략의 (symbol, liq_interval) 목록 반환."""
+    import pathlib
+    import yaml as _yaml
+    _master_path = pathlib.Path(__file__).resolve().parents[1] / "features" / "strategy" / "common" / "strategies_master.yaml"
+    try:
+        cfg = _yaml.safe_load(_master_path.read_text(encoding="utf-8")) or {}
+    except Exception:
+        return [("ETHUSDT", "1h"), ("BTCUSDT", "1h")]
+    seen: set[tuple[str, str]] = set()
+    targets: list[tuple[str, str]] = []
+    for strat_cfg in cfg.values():
+        if not isinstance(strat_cfg, dict) or not strat_cfg.get("enabled"):
+            continue
+        sym = str(strat_cfg.get("symbol") or "ETHUSDT").upper()
+        iv  = str(strat_cfg.get("liq_interval") or "1h")
+        if (sym, iv) not in seen:
+            seen.add((sym, iv))
+            targets.append((sym, iv))
+    return targets or [("ETHUSDT", "1h"), ("BTCUSDT", "1h")]
+
+
 async def refresh_loop() -> None:
     while True:
-        for sym in _liq_symbols():
-            await refresh_symbol(sym)
+        for sym, iv in _liq_refresh_targets():
+            await refresh_symbol(sym, interval=iv)
         await asyncio.sleep(LIQ_REFRESH_SEC)

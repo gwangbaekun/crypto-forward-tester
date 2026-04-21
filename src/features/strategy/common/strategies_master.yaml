@@ -51,6 +51,7 @@ eth_cvd_explosion:
   timeframes: ["15m", "1h", "4h"]
   entry_tf: "1h"
   higher_tf: "4h"
+  liq_interval: "1h"
   strategy_tag: eth_cvd_explosion
   label: "ETH CVD Explosion"
   emoji: "🔷"
@@ -70,6 +71,7 @@ eth_cvd_explosion_v2:
   timeframes: ["15m", "1h"]
   entry_tf: "15m"
   higher_tf: "1h"
+  liq_interval: "15m"
   strategy_tag: eth_cvd_explosion_v2
   label: "ETH CVD Explosion V2"
   emoji: "🔷"

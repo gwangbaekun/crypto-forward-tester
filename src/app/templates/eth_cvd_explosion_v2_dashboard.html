@@ -44,11 +44,11 @@
 
     <div class="card" id="chart-card">
         <div class="card-title" style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
-            <span id="chart-title-text">Price chart (1h) <span id="health-chart-data" style="display:none;color:var(--accent-red);font-size:0.72rem;margin-left:6px;">●</span></span>
+            <span id="chart-title-text">Price chart (15m) <span id="health-chart-data" style="display:none;color:var(--accent-red);font-size:0.72rem;margin-left:6px;">●</span></span>
             <div style="display:flex;gap:8px;align-items:center;">
                 <select id="chart-tf-sel" style="background:var(--card);border:1px solid var(--border);color:var(--text);padding:3px 8px;border-radius:6px;font-size:0.75rem;">
+                    <option value="15m" selected>15m</option>
                     <option value="1h">1h</option>
-                    <option value="15m">15m</option>
                 </select>
                 <button id="chart-toggle-btn" onclick="toggleChart()" style="font-size:0.72rem;padding:3px 9px;">Collapse</button>
             </div>
@@ -121,7 +121,7 @@
     var running = false;
     var HEALTH_POLL_SEC = 10.0;
     var BINANCE_POLL_SEC = 30.0;
-    var CHART_TF = '1h';
+    var CHART_TF = '15m';
     window.__CVD_EXPLOSION_SYMBOL = SYMBOL;
     var HEALTH_META = {
         market_stream: { label: '실시간 시세', expectSec: 1.0 },
@@ -575,7 +575,7 @@
         var tfSel = document.getElementById('chart-tf-sel');
         if (tfSel) {
             tfSel.addEventListener('change', function() {
-                CHART_TF = tfSel.value || '1h';
+                CHART_TF = tfSel.value || '15m';
                 _loadChart();
             });
         }
@@ -585,7 +585,7 @@
         var tfSel2 = document.getElementById('chart-tf-sel');
         if (tfSel2) {
             tfSel2.addEventListener('change', function() {
-                CHART_TF = tfSel2.value || '1h';
+                CHART_TF = tfSel2.value || '15m';
                 _loadChart();
             });
         }

@@ -13,7 +13,7 @@ async def liq_levels(symbol: str = Query("ETHUSDT")):
     from common.liq_series_cache import get_chart_payload_or_fetch
 
     try:
-        payload = await get_chart_payload_or_fetch(symbol)
+        payload = await get_chart_payload_or_fetch(symbol, interval="15m")
         if not payload or payload.get("error"):
             return JSONResponse({"ok": False, "levels": [], "by_window": {}})
         multi = payload.get("liq_multi_window") or {}
