@@ -10,6 +10,7 @@ from __future__ import annotations
 import asyncio
 import importlib
 import os
+import time
 from typing import Any, Dict, Optional
 
 
@@ -40,7 +41,8 @@ def _build_registry() -> Dict[str, Dict[str, Any]]:
             "kwargs":        tick.get("kwargs") or {},
             "tick_interval": int(cfg.get("tick_interval") or 60),
             "timeframes":    cfg.get("timeframes") or [],
-            "symbol":        cfg.get("symbol") or None,  # 전략별 심볼 (없으면 STRATEGY_SYMBOL 환경변수)
+            "symbol":        cfg.get("symbol") or None,
+            "entry_tf":      cfg.get("entry_tf") or "15m",
         }
     return registry
 
@@ -89,12 +91,17 @@ async def _strategy_loop(name: str, cfg: Dict[str, Any], symbol: str) -> None:
                 await asyncio.sleep(max(0.5, fast_exit_interval))
                 continue
 
-            # ── 포지션 없음: bar close 기준 정상 신호 체크 ──────────────────
+            # ── 포지션 없음: :14/:29/:44/:59 에 signal check + 진입 ──────────
             await fn(symbol=symbol, tfs=tfs_str)
 
         except Exception as e:
             print(f"[StrategyLoop:{name}] error: {e}")
-        await asyncio.sleep(base_interval)
+
+        # 다음 진입 트리거(:14/:29/:44/:59)까지 sleep
+        from common.liq_series_cache import _next_trigger_time
+        entry_tf = cfg.get("entry_tf") or "15m"
+        next_t = _next_trigger_time(entry_tf, time.time(), advance=60)
+        await asyncio.sleep(max(1.0, next_t - time.time()))
 
 
 async def run_all_strategy_loops() -> None:

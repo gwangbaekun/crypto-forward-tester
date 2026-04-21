@@ -196,10 +196,13 @@ def _closed_bar_end_time_ms(interval: str) -> int:
     return current_bar_open_ms - 1  # 현재 봉 open 직전 = 이전 봉 close
 
 
-def _next_trigger_time(interval: str, now: float) -> float:
-    """봉 close 60초 전 trigger 시각 반환 (항상 now 보다 미래)."""
+def _next_trigger_time(interval: str, now: float, advance: int = 60) -> float:
+    """봉 close `advance`초 전 trigger 시각 반환 (항상 now 보다 미래).
+
+    advance=60 → :14/:29/:44/:59  (진입 + pre-liq)
+    advance=0  → :00/:15/:30/:45  (bar close liq)
+    """
     iv_sec = _interval_to_seconds(interval)
-    advance = 60  # 봉 close 1분 전
     bar_close = (int(now) // iv_sec + 1) * iv_sec
     trigger = bar_close - advance
     if trigger <= now:
@@ -517,26 +520,37 @@ def _liq_refresh_targets() -> list[tuple[str, str]]:
 
 async def refresh_loop() -> None:
     """
-    각 (symbol, interval) 별로 봉 close 60초 전(:14/:29/:44/:59 for 15m, :59 for 1h)에
-    liq cache를 재빌드한다. 미완성 봉은 제외(exclude_current_bar=True).
+    각 (symbol, interval) 별로 두 타이밍에 liq cache를 재빌드한다.
+
+    advance=60 (:14/:29/:44/:59):
+        봉 close 1분 전. 현재 형성 중인 봉 제외(exclude_current_bar=True).
+        진입 signal check 직전에 cache를 준비해 슬리피지를 줄인다.
+
+    advance=0 (:00/:15/:30/:45):
+        봉 close 직후. 방금 닫힌 봉 포함한 최신 liq 빌드.
+        다음 사이클(:14)을 위해 최신 상태 유지.
     """
-    _next: Dict[tuple, float] = {}
+    _ADVANCES = [60, 0]  # 두 타이밍
+    _next: Dict[tuple, float] = {}  # key: (sym, iv, advance)
     while True:
         targets = _liq_refresh_targets()
         now = time.time()
         # 신규 target 초기화
         for sym, iv in targets:
-            key = (sym, iv)
-            if key not in _next:
-                _next[key] = _next_trigger_time(iv, now)
+            for adv in _ADVANCES:
+                key = (sym, iv, adv)
+                if key not in _next:
+                    _next[key] = _next_trigger_time(iv, now, advance=adv)
         # trigger 도달한 항목 refresh
-        active = {(s, i) for s, i in targets}
-        for key in list(active):
-            if now >= _next.get(key, float("inf")):
-                sym, iv = key
-                await refresh_symbol(sym, interval=iv)
-                _next[key] = _next_trigger_time(iv, time.time())
+        active_keys = {(s, i) for s, i in targets}
+        for sym, iv in list(active_keys):
+            for adv in _ADVANCES:
+                key = (sym, iv, adv)
+                if now >= _next.get(key, float("inf")):
+                    await refresh_symbol(sym, interval=iv)
+                    _next[key] = _next_trigger_time(iv, time.time(), advance=adv)
         # 다음 trigger까지 sleep
-        upcoming = [_next[k] for k in active if k in _next]
-        sleep_sec = max(5.0, min(upcoming) - time.time()) if upcoming else 30.0
+        all_keys = [(s, i, a) for s, i in active_keys for a in _ADVANCES]
+        upcoming = [_next[k] for k in all_keys if k in _next]
+        sleep_sec = max(2.0, min(upcoming) - time.time()) if upcoming else 15.0
         await asyncio.sleep(sleep_sec)
