@@ -24,8 +24,8 @@ atr_breakout:
     fn: get_state
 
 cvd_explosion:
-  enabled: true
-  monitoring: true
+  enabled: false
+  monitoring: false
   symbol: "BTCUSDT"
   tick_interval: 10
   exit_tick_interval: 1.0
@@ -35,8 +35,8 @@ cvd_explosion:
   strategy_tag: cvd_explosion
   label: "CVD Explosion"
   emoji: "💣"
-  telegram_alerts: true
-  binance_live: true
+  telegram_alerts: false
+  binance_live: false
   binance_leverage: 3
   tick:
     module: features.strategy.cvd_explosion.realtime_feed
@@ -55,7 +55,7 @@ eth_cvd_explosion:
   label: "ETH CVD Explosion"
   emoji: "🔷"
   telegram_alerts: true
-  binance_live: false
+  binance_live: true
   binance_leverage: 3
   tick:
     module: features.strategy.eth_cvd_explosion.realtime_feed
