@@ -28,9 +28,17 @@ from .sweep_builder import TF_TO_MINUTES, build_sweep_at
 
 async def _fetch_liq_level_map(symbol: str) -> List[Dict]:
     try:
-        from features.strategy.common.kline_bundle import _fetch_liq_level_map as _liq
-        return await _liq(symbol)
-    except Exception:
+        from common.liq_series_cache import get_chart_payload_or_fetch, _zones_to_level_map, _merge_level_maps
+        payload = await get_chart_payload_or_fetch(symbol, interval="15m")
+        if not payload or payload.get("error"):
+            return []
+        multi = (payload.get("liq_multi_window") or {}).get("merged")
+        if multi:
+            return multi
+        liq_map = (payload.get("liq_latest") or {}).get("map") or {}
+        return _zones_to_level_map(liq_map)
+    except Exception as exc:
+        print(f"[eth_cvd_explosion_v2] liq fetch 실패 ({symbol}): {exc}")
         return []
 
 

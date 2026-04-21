@@ -42,9 +42,10 @@ _sym_fetch_locks: Dict[str, asyncio.Lock] = {}
 _sym_fetch_locks_guard = asyncio.Lock()
 
 
-def _redis_key(symbol: str) -> str:
+def _redis_key(symbol: str, interval: str = "1h") -> str:
     sym = symbol.upper().replace(" ", "")
-    return f"{REDIS_KEY_PREFIX}:liq:{sym}"
+    sfx = "" if interval == "1h" else f":{interval}"
+    return f"{REDIS_KEY_PREFIX}:liq:{sym}{sfx}"
 
 
 async def _get_redis():
@@ -79,60 +80,61 @@ def _disable_redis_temporarily(exc: Exception, *, action: str) -> None:
     print(f"[liq_series_cache] redis {action} failed: {exc} (fallback to memory for {int(backoff_sec)}s)")
 
 
-async def _cache_write(symbol: str, payload: Dict[str, Any]) -> None:
+async def _cache_write(symbol: str, payload: Dict[str, Any], interval: str = "1h") -> None:
     r = await _get_redis()
     if r is not None:
         try:
-            await r.set(_redis_key(symbol), json.dumps(payload, ensure_ascii=False), ex=REDIS_TTL_SEC)
+            await r.set(_redis_key(symbol, interval), json.dumps(payload, ensure_ascii=False), ex=REDIS_TTL_SEC)
             return
         except Exception as exc:
             _disable_redis_temporarily(exc, action="set")
     async with _memory_lock:
-        _memory_payload[symbol.upper()] = payload
+        _memory_payload[_redis_key(symbol, interval)] = payload
 
 
-async def get_cached_chart_payload(symbol: str) -> Optional[Dict[str, Any]]:
+async def get_cached_chart_payload(symbol: str, interval: str = "1h") -> Optional[Dict[str, Any]]:
     sym = symbol.upper().strip() or "BTCUSDT"
     r = await _get_redis()
     if r is not None:
         try:
-            raw = await r.get(_redis_key(sym))
+            raw = await r.get(_redis_key(sym, interval))
             if raw:
                 return json.loads(raw)
         except Exception as exc:
             _disable_redis_temporarily(exc, action="get")
     async with _memory_lock:
-        return _memory_payload.get(sym)
+        return _memory_payload.get(_redis_key(sym, interval))
 
 
-async def _lock_for_symbol(sym: str) -> asyncio.Lock:
+async def _lock_for_symbol(sym: str, interval: str = "1h") -> asyncio.Lock:
+    key = f"{sym}:{interval}"
     async with _sym_fetch_locks_guard:
-        if sym not in _sym_fetch_locks:
-            _sym_fetch_locks[sym] = asyncio.Lock()
-        return _sym_fetch_locks[sym]
+        if key not in _sym_fetch_locks:
+            _sym_fetch_locks[key] = asyncio.Lock()
+        return _sym_fetch_locks[key]
 
 
-async def get_chart_payload_or_fetch(symbol: str) -> Optional[Dict[str, Any]]:
+async def get_chart_payload_or_fetch(symbol: str, interval: str = "1h") -> Optional[Dict[str, Any]]:
     """
     캐시 히트 시 그대로 반환. cold start(캐시 없음)이면 Binance REST로 빌드 후 캐시에 쓰고 반환.
     동일 심볼 동시 요청은 락으로 한 번만 fetch.
     """
     sym = symbol.upper().strip() or "BTCUSDT"
     if not LIQ_ON_DEMAND_FETCH:
-        return await get_cached_chart_payload(sym)
+        return await get_cached_chart_payload(sym, interval)
 
-    hit = await get_cached_chart_payload(sym)
+    hit = await get_cached_chart_payload(sym, interval)
     if hit:
         return hit
 
-    lock = await _lock_for_symbol(sym)
+    lock = await _lock_for_symbol(sym, interval)
     async with lock:
-        hit2 = await get_cached_chart_payload(sym)
+        hit2 = await get_cached_chart_payload(sym, interval)
         if hit2:
             return hit2
-        await refresh_symbol(sym)
+        await refresh_symbol(sym, interval)
 
-    out = await get_cached_chart_payload(sym)
+    out = await get_cached_chart_payload(sym, interval)
     if out and isinstance(out.get("meta"), dict):
         meta = dict(out["meta"])
         meta["cold_fetch"] = True
@@ -179,24 +181,24 @@ def build_strategy_liq_snapshot(payload: Dict[str, Any], *, include_series: bool
     return out
 
 
-async def fetch_klines_1h(client: httpx.AsyncClient, symbol: str, limit: int) -> List[list]:
+async def fetch_klines(client: httpx.AsyncClient, symbol: str, limit: int, interval: str = "1h") -> List[list]:
     r = await client.get(
         "https://fapi.binance.com/fapi/v1/klines",
-        params={"symbol": symbol.upper(), "interval": "1h", "limit": min(limit, 1500)},
+        params={"symbol": symbol.upper(), "interval": interval, "limit": min(limit, 1500)},
     )
     r.raise_for_status()
     return r.json()
 
 
-async def fetch_oi_hist_1h(client: httpx.AsyncClient, symbol: str, need: int) -> List[Dict[str, Any]]:
-    """openInterestHist period=1h, 최대 500개 단위로 과거까지 이어붙임 (시간 오름차순)."""
+async def fetch_oi_hist(client: httpx.AsyncClient, symbol: str, need: int, interval: str = "1h") -> List[Dict[str, Any]]:
+    """openInterestHist, 최대 500개 단위로 과거까지 이어붙임 (시간 오름차순)."""
     chunks: List[List[Dict[str, Any]]] = []
     end_time: Optional[int] = None
     sym = symbol.upper()
     collected = 0
     while collected < need:
         batch_need = min(500, need - collected)
-        params: Dict[str, Any] = {"symbol": sym, "period": "1h", "limit": batch_need}
+        params: Dict[str, Any] = {"symbol": sym, "period": interval, "limit": batch_need}
         if end_time is not None:
             params["endTime"] = end_time
         resp = await client.get("https://fapi.binance.com/futures/data/openInterestHist", params=params)
@@ -219,6 +221,14 @@ async def fetch_oi_hist_1h(client: httpx.AsyncClient, symbol: str, need: int) ->
         by_ts[int(row["timestamp"])] = row
     sorted_rows = [by_ts[k] for k in sorted(by_ts.keys())]
     return sorted_rows[-need:] if len(sorted_rows) > need else sorted_rows
+
+
+# backward-compat aliases
+async def fetch_klines_1h(client: httpx.AsyncClient, symbol: str, limit: int) -> List[list]:
+    return await fetch_klines(client, symbol, limit, interval="1h")
+
+async def fetch_oi_hist_1h(client: httpx.AsyncClient, symbol: str, need: int) -> List[Dict[str, Any]]:
+    return await fetch_oi_hist(client, symbol, need, interval="1h")
 
 
 def _klines_to_df(raw: List[list]) -> pd.DataFrame:
@@ -314,21 +324,24 @@ def _merge_level_maps(level_maps: List[List[Dict]]) -> List[Dict]:
     return out
 
 
-async def build_payload_for_symbol(symbol: str) -> Dict[str, Any]:
+async def build_payload_for_symbol(symbol: str, interval: str = "1h") -> Dict[str, Any]:
     sym = symbol.upper().strip() or "BTCUSDT"
-    retain = max(LIQ_RETAIN_BARS, LIQ_WINDOW + LIQ_MIN_BARS)
+    # 15m 은 1h 대비 4배 봉 → window preset도 4배
+    _interval_mult = {"15m": 4, "30m": 2, "5m": 12}.get(interval, 1)
+    _window_presets = [(k, v * _interval_mult) for k, v in _WINDOW_PRESETS]
+    retain = max(LIQ_RETAIN_BARS * _interval_mult, (LIQ_WINDOW + LIQ_MIN_BARS) * _interval_mult)
     t0 = time.time()
     async with httpx.AsyncClient(timeout=45.0) as client:
-        raw_k = await fetch_klines_1h(client, sym, retain)
+        raw_k = await fetch_klines(client, sym, retain, interval=interval)
         if not raw_k:
             return {
                 "symbol": sym,
                 "error": "no_klines",
-                "meta": {"updated_at": None, "retain_bars": retain, "window": LIQ_WINDOW},
+                "meta": {"updated_at": None, "retain_bars": retain, "window": LIQ_WINDOW, "interval": interval},
             }
         df_k = _klines_to_df(raw_k)
         need_oi = len(df_k)
-        oi_rows = await fetch_oi_hist_1h(client, sym, max(need_oi, LIQ_WINDOW + 10))
+        oi_rows = await fetch_oi_hist(client, sym, max(need_oi, LIQ_WINDOW + 10), interval=interval)
         df = _merge_oi(df_k, oi_rows)
         df = df.dropna(subset=["close"])
         if len(df) > retain:
@@ -371,7 +384,7 @@ async def build_payload_for_symbol(symbol: str) -> Dict[str, Any]:
     # 3개 window(3d/2w/1m) 각각 빌드 → 병합 (backtest engine.py와 동일 로직)
     preset_level_maps: List[List[Dict]] = []
     by_window: Dict[str, Any] = {}
-    for preset_key, preset_bars in _WINDOW_PRESETS:
+    for preset_key, preset_bars in _window_presets:
         if len(bars_all) < LIQ_MIN_BARS:
             continue
         slc = bars_all[-preset_bars:] if len(bars_all) >= preset_bars else bars_all
@@ -420,12 +433,12 @@ async def build_payload_for_symbol(symbol: str) -> Dict[str, Any]:
     }
 
 
-async def refresh_symbol(symbol: str) -> None:
+async def refresh_symbol(symbol: str, interval: str = "1h") -> None:
     try:
-        payload = await build_payload_for_symbol(symbol)
-        await _cache_write(symbol.upper(), payload)
+        payload = await build_payload_for_symbol(symbol, interval=interval)
+        await _cache_write(symbol.upper(), payload, interval=interval)
     except Exception as exc:
-        print(f"[liq_series_cache] refresh {symbol} failed: {exc}")
+        print(f"[liq_series_cache] refresh {symbol} ({interval}) failed: {exc}")
 
 
 def _liq_symbols() -> List[str]:

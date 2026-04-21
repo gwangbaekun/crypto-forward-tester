@@ -67,9 +67,9 @@ eth_cvd_explosion_v2:
   symbol: "ETHUSDT"
   tick_interval: 10
   exit_tick_interval: 1.0
-  timeframes: ["1m", "15m"]
-  entry_tf: "1m"
-  higher_tf: "15m"
+  timeframes: ["15m", "1h"]
+  entry_tf: "15m"
+  higher_tf: "1h"
   strategy_tag: eth_cvd_explosion_v2
   label: "ETH CVD Explosion V2"
   emoji: "🔷"
