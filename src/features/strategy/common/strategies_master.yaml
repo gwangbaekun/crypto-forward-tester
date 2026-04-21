@@ -58,5 +58,5 @@ eth_cvd_explosion:
   binance_live: true
   binance_leverage: 3
   tick:
-    module: features.strategy.eth_cvd_explosion.realtime_feed
+    module: features.strategy.eth_cvd_explosion.forward_test_runner
     fn: get_state

@@ -249,6 +249,7 @@
     var _priceChart = null, _volChart = null;
     var _candleSeries = null, _volSeries = null, _threshSeries = null;
     var _m15SupportSeries = null, _m15ResistanceSeries = null;
+    var _liqPriceLines = [];
     var _chartTimes = [];
     var _chartOpen = true;
 
@@ -343,6 +344,54 @@
             .catch(function() { _setHealth('forward_trades', false, '요청 실패', null); });
     }
 
+    var _INTENSITY_COLOR = {
+        CRITICAL: { line: '#ff4757', text: '#ff4757' },
+        HIGH:     { line: '#ffa502', text: '#ffa502' },
+        MEDIUM:   { line: '#eccc68', text: '#eccc68' },
+        LOW:      { line: '#57606f', text: '#57606f' },
+    };
+
+    function _clearLiqLines() {
+        if (!_candleSeries) return;
+        _liqPriceLines.forEach(function(pl) {
+            try { _candleSeries.removePriceLine(pl); } catch(e) {}
+        });
+        _liqPriceLines = [];
+    }
+
+    function _drawLiqLevels(levels, currentPrice) {
+        _clearLiqLines();
+        if (!_candleSeries || !levels || !levels.length) return;
+        var cp = currentPrice || 0;
+        levels.forEach(function(lvl) {
+            var p = lvl.price;
+            if (!p) return;
+            var intensity = (lvl.intensity || 'LOW').toUpperCase();
+            var col = (_INTENSITY_COLOR[intensity] || _INTENSITY_COLOR['LOW']).line;
+            var isAbove = cp > 0 && p > cp;
+            var pl = _candleSeries.createPriceLine({
+                price:        p,
+                color:        col,
+                lineWidth:    intensity === 'CRITICAL' ? 2 : 1,
+                lineStyle:    2,
+                axisLabelVisible: true,
+                title:        intensity.charAt(0) + (lvl.rank ? lvl.rank : ''),
+            });
+            _liqPriceLines.push(pl);
+        });
+    }
+
+    function _loadLiqLevels(currentPrice) {
+        fetch('/quant/eth_cvd_explosion/liq_levels?symbol=' + SYMBOL)
+            .then(function(r) { return r.json(); })
+            .then(function(d) {
+                if (d.ok && d.levels) {
+                    _drawLiqLevels(d.levels, currentPrice);
+                }
+            })
+            .catch(function() {});
+    }
+
     function _loadChart() {
         if (!_chartOpen) return;
         _initCharts();
@@ -386,6 +435,11 @@
                 _threshSeries.setData(bars.map(function(b) {
                     return { time: b.time, value: mult };
                 }));
+
+                // liq level price lines
+                var lastClose = bars.length ? bars[bars.length - 1].close : 0;
+                _loadLiqLevels(lastClose);
+
                 _setHealth('chart_data', true, '정상 수신', null);
             })
             .catch(function() {

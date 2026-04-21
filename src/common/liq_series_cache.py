@@ -20,6 +20,8 @@ import pandas as pd
 
 from common.oi_liq_map import build_oi_liq_map, compute_direction
 
+_WINDOW_PRESETS: List[tuple] = [("3d", 72), ("2w", 336), ("1m", 720)]
+
 # backtest DEFAULT_WINDOW / scripts 기본과 동일
 LIQ_WINDOW = int(os.getenv("LIQ_WINDOW", "400"))
 # 최대 룩백(window)의 2배만 Redis에 유지
@@ -278,6 +280,40 @@ def _bars_for_map(df: pd.DataFrame) -> List[Dict[str, Any]]:
     return out
 
 
+def _zones_to_level_map(liq_map: Dict) -> List[Dict]:
+    """long_liq_zones + short_liq_zones → flat level_map (backtest engine.py 동일)."""
+    out: List[Dict] = []
+    for key in ("long_liq_zones", "short_liq_zones"):
+        for z in (liq_map or {}).get(key) or []:
+            lo = z.get("price_low") or z.get("price")
+            hi = z.get("price_high") or z.get("price")
+            if lo and hi:
+                mid = (float(lo) + float(hi)) / 2
+                out.append({
+                    "price":     round(mid, 1),
+                    "rank":      z.get("rank", 0),
+                    "intensity": z.get("intensity", ""),
+                    "oi_weight": round(float(z.get("oi_weight", 0)), 4),
+                })
+    return out
+
+
+def _merge_level_maps(level_maps: List[List[Dict]]) -> List[Dict]:
+    """가격 기준 중복 제거(oi_weight 큰 항목 우선) — backtest engine.py _merge_level_maps 동일."""
+    merged: Dict[float, Dict] = {}
+    for levels in level_maps:
+        for lvl in levels:
+            p = round(float(lvl.get("price", 0)), 1)
+            if p <= 0:
+                continue
+            cur = merged.get(p)
+            if cur is None or float(lvl.get("oi_weight", 0)) > float(cur.get("oi_weight", 0)):
+                merged[p] = dict(lvl)
+    out = list(merged.values())
+    out.sort(key=lambda x: float(x.get("price", 0)))
+    return out
+
+
 async def build_payload_for_symbol(symbol: str) -> Dict[str, Any]:
     sym = symbol.upper().strip() or "BTCUSDT"
     retain = max(LIQ_RETAIN_BARS, LIQ_WINDOW + LIQ_MIN_BARS)
@@ -332,6 +368,23 @@ async def build_payload_for_symbol(symbol: str) -> Dict[str, Any]:
     )
     direction = compute_direction(liq_single.get("long_liq_zones", []), liq_single.get("short_liq_zones", []))
 
+    # 3개 window(3d/2w/1m) 각각 빌드 → 병합 (backtest engine.py와 동일 로직)
+    preset_level_maps: List[List[Dict]] = []
+    by_window: Dict[str, Any] = {}
+    for preset_key, preset_bars in _WINDOW_PRESETS:
+        if len(bars_all) < LIQ_MIN_BARS:
+            continue
+        slc = bars_all[-preset_bars:] if len(bars_all) >= preset_bars else bars_all
+        try:
+            preset_liq = build_oi_liq_map(slc, current_price=last_close, min_bars=min(LIQ_MIN_BARS, len(slc) // 2))
+            lvl_map = _zones_to_level_map(preset_liq)
+            preset_level_maps.append(lvl_map)
+            by_window[preset_key] = {"bars": len(slc), "level_map": lvl_map}
+        except Exception as exc:
+            print(f"[liq_series_cache] preset {preset_key} build failed: {exc}")
+
+    merged_level_map = _merge_level_maps(preset_level_maps)
+
     t_ms = [b["time"] for b in bars_all]
     chart = {
         "t_ms": t_ms,
@@ -359,6 +412,10 @@ async def build_payload_for_symbol(symbol: str) -> Dict[str, Any]:
             "map": liq_single,        # backward-compat 단일 스냅샷
             "direction": direction,
             "windows": liq_windows,   # 3d/2w/1m 개별 liq map
+        },
+        "liq_multi_window": {
+            "merged": merged_level_map,
+            "by_window": by_window,
         },
     }
 

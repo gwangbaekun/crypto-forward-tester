@@ -186,7 +186,10 @@ def make_router(strategy_key: str, default_tfs: str = "15m,1h,4h") -> APIRouter:
     ):
         """특정 TF의 신호 상세 설명 (디버깅 + 검토용)."""
         try:
-            mod = importlib.import_module(f"features.strategy.{strategy_key}.realtime_feed")
+            from features.strategy.common.config_loader import get_master_config
+            _tick_cfg = ((get_master_config() or {}).get(strategy_key) or {}).get("tick") or {}
+            _tick_module = _tick_cfg.get("module") or f"features.strategy.{strategy_key}.realtime_feed"
+            mod = importlib.import_module(_tick_module)
             state_fn = getattr(mod, "get_state", None) or getattr(mod, "get_realtime_state", None)
             state = await state_fn(symbol=symbol, tfs=timeframes)
             by_tf = state.get("by_tf") or {}

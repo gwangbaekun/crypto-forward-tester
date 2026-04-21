@@ -79,21 +79,19 @@ def _merge_level_maps(level_maps: List[List[Dict]]) -> List[Dict]:
 
 async def _fetch_liq_level_map(symbol: str) -> List[Dict]:
     """
-    liq_series_cache 에서 3d/2w/1m 윈도우 level_map 을 병합 반환.
-    백테스트 _load_liq_ts_map_from_presets 와 동일 방식.
+    liq_series_cache 에서 multi_window 병합 level_map 조회.
+    3d/2w/1m 3개 window 병합 (backtest engine.py와 동일).
     실패 시 빈 리스트 반환 (magnets={} 로 graceful fallback).
     """
     try:
         payload = await get_chart_payload_or_fetch(symbol)
         if not payload or payload.get("error"):
             return []
-        liq_latest = payload.get("liq_latest") or {}
-        windows = liq_latest.get("windows") or {}
-        if windows:
-            maps = [_zones_to_level_map(windows[k]) for k in ("3d", "2w", "1m") if k in windows]
-            return _merge_level_maps(maps)
-        # fallback: 구버전 캐시(단일 맵)
-        liq_map = liq_latest.get("map") or {}
+        # multi_window 병합 우선, 없으면 liq_latest 폴백
+        multi = (payload.get("liq_multi_window") or {}).get("merged")
+        if multi:
+            return multi
+        liq_map = (payload.get("liq_latest") or {}).get("map") or {}
         return _zones_to_level_map(liq_map)
     except Exception as exc:
         print(f"[kline_bundle] liq fetch 실패 ({symbol}): {exc}")

@@ -129,8 +129,24 @@ class EthCvdExplosionForwardTest(BaseForwardTest):
                 }
                 # position_meta — backtest_runner 와 동일 키셋
                 pm = sig.get("position_meta") or {}
-                for k, v in pm.items():
-                    pos[k] = v
+                for k in (
+                    "tpsl_mode",
+                    "tp_advances",
+                    "rr_ratio",
+                    "sl_ratchet_step",
+                    "sl_ratchet_buffer_pct",
+                    "sl_ratchet_mode",
+                    "sl_ratchet_mid_ratio",
+                    "sl_lift_mode",
+                    "sl_lift_min_intensity",
+                    "sl_lift_rank_le",
+                    "slippage_pct",
+                    "m15_structure_stop_enabled",
+                    "m15_structure_lookback_bars",
+                    "m15_structure_buffer_pct",
+                ):
+                    if k in pm:
+                        pos[k] = pm[k]
 
                 pos["trade_id"] = self._persist_open(symbol, pos, report_text or "")
                 self._position = pos
