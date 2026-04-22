@@ -83,6 +83,8 @@
     var perPage = 10;
     var timer = null;
     var _selectedGlobalIdx = -1;
+    var hasRenderedStats = false;
+    var hasRenderedTrades = false;
 
     function renderTradesPage() {
       if (!tradesListEl) return;
@@ -249,27 +251,37 @@
       var sym = symbolFn();
       var statsUrl = basePath + "/forward_test/stats?symbol=" + encodeURIComponent(sym);
       if (strategyTag) statsUrl += "&strategy_tag=" + encodeURIComponent(strategyTag);
+      if (!hasRenderedStats) {
+        statsEl.innerHTML = "<span style='color:var(--text-secondary);font-size:0.85rem;'>Loading forward test stats…</span>";
+      }
       return fetch(statsUrl)
         .then(function (r) { return r.json(); })
         .then(function (d) {
           if (d && d.error) {
-            statsEl.innerHTML = "<span style='color:var(--text-secondary);font-size:0.85rem;'>Could not load forward test stats.</span>";
+            if (!hasRenderedStats) {
+              statsEl.innerHTML = "<span style='color:var(--text-secondary);font-size:0.85rem;'>Could not load forward test stats.</span>";
+            }
             if (typeof opts.onStatsFetch === "function") opts.onStatsFetch(false, d);
             return;
           }
           renderStats(d || {});
+          hasRenderedStats = true;
           if (typeof opts.onRendered === "function") opts.onRendered(d || {});
           if (typeof opts.onStatsFetch === "function") opts.onStatsFetch(true, d || {});
         })
         .catch(function () {
-          statsEl.innerHTML = "<span style='color:var(--text-secondary);font-size:0.85rem;'>Could not load forward test stats.</span>";
+          if (!hasRenderedStats) {
+            statsEl.innerHTML = "<span style='color:var(--text-secondary);font-size:0.85rem;'>Could not load forward test stats.</span>";
+          }
           if (typeof opts.onStatsFetch === "function") opts.onStatsFetch(false, null);
         });
     }
 
     function refreshTrades() {
       var sym = symbolFn();
-      tradesListEl.innerHTML = "<span style='color:var(--text-secondary);'>Loading…</span>";
+      if (!hasRenderedTrades) {
+        tradesListEl.innerHTML = "<span style='color:var(--text-secondary);'>Loading…</span>";
+      }
       var tradesUrl = basePath + "/forward_test/trades?symbol=" + encodeURIComponent(sym) + "&limit=" + tradesLimit;
       if (strategyTag) tradesUrl += "&strategy_tag=" + encodeURIComponent(strategyTag);
       return fetch(tradesUrl)
@@ -277,11 +289,14 @@
         .then(function (d) {
           trades = Array.isArray(d) ? d : (d && d.trades ? d.trades : []);
           renderTradesPage();
+          hasRenderedTrades = true;
           if (typeof opts.onTradesFetch === "function") opts.onTradesFetch(true, d);
         })
         .catch(function () {
-          tradesListEl.innerHTML = "<span style='color:var(--text-secondary);'>Could not load trade list.</span>";
-          if (pagerEl) pagerEl.innerHTML = "";
+          if (!hasRenderedTrades) {
+            tradesListEl.innerHTML = "<span style='color:var(--text-secondary);'>Could not load trade list.</span>";
+            if (pagerEl) pagerEl.innerHTML = "";
+          }
           if (typeof opts.onTradesFetch === "function") opts.onTradesFetch(false, null);
         });
     }

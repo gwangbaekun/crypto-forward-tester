@@ -80,12 +80,16 @@ async def _strategy_loop(name: str, cfg: Dict[str, Any], symbol: str) -> None:
                 from common.binance_price_ws import get_cached_price
                 ws_price = get_cached_price(symbol)
                 if ws_price:
-                    eng.tick(symbol, {
+                    tick_result = eng.tick(symbol, {
                         "current_price": ws_price,
                         "signal":        {},
                         "bar_high":      ws_price,
                         "bar_low":       ws_price,
                     })
+                    events = (tick_result or {}).get("events") or []
+                    if events:
+                        from features.strategy.common.base_realtime_feed import _execute_verify_notify
+                        await _execute_verify_notify(name, symbol, events, ws_price)
                 else:
                     print(f"[StrategyLoop:{name}] WS price stale for {symbol}, skip exit tick")
                 await asyncio.sleep(max(0.5, fast_exit_interval))
