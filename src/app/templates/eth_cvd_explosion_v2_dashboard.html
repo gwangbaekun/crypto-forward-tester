@@ -103,10 +103,18 @@
         </div>
         <div id="forward-stats" style="min-height:60px;color:var(--text-secondary);">Loading…</div>
         <div id="forward-trades-box" style="margin-top:14px; padding-top:14px; border-top:1px solid var(--border-color);">
-            <div style="font-size:0.8rem;font-weight:bold;margin-bottom:8px;color:var(--text-primary);">📋 Recent trades</div>
+            <div style="font-size:0.8rem;font-weight:bold;margin-bottom:8px;color:var(--text-primary);">📋 Recent trades <span style="font-size:0.68rem;color:var(--text-secondary);font-weight:normal;">— 클릭 시 상세 보기</span></div>
             <div id="forward-trades-list" style="font-size:0.75rem;color:var(--text-secondary);">Loading…</div>
             <div id="forward-trades-pagination" style="margin-top:8px;display:flex;gap:6px;align-items:center;flex-wrap:wrap;"></div>
         </div>
+    </div>
+
+    <div class="card" id="forward-trade-detail" style="display:none;">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;">
+            <div class="card-title" style="margin:0;">Trade Detail</div>
+            <button onclick="document.getElementById('forward-trade-detail').style.display='none';_clearFwdPriceLines();" style="font-size:0.7rem;padding:2px 8px;">✕ Close</button>
+        </div>
+        <div id="forward-trade-detail-body" style="font-size:0.8rem;color:var(--text-secondary);"></div>
     </div>
 
 </div>
@@ -250,6 +258,7 @@
     var _candleSeries = null, _volSeries = null, _threshSeries = null;
     var _m15SupportSeries = null, _m15ResistanceSeries = null;
     var _liqPriceLines = [];
+    var _fwdTradePriceLines = [];
     var _chartTimes = [];
     var _chartOpen = true;
 
@@ -357,6 +366,88 @@
             try { _candleSeries.removePriceLine(pl); } catch(e) {}
         });
         _liqPriceLines = [];
+    }
+
+    function _clearFwdPriceLines() {
+        if (!_candleSeries) return;
+        _fwdTradePriceLines.forEach(function(pl) {
+            try { _candleSeries.removePriceLine(pl); } catch(e) {}
+        });
+        _fwdTradePriceLines = [];
+    }
+    window._clearFwdPriceLines = _clearFwdPriceLines;
+
+    function _addFwdPl(price, color, title, dashed) {
+        if (!_candleSeries || price == null || !(price > 0)) return;
+        var pl = _candleSeries.createPriceLine({
+            price: price, color: color, lineWidth: 1,
+            lineStyle: dashed ? 2 : 0, axisLabelVisible: true, title: title,
+        });
+        _fwdTradePriceLines.push(pl);
+    }
+
+    function _fmtTs(ts) {
+        if (!ts) return '—';
+        return new Date(ts * 1000).toISOString().slice(5, 16).replace('T', ' ') + ' UTC';
+    }
+
+    function _onFwdTradeClick(t, idx) {
+        _clearFwdPriceLines();
+        _addFwdPl(t.entry_price, '#c77dff', 'Entry', true);
+        var tpPal = ['#26a69a', '#4db6ac', '#66bb6a', '#81c784', '#a5d6a7'];
+        var slPal = ['#c62828', '#e57373', '#ff8a80'];
+        var tps = (Array.isArray(t.tp_levels) && t.tp_levels.length) ? t.tp_levels : (t.tp1_price ? [t.tp1_price] : []);
+        var sls = (Array.isArray(t.sl_levels) && t.sl_levels.length) ? t.sl_levels : (t.sl_price ? [t.sl_price] : []);
+        tps.forEach(function(p, i) { _addFwdPl(p, tpPal[i % tpPal.length], 'TP' + (i + 1), i > 0); });
+        sls.forEach(function(p, i) { _addFwdPl(p, slPal[i % slPal.length], sls.length > 1 ? 'SL' + (i + 1) : 'SL', i > 0); });
+
+        var pnl = Number(t.pnl_pct || 0);
+        var pnlCol = pnl >= 0 ? '#26a69a' : '#ef5350';
+        var sideCol = t.side === 'long' ? '#26a69a' : '#ef5350';
+
+        var tpRows = tps.map(function(p, i) {
+            return "<div style='display:flex;justify-content:space-between;padding:2px 0;'>" +
+                "<span style='color:#8b949e;'>TP" + (i + 1) + "</span>" +
+                "<span style='color:" + tpPal[i % tpPal.length] + ";'>$" + Math.round(p).toLocaleString() + "</span></div>";
+        }).join('');
+        var slRows = sls.map(function(p, i) {
+            return "<div style='display:flex;justify-content:space-between;padding:2px 0;'>" +
+                "<span style='color:#8b949e;'>" + (sls.length > 1 ? 'SL' + (i + 1) : 'SL') + "</span>" +
+                "<span style='color:" + slPal[i % slPal.length] + ";'>$" + Math.round(p).toLocaleString() + "</span></div>";
+        }).join('');
+
+        var advStr = (t.tp_advances != null && t.tp_advances > 0) ? ' · TP×' + t.tp_advances : '';
+
+        var html =
+            "<div style='color:#c77dff;font-weight:bold;margin-bottom:6px;'>#" + (idx + 1) +
+            " · <span style='color:" + sideCol + ";'>" + (t.side || '').toUpperCase() + "</span>" +
+            " · ★" + (t.confidence != null ? t.confidence : '—') +
+            advStr + "</div>" +
+            "<div style='display:flex;justify-content:space-between;padding:2px 0;border-top:1px solid #21262d;margin-top:4px;'>" +
+                "<span style='color:#8b949e;'>Open</span><span>" + _fmtTs(t.entry_ts) + "</span></div>" +
+            "<div style='display:flex;justify-content:space-between;padding:2px 0;'>" +
+                "<span style='color:#8b949e;'>Entry</span><span>$" + Math.round(t.entry_price || 0).toLocaleString() + "</span></div>" +
+            tpRows + slRows +
+            "<div style='display:flex;justify-content:space-between;padding:2px 0;border-top:1px solid #21262d;margin-top:4px;'>" +
+                "<span style='color:#8b949e;'>Exit</span><span>$" + Math.round(t.exit_price || 0).toLocaleString() + " · " + (t.exit_reason || '—') + "</span></div>" +
+            "<div style='display:flex;justify-content:space-between;padding:2px 0;'>" +
+                "<span style='color:#8b949e;'>PnL (gross)</span><span style='color:" + pnlCol + ";'>" + (pnl >= 0 ? '+' : '') + pnl.toFixed(2) + "%</span></div>" +
+            (t.net_pnl_pct != null ? "<div style='display:flex;justify-content:space-between;padding:2px 0;'>" +
+                "<span style='color:#8b949e;'>PnL (net fee)</span><span style='color:" + (Number(t.net_pnl_pct) >= 0 ? '#26a69a' : '#ef5350') + ";font-weight:bold;'>" + (Number(t.net_pnl_pct) >= 0 ? '+' : '') + Number(t.net_pnl_pct).toFixed(2) + "%</span></div>" : "") +
+            "<div style='display:flex;justify-content:space-between;padding:2px 0;'>" +
+                "<span style='color:#8b949e;'>Close</span><span>" + _fmtTs(t.exit_ts) + " (" + (t.duration_min || '—') + "m)</span></div>";
+
+        document.getElementById('forward-trade-detail-body').innerHTML = html;
+        document.getElementById('forward-trade-detail').style.display = '';
+
+        // 차트 범위 이동
+        if (_priceChart && t.entry_ts && t.exit_ts) {
+            var span = Math.max(3600 * 4, (t.exit_ts - t.entry_ts) * 2);
+            _priceChart.timeScale().setVisibleRange({
+                from: t.entry_ts - span,
+                to: t.exit_ts + span,
+            });
+        }
     }
 
     function _drawLiqLevels(levels, currentPrice) {
@@ -509,7 +600,7 @@
         if (window.ForwardTestDashboard && !window.__CVD_FWD_INITED) {
             window.__CVD_FWD_INITED = true;
             window.ForwardTestDashboard.init({
-                basePath: '/quant/eth_cvd_explosion',
+                basePath: '/quant/eth_cvd_explosion_v2',
                 symbolFn: function () { return SYMBOL; },
                 strategyTag: null,
                 statsElId: 'forward-stats',
@@ -522,6 +613,7 @@
                 onTradesFetch: function(ok) {
                     _setHealth('forward_trades', !!ok, ok ? '정상 수신' : '요청 실패', null);
                 },
+                onTradeClick: _onFwdTradeClick,
             });
         }
 

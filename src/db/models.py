@@ -46,6 +46,7 @@ class ForwardTrade(Base):
     status: Mapped[str] = mapped_column(String(32), nullable=False, default="open")
     exit_price: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
     pnl_pct: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    pnl_pct_net: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
     closed_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
     duration_min: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
     close_note: Mapped[Optional[str]] = mapped_column(String(256), nullable=True)

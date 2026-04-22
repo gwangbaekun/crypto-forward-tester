@@ -1,21 +1,21 @@
 """
 Forward test 누적 수익률: 복리(compound) + Binance Futures 수수료 반영.
 
-- 복리: 거래 순서대로 capital *= (1 + net_pnl_pct/100), 최종 (capital - 1) * 100.
-- 수수료: Binance USDⓈ-M Futures 기준 1회 왕복(진입+청산) 시 round-trip fee 차감.
-  기본값 0.06% (진입 0.03% + 청산 0.03% 수준, maker/taker 평균 가정).
+- pnl_pct: 순수 가격 이동률 (leverage 미반영, fee 미포함).
+- pnl_pct_net: 거래 저장 시 pnl_pct - BINANCE_FEE_NOTIONAL_PCT 로 미리 계산된 값.
+- compound_total_pnl: pnl_pct 복리 누적 (순수 PnL).
+- compound_total_pnl_net: pnl_pct_net 복리 누적 (수수료 차감 PnL).
 """
 from __future__ import annotations
 
 from typing import Any, Dict, List, Optional, Tuple
 
 # Binance Futures taker 수수료: 0.05% per side → 왕복 0.10% (notional 기준)
-# equity 기준 = notional_fee × leverage (예: 3x → 0.30%)
-BINANCE_FEE_NOTIONAL_PCT   = 0.10   # 왕복 수수료 (notional 기준)
-BINANCE_DEFAULT_LEVERAGE   = 1.0    # 기본 1x (BaseForwardTest.LEVERAGE 와 연동)
+BINANCE_FEE_NOTIONAL_PCT   = 0.10   # 왕복 수수료 (notional = equity, leverage 제거 후)
 
 # 하위 호환성용 — 기존 코드가 직접 임포트하는 경우
 BINANCE_FEE_ROUND_TRIP_PCT = BINANCE_FEE_NOTIONAL_PCT
+BINANCE_DEFAULT_LEVERAGE   = 1.0
 
 
 def _parse_closed_at(t: Dict[str, Any]) -> Any:
@@ -25,42 +25,61 @@ def _parse_closed_at(t: Dict[str, Any]) -> Any:
     return v
 
 
-def compound_total_pnl_with_fee(
+def compound_total_pnl(
     trades: List[Dict[str, Any]],
-    fee_round_trip_pct: float = BINANCE_FEE_NOTIONAL_PCT,
-    leverage: float = BINANCE_DEFAULT_LEVERAGE,
 ) -> Tuple[float, int, int]:
-    """
-    거래 목록을 복리로 누적 수익률 계산하고, 거래당 수수료를 차감한 뒤 win/loss 건수 반환.
-
-    - trades: 각 항목에 pnl_pct, closed_at(선택) 필요. closed_at 기준 오름차순(과거→최근)이어야 복리 순서 맞음.
-    - fee_round_trip_pct: 1회 왕복 수수료 % (notional 기준, 0.10% 기본).
-    - leverage: 레버리지 배수. equity 기준 수수료 = fee × leverage.
-      pnl_pct가 이미 equity ROI(× leverage)로 저장된 경우 leverage=1.0 사용.
-    Returns:
-        (total_pnl_pct, win_count, loss_count)
-        total_pnl_pct: (최종 자본 - 1) * 100, 복리 + 수수료 반영.
-        win_count / loss_count: 수수료 차감 후 net_pnl 기준.
-    """
+    """순수 pnl_pct 복리 누적 (수수료 미포함). win/loss는 raw pnl 기준."""
     if not trades:
         return 0.0, 0, 0
-    # equity 기준 실효 수수료: pnl_pct 가 이미 × leverage 이므로 fee도 동일 기준
-    effective_fee = fee_round_trip_pct * leverage
-    # DB에서 closed_at.desc()로 가져오므로 최신순 → 과거순으로 뒤집기
     ordered = sorted(trades, key=_parse_closed_at)
     capital = 1.0
     win_count = 0
     loss_count = 0
     for t in ordered:
         raw_pnl = float(t.get("pnl_pct") or 0)
-        net_pnl = raw_pnl - effective_fee
+        capital *= 1.0 + (raw_pnl / 100.0)
+        if raw_pnl > 0:
+            win_count += 1
+        elif raw_pnl < 0:
+            loss_count += 1
+    return (capital - 1.0) * 100.0, win_count, loss_count
+
+
+def compound_total_pnl_net(
+    trades: List[Dict[str, Any]],
+) -> Tuple[float, int, int]:
+    """
+    수수료 차감 pnl_pct_net 복리 누적.
+    pnl_pct_net 이 없는 구형 레코드는 pnl_pct - BINANCE_FEE_NOTIONAL_PCT 로 폴백.
+    win/loss는 net pnl 기준.
+    """
+    if not trades:
+        return 0.0, 0, 0
+    ordered = sorted(trades, key=_parse_closed_at)
+    capital = 1.0
+    win_count = 0
+    loss_count = 0
+    for t in ordered:
+        net_pnl = t.get("pnl_pct_net")
+        if net_pnl is None:
+            net_pnl = float(t.get("pnl_pct") or 0) - BINANCE_FEE_NOTIONAL_PCT
+        else:
+            net_pnl = float(net_pnl)
         capital *= 1.0 + (net_pnl / 100.0)
         if net_pnl > 0:
             win_count += 1
         elif net_pnl < 0:
             loss_count += 1
-    total_pnl_pct = (capital - 1.0) * 100.0
-    return total_pnl_pct, win_count, loss_count
+    return (capital - 1.0) * 100.0, win_count, loss_count
+
+
+def compound_total_pnl_with_fee(
+    trades: List[Dict[str, Any]],
+    fee_round_trip_pct: float = BINANCE_FEE_NOTIONAL_PCT,
+    leverage: float = BINANCE_DEFAULT_LEVERAGE,
+) -> Tuple[float, int, int]:
+    """하위 호환성 유지 — compound_total_pnl_net 으로 위임."""
+    return compound_total_pnl_net(trades)
 
 
 def total_pnl_including_unrealized(

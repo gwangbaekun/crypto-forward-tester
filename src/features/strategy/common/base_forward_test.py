@@ -255,10 +255,13 @@ class BaseForwardTest(ABC):
         exit_price: float,
         reason: str,
         pnl_pct: float,
+        pnl_pct_net: float,
         close_note: Optional[str] = None,
+        position: Optional[Dict[str, Any]] = None,
     ) -> None:
         if not self._db_available() or trade_id is None:
             return
+        import json as _json
         from db.models import ForwardTrade
         from datetime import datetime
         session = self._get_session()
@@ -270,10 +273,28 @@ class BaseForwardTest(ABC):
             trade.status       = reason
             trade.exit_price   = exit_price
             trade.pnl_pct      = pnl_pct
+            trade.pnl_pct_net  = pnl_pct_net
             trade.closed_at    = now
             trade.duration_min = round((now - trade.opened_at).total_seconds() / 60.0, 1)
             if close_note:
                 trade.close_note = close_note
+            # 최종 position 상태 저장 (ratchet/advance 반영)
+            if position:
+                _meta_keys = (
+                    "tpsl_mode", "tp_advances", "tp_levels", "sl_levels",
+                    "level_map", "sl_ratchet_step", "sl_ratchet_buffer_pct",
+                    "slippage_pct", "m15_structure_stop_enabled",
+                    "m15_structure_lookback_bars", "m15_structure_buffer_pct",
+                )
+                final_meta = {k: position[k] for k in _meta_keys if k in position}
+                if final_meta:
+                    trade.position_meta = _json.dumps(final_meta)
+                final_sl = position.get("sl") or position.get("sl_price")
+                if final_sl:
+                    trade.sl_price = final_sl
+                final_tp = position.get("tp") or position.get("tp1_price")
+                if final_tp:
+                    trade.tp1_price = final_tp
             session.commit()
         except Exception as e:
             session.rollback()
@@ -324,8 +345,47 @@ class BaseForwardTest(ABC):
             session.close()
 
     def _extra_trade_row(self, row: Any) -> Dict[str, Any]:
-        """전략별 추가 필드 — 필요한 전략만 오버라이드."""
-        return {}
+        """전략 공통 trade 보강 필드."""
+        import json as _json
+        from features.strategy.common.pnl import BINANCE_FEE_NOTIONAL_PCT
+
+        meta: Dict[str, Any] = {}
+        if row.position_meta:
+            try:
+                meta = _json.loads(row.position_meta)
+            except Exception:
+                pass
+
+        tp_levels = meta.get("tp_levels") or ([row.tp1_price] if row.tp1_price else [])
+        sl_levels = meta.get("sl_levels") or ([row.sl_price] if row.sl_price else [])
+
+        # entry/exit 가격으로 순수 pnl 재계산 (과거 DB 레버리지 오염 보정)
+        entry = row.entry_price or 0
+        exit_ = row.exit_price or 0
+        if entry > 0 and exit_ and exit_ > 0:
+            if row.side == "long":
+                pnl_pct = round((exit_ - entry) / entry * 100, 4)
+            else:
+                pnl_pct = round((entry - exit_) / entry * 100, 4)
+        else:
+            pnl_pct = row.pnl_pct or 0
+
+        net_pnl_pct = round(pnl_pct - BINANCE_FEE_NOTIONAL_PCT, 4)
+
+        return {
+            "pnl_pct":     pnl_pct,
+            "net_pnl_pct": net_pnl_pct,
+            "confidence":  row.confidence or 0,
+            "tp":          row.tp1_price,
+            "sl":          row.sl_price,
+            "tp_levels":   tp_levels,
+            "sl_levels":   sl_levels,
+            "tp_advances": meta.get("tp_advances", 0),
+            "exit_reason": row.close_note or "",
+            "note":        row.close_note or "",
+            "entry_ts":    int(row.opened_at.timestamp()) if row.opened_at else None,
+            "exit_ts":     int(row.closed_at.timestamp()) if row.closed_at else None,
+        }
 
     def get_trades_from_db(
         self, symbol: Optional[str] = None, limit: int = 100
@@ -357,6 +417,7 @@ class BaseForwardTest(ABC):
                     "status":       r.status,
                     "exit_price":   r.exit_price,
                     "pnl_pct":      r.pnl_pct,
+                    "pnl_pct_net":  r.pnl_pct_net,
                     "closed_at":    r.closed_at.isoformat() if r.closed_at else None,
                     "duration_min": r.duration_min,
                     "close_note":   r.close_note,
@@ -376,25 +437,29 @@ class BaseForwardTest(ABC):
         position: Dict[str, Any],
         close_note: Optional[str] = None,
     ) -> Dict[str, Any]:
+        from features.strategy.common.pnl import BINANCE_FEE_NOTIONAL_PCT
         side  = position.get("side")
         entry = _f(position.get("entry_price"))
-        price_move_pct = (
+        pnl_pct = round(
             (exit_price - entry) / entry * 100 if side == "long"
-            else (entry - exit_price) / entry * 100
+            else (entry - exit_price) / entry * 100,
+            4,
         )
-        # equity ROI = 가격이동% × 레버리지 (기본 1x, Binance live 전략은 오버라이드)
-        pnl = round(price_move_pct * self.LEVERAGE, 4)
+        pnl_pct_net = round(pnl_pct - BINANCE_FEE_NOTIONAL_PCT, 4)
         trade = {
             **position,
-            "exit_price":  exit_price,
-            "exit_reason": reason,
-            "pnl_pct":     pnl,
-            "close_note":  close_note,
+            "exit_price":   exit_price,
+            "exit_reason":  reason,
+            "pnl_pct":      pnl_pct,
+            "pnl_pct_net":  pnl_pct_net,
+            "close_note":   close_note,
         }
         self._closed_trades.append(trade)
         if self._db_available() and position.get("trade_id") is not None:
             self._persist_close(
-                position["trade_id"], exit_price, reason, pnl, close_note
+                position["trade_id"], exit_price, reason,
+                pnl_pct, pnl_pct_net, close_note,
+                position=position,
             )
         return trade
 
@@ -464,12 +529,12 @@ class BaseForwardTest(ABC):
                 pass
 
         from features.strategy.common.pnl import (
-            compound_total_pnl_with_fee,
+            compound_total_pnl,
+            compound_total_pnl_net,
             total_pnl_including_unrealized,
         )
-        total_pnl, win_count, loss_count = compound_total_pnl_with_fee(
-            trades, leverage=self.LEVERAGE
-        )
+        total_pnl_raw, _, _ = compound_total_pnl(trades)
+        total_pnl_net, win_count, loss_count = compound_total_pnl_net(trades)
 
         pos = self._position
         unrealized_pct = None
@@ -490,13 +555,15 @@ class BaseForwardTest(ABC):
             except Exception:
                 pass
 
-        total_pnl = total_pnl_including_unrealized(total_pnl, unrealized_pct)
+        total_pnl_raw = total_pnl_including_unrealized(total_pnl_raw, unrealized_pct)
+        total_pnl_net = total_pnl_including_unrealized(total_pnl_net, unrealized_pct)
 
         return {
             "strategy":            self.STRATEGY_TAG,
             "current_position":    pos,
             "closed_trades_count": len(trades),
-            "total_pnl_pct":       round(total_pnl, 4),
+            "total_pnl_pct":       round(total_pnl_raw, 4),
+            "total_pnl_pct_net":   round(total_pnl_net, 4),
             "win_count":           win_count,
             "loss_count":          loss_count,
             "win_rate":            round(win_count / len(trades) * 100, 1) if trades else 0,

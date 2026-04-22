@@ -82,6 +82,7 @@
     var page = 1;
     var perPage = 10;
     var timer = null;
+    var _selectedGlobalIdx = -1;
 
     function renderTradesPage() {
       if (!tradesListEl) return;
@@ -97,24 +98,38 @@
       var start = (page - 1) * perPage;
       var slice = trades.slice(start, start + perPage);
 
-      var rows = slice.map(function (t) {
+      var hasOnClick = typeof opts.onTradeClick === "function";
+
+      var rows = slice.map(function (t, i) {
+        var globalIdx = start + i;
         var pnl = t.pnl_pct != null ? Number(t.pnl_pct) : 0;
+        var net = t.net_pnl_pct != null ? Number(t.net_pnl_pct) : null;
         var pnlClass = pnl >= 0 ? "pnl-pos" : "pnl-neg";
+        var netClass = net != null ? (net >= 0 ? "pnl-pos" : "pnl-neg") : "";
         var pnlStr = (pnl >= 0 ? "+" : "") + (isFinite(pnl) ? pnl.toFixed(2) : "—") + "%";
-        return "<tr>" +
+        var netStr = net != null
+          ? "<span style='font-size:0.68rem;opacity:0.7;'> (" + (net >= 0 ? "+" : "") + net.toFixed(2) + "%)</span>"
+          : "";
+        var isActive = globalIdx === _selectedGlobalIdx;
+        var rowStyle = isActive
+          ? "cursor:pointer;background:rgba(139,92,246,0.12);border-left:2px solid #7b2d8b;"
+          : (hasOnClick ? "cursor:pointer;" : "");
+        var clickAttr = hasOnClick
+          ? " onclick=\"ForwardTestDashboard._handleTradeClick(" + globalIdx + ")\"" : "";
+        return "<tr data-gidx='" + globalIdx + "' style='" + rowStyle + "'" + clickAttr + ">" +
           "<td>" + formatTradeDate(t.opened_at) + "</td>" +
           "<td>" + formatTradeDate(t.closed_at) + "</td>" +
           "<td><strong style='color:" + (t.side === "long" ? "var(--accent-green)" : "var(--accent-red)") + ";'>" + esc((t.side || "").toUpperCase()) + "</strong></td>" +
           "<td>" + fmtPrice(t.entry_price) + "</td>" +
           "<td>" + fmtPrice(t.exit_price) + "</td>" +
-          "<td class='" + pnlClass + "'>" + pnlStr + "</td>" +
+          "<td class='" + pnlClass + "'>" + pnlStr + "<span class='" + netClass + "'>" + netStr + "</span></td>" +
           "<td>" + (t.duration_min != null ? esc(String(t.duration_min)) + "m" : "—") + "</td>" +
           "</tr>";
       }).join("");
 
       tradesListEl.innerHTML =
         "<table class='trades-table'><thead><tr>" +
-        "<th>Open</th><th>Close</th><th>Side</th><th>Entry</th><th>Exit</th><th>PnL %</th><th>Dur</th>" +
+        "<th>Open</th><th>Close</th><th>Side</th><th>Entry</th><th>Exit</th><th>PnL (net)</th><th>Dur</th>" +
         "</tr></thead><tbody>" + rows + "</tbody></table>";
 
       if (!pagerEl) return;
@@ -276,11 +291,23 @@
       refreshTrades();
     }
 
+    function handleTradeClick(globalIdx) {
+      _selectedGlobalIdx = globalIdx;
+      renderTradesPage();
+      var t = trades[globalIdx];
+      if (t && typeof opts.onTradeClick === "function") {
+        opts.onTradeClick(t, globalIdx);
+      }
+    }
+
+    // 전역 노출 (onclick 문자열에서 호출)
+    window.ForwardTestDashboard._handleTradeClick = handleTradeClick;
+
     refresh();
     if (timer) clearInterval(timer);
     timer = setInterval(refresh, pollMs);
   }
 
-  window.ForwardTestDashboard = { init: init };
+  window.ForwardTestDashboard = { init: init, _handleTradeClick: function() {} };
 })();
 
