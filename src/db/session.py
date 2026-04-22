@@ -5,7 +5,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import Session, sessionmaker
 
 from db.config import get_engine_url
-from db.models import Base
+from db.models import create_tables
 
 _engine = None
 _SessionLocal = None
@@ -39,4 +39,4 @@ def get_session() -> Session:
 def init_db() -> None:
     """Create tables if missing."""
     eng = _get_engine()
-    Base.metadata.create_all(bind=eng)
+    create_tables(eng)

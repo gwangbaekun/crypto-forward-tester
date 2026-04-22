@@ -2,7 +2,7 @@
 from datetime import datetime
 from typing import Optional
 
-from sqlalchemy import DateTime, Float, Integer, String, Text
+from sqlalchemy import DateTime, Float, Integer, String, Text, inspect, text
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
 
@@ -12,6 +12,37 @@ class Base(DeclarativeBase):
 
 def create_tables(engine) -> None:
     Base.metadata.create_all(engine)
+    _ensure_forward_trades_columns(engine)
+
+
+def _ensure_forward_trades_columns(engine) -> None:
+    """
+    Backfill columns for legacy SQLite DB files.
+
+    SQLAlchemy create_all() creates missing tables only, so existing tables
+    need explicit ALTER TABLE statements for newly added columns.
+    """
+    insp = inspect(engine)
+    if "forward_trades" not in insp.get_table_names():
+        return
+
+    existing_columns = {c["name"] for c in insp.get_columns("forward_trades")}
+    required_columns = {
+        "pnl_pct_net": "ALTER TABLE forward_trades ADD COLUMN pnl_pct_net FLOAT",
+    }
+
+    missing_alters = [
+        alter_sql
+        for col_name, alter_sql in required_columns.items()
+        if col_name not in existing_columns
+    ]
+    if not missing_alters:
+        return
+
+    # SQLite auto-commits DDL; begin() keeps behavior consistent on other DBs.
+    with engine.begin() as conn:
+        for alter_sql in missing_alters:
+            conn.execute(text(alter_sql))
 
 
 class ForwardTrade(Base):
