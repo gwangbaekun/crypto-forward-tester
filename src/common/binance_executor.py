@@ -88,6 +88,13 @@ class BinanceExecutor:
         url    = f"{self._base}{path}?{signed}"
         async with self._client() as client:
             r = await client.get(url, headers=self._headers())
+            if r.status_code == 401:
+                mode = "TESTNET" if self._testnet else "LIVE"
+                raise RuntimeError(
+                    f"Binance 401 — API 키/시크릿 불일치 또는 권한 없음 "
+                    f"(현재 모드: {mode}, base={self._base}). "
+                    "BINANCE_TESTNET / BINANCE_API_KEY / BINANCE_API_SECRET 환경변수 확인 필요."
+                )
             r.raise_for_status()
             return r.json()
 

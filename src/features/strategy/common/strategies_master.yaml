@@ -76,7 +76,7 @@ eth_cvd_explosion_v2:
   label: "ETH CVD Explosion V2"
   emoji: "🔷"
   telegram_alerts: true
-  binance_live: true
+  binance_live: false
   binance_leverage: 3
   tick:
     module: features.strategy.eth_cvd_explosion_v2.forward_test_runner
