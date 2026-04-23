@@ -379,7 +379,7 @@ async def _execute_verify_notify(
                 sync_info["tp_advance"] = None
 
     try:
-        from features.strategy.common.telegram_notifier import send_event_alerts
+        from features.strategy.common.notifier import send_event_alerts
         send_event_alerts(strategy_key, symbol, events, sync_info)
     except Exception as e:
         print(f"[{strategy_key}] Telegram 알림 오류: {e}")

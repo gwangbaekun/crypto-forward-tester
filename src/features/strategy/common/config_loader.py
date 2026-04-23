@@ -108,20 +108,27 @@ def is_ctrader_live_enabled(strategy_id: str) -> bool:
     return isinstance(strat, dict) and bool(strat.get("ctrader_live", False))
 
 
-def is_telegram_alerts_enabled(strategy_id: str) -> bool:
+def is_alerts_enabled(strategy_id: str) -> bool:
     """
-    진입/청산 Telegram 알림 여부.
+    진입/청산 알림 여부 (Telegram + Discord 공통 게이트).
     - strategies_master.yaml 에 telegram_alerts: true
     - 또는 binance_live: true (실주문 전략은 알림 동기화와 함께 켜짐)
-    전역 끄기: TELEGRAM_DISABLE=1
+    전역 끄기: ALERT_DISABLE=1 또는 TELEGRAM_DISABLE=1 (하위 호환)
     """
     import os
 
-    if os.environ.get("TELEGRAM_DISABLE", "").strip().lower() in ("1", "true", "yes"):
-        return False
+    disable_keys = ("ALERT_DISABLE", "TELEGRAM_DISABLE")
+    for key in disable_keys:
+        if os.environ.get(key, "").strip().lower() in ("1", "true", "yes"):
+            return False
     strat = get_master_config().get(strategy_id)
     if not isinstance(strat, dict):
         return False
     if strat.get("telegram_alerts"):
         return True
     return bool(strat.get("binance_live", False))
+
+
+def is_telegram_alerts_enabled(strategy_id: str) -> bool:
+    """하위 호환 alias — is_alerts_enabled 로 위임."""
+    return is_alerts_enabled(strategy_id)

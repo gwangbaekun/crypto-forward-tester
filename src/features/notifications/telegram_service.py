@@ -65,7 +65,7 @@ class TelegramService:
         chat_id = config.get("chat_id")
 
         if not bot_token or not chat_id:
-            return False, "텔레그램 봇 토큰 또는 Chat ID가 설정되지 않았습니다."
+            return False, "Telegram bot token or chat ID is not configured."
 
         try:
             url = f"{self.API_BASE}{bot_token}/sendMessage"
@@ -82,11 +82,11 @@ class TelegramService:
                     result = response.json()
                     if result.get("ok"):
                         return True, ""
-                    error_desc = result.get("description", "알 수 없는 오류")
+                    error_desc = result.get("description", "Unknown error")
                     error_code = result.get("error_code", "")
-                    full_error = f"텔레그램 API 오류: {error_desc}"
+                    full_error = f"Telegram API error: {error_desc}"
                     if error_code:
-                        full_error += f" (코드: {error_code})"
+                        full_error += f" (code: {error_code})"
                     return False, full_error
                 try:
                     error_json = response.json()
@@ -96,9 +96,9 @@ class TelegramService:
                     return False, f"HTTP {response.status_code}: {response.text[:200]}"
 
         except httpx.TimeoutException:
-            return False, "타임아웃 (10초 초과)"
+            return False, "Timeout (over 10s)"
         except Exception as e:
-            return False, f"예외 발생: {str(e)}"
+            return False, f"Exception: {str(e)}"
 
     def send_prediction_alert(
         self, symbol: str, direction: str, stars: int, tf: str, details: str = ""
@@ -118,12 +118,12 @@ class TelegramService:
             if time.time() - last_sent[last_key] < 300:
                 return False
 
-        dir_label = "상승" if direction == "bull" else "하락"
+        dir_label = "Bullish" if direction == "bull" else "Bearish"
         emoji = "🚀" if direction == "bull" else "📉"
         star_emoji = "⭐" * stars
 
         message = (
-            f"<b>{emoji} {symbol} {tf} {dir_label} 예측 {stars}별</b>\n\n"
+            f"<b>{emoji} {symbol} {tf} {dir_label} Signal ({stars} stars)</b>\n\n"
             f"{star_emoji}\n\n"
             f"<code>{details}</code>"
         )
@@ -134,6 +134,6 @@ class TelegramService:
             config["last_sent"][last_key] = time.time()
             self.save_config(config)
         else:
-            print(f"텔레그램 알림 전송 실패: {error}")
+            print(f"Telegram alert send failed: {error}")
 
         return success
