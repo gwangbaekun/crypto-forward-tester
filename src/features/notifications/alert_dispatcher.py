@@ -1,5 +1,5 @@
 """
-AlertDispatcher — Telegram + Discord 동시 전송.
+AlertDispatcher — Telegram + Discord 선택 전송.
 
 각 채널은 독립적으로 동작: 하나가 실패해도 나머지는 계속 전송됨.
 설정되지 않은 채널은 자동으로 스킵.
@@ -24,7 +24,14 @@ class AlertDispatcher:
             cls._instance = super().__new__(cls)
         return cls._instance
 
-    def send_message(self, message: str, strategy_key: str | None = None) -> Dict[str, Tuple[bool, str]]:
+    def send_message(
+        self,
+        message: str,
+        strategy_key: str | None = None,
+        *,
+        send_telegram: bool = True,
+        send_discord: bool = True,
+    ) -> Dict[str, Tuple[bool, str]]:
         """설정된 모든 채널에 메시지 전송.
 
         Args:
@@ -35,18 +42,20 @@ class AlertDispatcher:
         """
         results: Dict[str, Tuple[bool, str]] = {}
 
-        try:
-            from features.notifications.telegram_service import TelegramService
+        if send_telegram:
+            try:
+                from features.notifications.telegram_service import TelegramService
 
-            results["telegram"] = TelegramService().send_message(message)
-        except Exception as e:
-            results["telegram"] = (False, f"Exception: {e}")
+                results["telegram"] = TelegramService().send_message(message)
+            except Exception as e:
+                results["telegram"] = (False, f"Exception: {e}")
 
-        try:
-            from features.notifications.discord_service import DiscordService
+        if send_discord:
+            try:
+                from features.notifications.discord_service import DiscordService
 
-            results["discord"] = DiscordService().send_message(message, strategy_key=strategy_key)
-        except Exception as e:
-            results["discord"] = (False, f"Exception: {e}")
+                results["discord"] = DiscordService().send_message(message, strategy_key=strategy_key)
+            except Exception as e:
+                results["discord"] = (False, f"Exception: {e}")
 
         return results

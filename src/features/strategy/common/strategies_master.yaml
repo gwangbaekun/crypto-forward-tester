@@ -6,6 +6,8 @@
 #   monitoring:     대시보드 자동 polling 여부
 #   tick_interval:  서버 background tick 주기 (초)
 #   timeframes:     fetch할 TF 목록
+#   telegram_alerts: Telegram 알림 on/off
+#   discord_alerts:  Discord 알림 on/off
 #   tick.module:    realtime_feed 모듈 경로
 #   tick.fn:        호출할 함수명
 
@@ -18,6 +20,7 @@ atr_breakout:
   label: "ATR Breakout"
   emoji: "💥"
   telegram_alerts: true
+  discord_alerts: false
   binance_live: false
   tick:
     module: features.strategy.atr_breakout.realtime_feed
@@ -36,6 +39,7 @@ cvd_explosion:
   label: "CVD Explosion"
   emoji: "💣"
   telegram_alerts: false
+  discord_alerts: false
   binance_live: false
   binance_leverage: 3
   tick:
@@ -56,6 +60,7 @@ eth_cvd_explosion:
   label: "ETH CVD Explosion"
   emoji: "🔷"
   telegram_alerts: true
+  discord_alerts: true
   binance_live: true
   binance_leverage: 3
   tick:
@@ -76,6 +81,7 @@ eth_cvd_explosion_v2:
   label: "ETH CVD Explosion V2"
   emoji: "🔷"
   telegram_alerts: true
+  discord_alerts: false
   binance_live: false
   binance_leverage: 3
   tick:

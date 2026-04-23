@@ -1,8 +1,8 @@
 """
-전략 이벤트 → AlertDispatcher (Telegram + Discord) 알림.
+전략 이벤트 → AlertDispatcher 채널별 알림.
 
 - strategies_master.yaml 의 label / emoji 사용.
-- telegram_alerts: true 이거나 binance_live: true 인 전략만 전송.
+- telegram_alerts / discord_alerts 를 채널별로 분리해 제어.
 """
 from __future__ import annotations
 
@@ -185,9 +185,14 @@ def send_event_alerts(
     if not events:
         return
 
-    from features.strategy.common.config_loader import is_alerts_enabled
+    from features.strategy.common.config_loader import (
+        is_discord_alerts_enabled,
+        is_telegram_alerts_enabled,
+    )
 
-    if not is_alerts_enabled(strategy_key):
+    send_telegram = is_telegram_alerts_enabled(strategy_key)
+    send_discord = is_discord_alerts_enabled(strategy_key)
+    if not send_telegram and not send_discord:
         return
 
     label, emoji = _strategy_meta(strategy_key)
@@ -210,7 +215,12 @@ def send_event_alerts(
             else:
                 continue
 
-            results = dispatcher.send_message(prefix + msg, strategy_key=strategy_key)
+            results = dispatcher.send_message(
+                prefix + msg,
+                strategy_key=strategy_key,
+                send_telegram=send_telegram,
+                send_discord=send_discord,
+            )
             for channel, (ok, err) in results.items():
                 if not ok and "is not configured" not in err and "No webhook configured" not in err:
                     print(f"[notifier] {channel} send failed ({strategy_key}): {err}")

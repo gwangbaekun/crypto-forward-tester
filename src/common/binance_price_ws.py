@@ -18,6 +18,8 @@ from websockets.exceptions import ConnectionClosed
 DEFAULT_SYMBOLS = ["btcusdt", "ethusdt"]
 # Cache TTL: if WS has no update for this many seconds, get_price may fall back to None/REST
 STALE_SECONDS = 30
+# 수신 침묵 감지: 이 시간 동안 ws.recv()가 없으면 heartbeat 검사
+_RECV_TIMEOUT_SEC = float(os.getenv("BINANCE_WS_RECV_TIMEOUT_SEC", "20"))
 # Abrupt TCP drop (no close frame) / flaky DNS 시 재연결 스팸 방지
 _MIN_RECONNECT_SEC = float(os.getenv("BINANCE_WS_MIN_RECONNECT_SEC", "3.0"))
 _DNS_RECONNECT_FLOOR = float(os.getenv("BINANCE_WS_DNS_RECONNECT_FLOOR", "5.0"))
@@ -45,6 +47,7 @@ class BinancePriceWS:
         self._symbols = list(DEFAULT_SYMBOLS)
         self._reconnect_delay = 1.0
         self._dns_streak = 0
+        self._last_rx_monotonic = 0.0
 
     def start(self, symbols: Optional[list] = None) -> None:
         """Start the WebSocket listener in the background."""
@@ -179,9 +182,24 @@ class BinancePriceWS:
         ) as ws:
             self._reconnect_delay = 1.0
             self._dns_streak = 0
+            self._last_rx_monotonic = time.monotonic()
             print(f"[BinancePriceWS] connected to {url}")
 
-            async for raw in ws:
+            while self._running:
+                try:
+                    raw = await asyncio.wait_for(ws.recv(), timeout=_RECV_TIMEOUT_SEC)
+                except asyncio.TimeoutError:
+                    # 소켓이 조용히 멈춘 half-open 상태 방지: 최근 가격 갱신이 stale면 재연결
+                    newest_ts = max(self._updated_at.values()) if self._updated_at else 0.0
+                    age = time.time() - newest_ts if newest_ts else float("inf")
+                    if age > STALE_SECONDS:
+                        print(
+                            f"[BinancePriceWS] recv timeout and cache stale ({age:.1f}s) → reconnect"
+                        )
+                        raise OSError("ws recv timeout with stale cache")
+                    continue
+
+                self._last_rx_monotonic = time.monotonic()
                 try:
                     msg = json.loads(raw)
                     stream_name = msg.get("stream", "")

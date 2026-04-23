@@ -109,33 +109,33 @@ def is_ctrader_live_enabled(strategy_id: str) -> bool:
 
 
 def is_alerts_enabled(strategy_id: str) -> bool:
-    """
-    진입/청산 알림 여부 (Telegram + Discord 공통 게이트).
-    - strategies_master.yaml 에 telegram_alerts: true
-    - 또는 binance_live: true (실주문 전략은 알림 동기화와 함께 켜짐)
-    전역 끄기: ALERT_DISABLE=1 또는 TELEGRAM_DISABLE=1 (하위 호환)
-    """
-    import os
+    """하위 호환 공통 알림 게이트 (Telegram/Discord 중 하나라도 켜져 있으면 true)."""
+    return is_telegram_alerts_enabled(strategy_id) or is_discord_alerts_enabled(strategy_id)
 
-    disable_keys = ("ALERT_DISABLE", "TELEGRAM_DISABLE")
-    for key in disable_keys:
-        if os.environ.get(key, "").strip().lower() in ("1", "true", "yes"):
-            return False
 
-    # Strategy-specific kill switch
-    # e.g. ETH_CVD_EXPLOSION_ALERT_DISABLE=1
-    strategy_env_prefix = strategy_id.upper().replace("-", "_")
-    per_strategy_disable = f"{strategy_env_prefix}_ALERT_DISABLE"
-    if os.environ.get(per_strategy_disable, "").strip().lower() in ("1", "true", "yes"):
+def is_discord_alerts_enabled(strategy_id: str) -> bool:
+    """
+    Discord 알림 여부.
+    - strategies_master.yaml 의 discord_alerts 사용
+    - 값이 없으면 telegram_alerts 값을 상속 (하위 호환)
+    """
+    strat = get_master_config().get(strategy_id)
+    if not isinstance(strat, dict):
         return False
+    if "discord_alerts" in strat:
+        return bool(strat.get("discord_alerts"))
+    return bool(strat.get("telegram_alerts", False))
+
+
+def is_telegram_alerts_enabled(strategy_id: str) -> bool:
+    """
+    Telegram 알림 여부.
+    - strategies_master.yaml 의 telegram_alerts 사용
+    - binance_live: true 이면 기본적으로 true (실주문 상태 동기화 알림 보장)
+    """
     strat = get_master_config().get(strategy_id)
     if not isinstance(strat, dict):
         return False
     if strat.get("telegram_alerts"):
         return True
     return bool(strat.get("binance_live", False))
-
-
-def is_telegram_alerts_enabled(strategy_id: str) -> bool:
-    """하위 호환 alias — is_alerts_enabled 로 위임."""
-    return is_alerts_enabled(strategy_id)
