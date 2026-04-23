@@ -80,8 +80,8 @@ eth_cvd_explosion_v2:
   strategy_tag: eth_cvd_explosion_v2
   label: "ETH CVD Explosion V2"
   emoji: "🔷"
-  telegram_alerts: true
-  discord_alerts: false
+  telegram_alerts: false
+  discord_alerts: true
   binance_live: false
   binance_leverage: 3
   tick:

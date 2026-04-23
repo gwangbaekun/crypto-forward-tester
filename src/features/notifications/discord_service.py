@@ -38,6 +38,7 @@ class DiscordService:
             strategy_webhook_key = f"{strategy_env_prefix}_DISCORD_WEBHOOK_URL"
             if os.environ.get(strategy_webhook_key):
                 return os.environ.get(strategy_webhook_key)
+            return None
         return os.environ.get("DISCORD_WEBHOOK_URL") or None
 
     def send_message(self, message: str, strategy_key: Optional[str] = None) -> Tuple[bool, str]:
@@ -51,10 +52,7 @@ class DiscordService:
             if strategy_key:
                 strategy_env_prefix = strategy_key.upper().replace("-", "_")
                 strategy_webhook_key = f"{strategy_env_prefix}_DISCORD_WEBHOOK_URL"
-                return False, (
-                    f"No webhook configured. Expected `{strategy_webhook_key}` "
-                    "or fallback `DISCORD_WEBHOOK_URL`."
-                )
+                return False, f"No webhook configured. Expected `{strategy_webhook_key}`."
             return False, "DISCORD_WEBHOOK_URL is not configured."
 
         content = _html_to_discord_md(message)
