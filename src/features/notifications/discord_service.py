@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import os
 import re
-from typing import Tuple
+from typing import Optional, Tuple
 
 import httpx
 
@@ -32,17 +32,29 @@ class DiscordService:
             cls._instance = super().__new__(cls)
         return cls._instance
 
-    def _webhook_url(self) -> str | None:
+    def _webhook_url(self, strategy_key: Optional[str] = None) -> str | None:
+        if strategy_key:
+            strategy_env_prefix = strategy_key.upper().replace("-", "_")
+            strategy_webhook_key = f"{strategy_env_prefix}_DISCORD_WEBHOOK_URL"
+            if os.environ.get(strategy_webhook_key):
+                return os.environ.get(strategy_webhook_key)
         return os.environ.get("DISCORD_WEBHOOK_URL") or None
 
-    def send_message(self, message: str) -> Tuple[bool, str]:
+    def send_message(self, message: str, strategy_key: Optional[str] = None) -> Tuple[bool, str]:
         """HTML 메시지를 Discord Markdown으로 변환 후 Webhook 전송.
 
         Returns:
             (성공 여부, 에러 메시지)
         """
-        webhook_url = self._webhook_url()
+        webhook_url = self._webhook_url(strategy_key)
         if not webhook_url:
+            if strategy_key:
+                strategy_env_prefix = strategy_key.upper().replace("-", "_")
+                strategy_webhook_key = f"{strategy_env_prefix}_DISCORD_WEBHOOK_URL"
+                return False, (
+                    f"No webhook configured. Expected `{strategy_webhook_key}` "
+                    "or fallback `DISCORD_WEBHOOK_URL`."
+                )
             return False, "DISCORD_WEBHOOK_URL is not configured."
 
         content = _html_to_discord_md(message)

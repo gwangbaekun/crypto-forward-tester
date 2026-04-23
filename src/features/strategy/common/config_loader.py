@@ -121,6 +121,13 @@ def is_alerts_enabled(strategy_id: str) -> bool:
     for key in disable_keys:
         if os.environ.get(key, "").strip().lower() in ("1", "true", "yes"):
             return False
+
+    # Strategy-specific kill switch
+    # e.g. ETH_CVD_EXPLOSION_ALERT_DISABLE=1
+    strategy_env_prefix = strategy_id.upper().replace("-", "_")
+    per_strategy_disable = f"{strategy_env_prefix}_ALERT_DISABLE"
+    if os.environ.get(per_strategy_disable, "").strip().lower() in ("1", "true", "yes"):
+        return False
     strat = get_master_config().get(strategy_id)
     if not isinstance(strat, dict):
         return False

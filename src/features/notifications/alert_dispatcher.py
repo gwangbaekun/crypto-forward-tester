@@ -24,7 +24,7 @@ class AlertDispatcher:
             cls._instance = super().__new__(cls)
         return cls._instance
 
-    def send_message(self, message: str) -> Dict[str, Tuple[bool, str]]:
+    def send_message(self, message: str, strategy_key: str | None = None) -> Dict[str, Tuple[bool, str]]:
         """설정된 모든 채널에 메시지 전송.
 
         Args:
@@ -45,7 +45,7 @@ class AlertDispatcher:
         try:
             from features.notifications.discord_service import DiscordService
 
-            results["discord"] = DiscordService().send_message(message)
+            results["discord"] = DiscordService().send_message(message, strategy_key=strategy_key)
         except Exception as e:
             results["discord"] = (False, f"Exception: {e}")
 

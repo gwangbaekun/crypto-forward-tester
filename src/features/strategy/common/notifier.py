@@ -210,9 +210,9 @@ def send_event_alerts(
             else:
                 continue
 
-            results = dispatcher.send_message(prefix + msg)
+            results = dispatcher.send_message(prefix + msg, strategy_key=strategy_key)
             for channel, (ok, err) in results.items():
-                if not ok and err != f"{channel.upper()}_WEBHOOK_URL is not configured.":
+                if not ok and "is not configured" not in err and "No webhook configured" not in err:
                     print(f"[notifier] {channel} send failed ({strategy_key}): {err}")
 
     except Exception as e:
