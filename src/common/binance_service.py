@@ -61,6 +61,19 @@ async def fetch_binance_klines(
         return None
 
 
+async def fetch_mark_price(symbol: str) -> Optional[float]:
+    """Binance Futures mark price REST fallback (WS stale 시 사용)."""
+    try:
+        url = "https://fapi.binance.com/fapi/v1/premiumIndex"
+        async with httpx.AsyncClient(timeout=5.0) as client:
+            resp = await client.get(url, params={"symbol": symbol.upper()})
+            resp.raise_for_status()
+            return float(resp.json()["markPrice"])
+    except Exception as e:
+        print(f"[fetch_mark_price] {symbol} REST fallback 실패: {e}")
+        return None
+
+
 async def fetch_cvd_seed(symbol: str, limit: int = 1000) -> List[list]:
     """
     간단한 CVD 시드 데이터 생성:

@@ -51,8 +51,18 @@ class BinancePriceWS:
 
     def start(self, symbols: Optional[list] = None) -> None:
         """Start the WebSocket listener in the background."""
-        if self._running:
+        task_alive = self._task is not None and not self._task.done()
+        if self._running and task_alive:
             return
+        if self._running and not task_alive:
+            exc = None
+            if self._task is not None and not self._task.cancelled():
+                try:
+                    exc = self._task.exception()
+                except Exception:
+                    pass
+            print(f"[BinancePriceWS] task dead (exc={exc}), restarting")
+            self._running = False
         if symbols:
             normalized = []
             for s in symbols:
@@ -189,12 +199,15 @@ class BinancePriceWS:
                 try:
                     raw = await asyncio.wait_for(ws.recv(), timeout=_RECV_TIMEOUT_SEC)
                 except asyncio.TimeoutError:
-                    # 소켓이 조용히 멈춘 half-open 상태 방지: 최근 가격 갱신이 stale면 재연결
-                    newest_ts = max(self._updated_at.values()) if self._updated_at else 0.0
-                    age = time.time() - newest_ts if newest_ts else float("inf")
-                    if age > STALE_SECONDS:
+                    # 소켓이 조용히 멈춘 half-open 상태 방지: 구독 심볼 중 하나라도 stale면 재연결
+                    now = time.time()
+                    stale_syms = [
+                        s for s in self._symbols
+                        if (now - self._updated_at.get(s, 0)) > STALE_SECONDS
+                    ]
+                    if stale_syms:
                         print(
-                            f"[BinancePriceWS] recv timeout and cache stale ({age:.1f}s) → reconnect"
+                            f"[BinancePriceWS] recv timeout and stale symbols {stale_syms} → reconnect"
                         )
                         raise OSError("ws recv timeout with stale cache")
                     continue

@@ -55,11 +55,12 @@ async def _strategy_loop(name: str, cfg: Dict[str, Any], symbol: str) -> None:
 
     포지션 없음: tick_interval 마다 realtime_feed 호출 (bar close 기준 신호 체크).
     포지션 있음: exit_tick_interval 마다 BinancePriceWS 캐시 가격으로 engine.tick() 직접 호출.
-                 REST 없음 — WS mark price 스트림만 사용.
+                 WS stale → REST mark price fallback.
     """
     base_interval = float(cfg["tick_interval"])
     fast_exit_interval = float(cfg.get("exit_tick_interval") or 1.0)
     tfs_str = ",".join(str(t) for t in cfg["timeframes"]) if cfg["timeframes"] else "15m,1h"
+    _stale_logged_at: float = 0.0  # 스팸 억제: 마지막 stale 로그 시각
 
     while True:
         try:
@@ -76,22 +77,31 @@ async def _strategy_loop(name: str, cfg: Dict[str, Any], symbol: str) -> None:
                 eng = None
 
             if has_open_pos and eng is not None:
-                # ── 포지션 보유: WS 가격으로 exit 체크 (REST 없음) ────────────
-                from common.binance_price_ws import get_cached_price
+                # ── 포지션 보유: WS → REST fallback 순으로 가격 취득 ──────────
+                from common.binance_price_ws import BinancePriceWS, get_cached_price
+                BinancePriceWS().start()  # 태스크 죽었으면 재시작
                 ws_price = get_cached_price(symbol)
-                if ws_price:
-                    tick_result = eng.tick(symbol, {
-                        "current_price": ws_price,
-                        "signal":        {},
-                        "bar_high":      ws_price,
-                        "bar_low":       ws_price,
-                    })
-                    events = (tick_result or {}).get("events") or []
-                    if events:
-                        from features.strategy.common.base_realtime_feed import _execute_verify_notify
-                        await _execute_verify_notify(name, symbol, events, ws_price)
-                else:
-                    print(f"[StrategyLoop:{name}] WS price stale for {symbol}, skip exit tick")
+                if ws_price is None:
+                    # WS stale: REST fallback (포지션 보유 중 exit tick 누락 방지)
+                    from common.binance_service import fetch_mark_price
+                    ws_price = await fetch_mark_price(symbol)
+                    if ws_price is None:
+                        now = time.time()
+                        if now - _stale_logged_at >= 60.0:
+                            print(f"[StrategyLoop:{name}] WS+REST price unavailable for {symbol}, skip exit tick")
+                            _stale_logged_at = now
+                        await asyncio.sleep(max(0.5, fast_exit_interval))
+                        continue
+                tick_result = eng.tick(symbol, {
+                    "current_price": ws_price,
+                    "signal":        {},
+                    "bar_high":      ws_price,
+                    "bar_low":       ws_price,
+                })
+                events = (tick_result or {}).get("events") or []
+                if events:
+                    from features.strategy.common.base_realtime_feed import _execute_verify_notify
+                    await _execute_verify_notify(name, symbol, events, ws_price)
                 await asyncio.sleep(max(0.5, fast_exit_interval))
                 continue
 
