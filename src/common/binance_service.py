@@ -57,7 +57,7 @@ async def fetch_binance_klines(
         return df
         
     except Exception as e:
-        print(f"Binance klines fetch error: {e}")
+        print(f"[binance_service] klines fetch error ({symbol} {interval}): {e}")
         return None
 
 

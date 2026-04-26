@@ -42,19 +42,16 @@ class CTraderExecutor:
         self._account_id = os.environ.get("CTRADER_ACCOUNT_ID", "").strip()
         self._env = os.environ.get("CTRADER_ENV", "demo").strip().lower() or "demo"
         self._is_live = self._env == "live"
-        print(f"[CTraderExecutor] initialized env={self._env} account={bool(self._account_id)}")
 
     def _ready(self) -> bool:
         return bool(self._access_token and self._account_id)
 
     async def get_market_price(self, symbol: str) -> float:
         # TODO: cTrader Open API 시세 조회로 교체
-        print(f"[CTraderExecutor] get_market_price not implemented ({symbol})")
         return 0.0
 
     async def get_position(self, symbol: str) -> Optional[Dict]:
         # TODO: cTrader Open API 포지션 조회로 교체
-        print(f"[CTraderExecutor] get_position not implemented ({symbol})")
         return None
 
     async def open_position(
@@ -65,13 +62,8 @@ class CTraderExecutor:
         leverage: Optional[int] = None,
     ) -> Optional[Dict]:
         if not self._ready():
-            print("[CTraderExecutor] API credentials missing - skip open_position")
             return None
         # TODO: 실제 cTrader 신규 포지션 주문 구현
-        print(
-            "[CTraderExecutor] open_position skeleton - "
-            f"symbol={symbol} side={side} price={current_price} leverage={leverage}"
-        )
         return None
 
     async def close_position(
@@ -80,10 +72,8 @@ class CTraderExecutor:
         side: str,  # "long" | "short"
     ) -> Optional[Dict]:
         if not self._ready():
-            print("[CTraderExecutor] API credentials missing - skip close_position")
             return None
         # TODO: 실제 cTrader 포지션 청산 구현
-        print(f"[CTraderExecutor] close_position skeleton - symbol={symbol} side={side}")
         return None
 
     async def place_tp_sl(
@@ -96,16 +86,13 @@ class CTraderExecutor:
         if not self._ready():
             return
         # TODO: 실제 cTrader TP/SL 수정 구현
-        print(
-            "[CTraderExecutor] place_tp_sl skeleton - "
-            f"symbol={symbol} side={side} tp={tp} sl={sl}"
-        )
+        pass
 
     async def cancel_tp_sl(self, symbol: str) -> None:
         if not self._ready():
             return
         # TODO: 실제 cTrader 미체결 보호주문 취소 구현
-        print(f"[CTraderExecutor] cancel_tp_sl skeleton - symbol={symbol}")
+        pass
 
 
 _executor: Optional[CTraderExecutor] = None

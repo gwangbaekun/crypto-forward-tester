@@ -502,8 +502,8 @@ async def refresh_symbol(symbol: str, interval: str = "1h") -> None:
     try:
         payload = await build_payload_for_symbol(symbol, interval=interval)
         await _cache_write(symbol.upper(), payload, interval=interval)
-    except Exception as exc:
-        print(f"[liq_series_cache] refresh {symbol} ({interval}) failed: {exc}")
+    except Exception:
+        pass
 
 
 def _liq_symbols() -> List[str]:

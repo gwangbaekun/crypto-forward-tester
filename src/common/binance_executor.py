@@ -62,7 +62,6 @@ class BinanceExecutor:
 
         mode = "TESTNET" if self._testnet else "LIVE"
         proxy_info = f", proxy={self._proxy}" if self._proxy else ""
-        print(f"[BinanceExecutor] 초기화 — {mode} / leverage={LEVERAGE}x{proxy_info}")
 
     # ── 내부 헬퍼 ─────────────────────────────────────────────────────────
 
@@ -174,8 +173,8 @@ class BinanceExecutor:
             await self._post("/fapi/v1/leverage", {
                 "symbol": symbol, "leverage": leverage,
             })
-        except Exception as e:
-            print(f"[BinanceExecutor] leverage 설정 오류 (무시): {e}")
+        except Exception:
+            pass
 
     async def _ensure_margin_type(self, symbol: str) -> None:
         """ISOLATED 마진 타입 설정 (이미 설정됨이면 오류 무시)."""
@@ -210,7 +209,6 @@ class BinanceExecutor:
         # 이미 포지션 있으면 건너뜀
         existing = await self.get_position(symbol)
         if existing:
-            print(f"[BinanceExecutor] 이미 포지션 있음 ({existing['positionAmt']}) → 신규 주문 스킵")
             return None
 
         balance = await self.get_usdt_balance()
@@ -276,7 +274,6 @@ class BinanceExecutor:
         # 문서와 다르게 동작하는 케이스가 있어, 테스트넷에서는 TP/SL 주문을 생략한다.
         # (실계좌 LIVE 환경에서만 실제 TP/SL 주문을 등록한다.)
         if self._testnet:
-            print("[BinanceExecutor] TESTNET 환경 — TP/SL 거래소 주문은 생략 (엔진 내 가상 TP/SL만 사용).")
             return
 
         if not self._key or not self._secret:
@@ -331,7 +328,6 @@ class BinanceExecutor:
         """symbol의 미체결 주문 전체 취소 (DELETE)."""
         try:
             await self._delete("/fapi/v1/allOpenOrders", {"symbol": symbol})
-            print(f"[BinanceExecutor] 🗑 미체결 주문 취소: {symbol}")
         except httpx.HTTPStatusError as e:
             txt = e.response.text[:200]  # HTML 응답 방지용 truncate
             if "-2011" not in txt:
@@ -356,8 +352,6 @@ class BinanceExecutor:
         for attempt in range(1, max_attempts + 1):
             pos = await self.get_position(symbol)
             if not pos:
-                if attempt == 1:
-                    print(f"[BinanceExecutor] 청산할 포지션 없음 ({symbol})")
                 return None
 
             pos_amt = float(pos.get("positionAmt", 0))

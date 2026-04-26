@@ -193,7 +193,7 @@ class BinancePriceWS:
             self._reconnect_delay = 1.0
             self._dns_streak = 0
             self._last_rx_monotonic = time.monotonic()
-            print(f"[BinancePriceWS] connected to {url}")
+            print(f"[BinancePriceWS] connected ({self._symbols})")
 
             while self._running:
                 try:
