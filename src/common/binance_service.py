@@ -128,7 +128,7 @@ async def get_open_interest(symbol: str, period: str, limit: int = 500) -> List[
       ...
     ]
     """
-    url = "https://fapi.binance.com/fapi/v1/openInterestHist"
+    url = "https://fapi.binance.com/futures/data/openInterestHist"
     params = {
         "symbol": symbol.upper(),
         "period": period,

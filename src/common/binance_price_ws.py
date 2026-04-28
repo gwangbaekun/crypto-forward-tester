@@ -11,6 +11,17 @@ import socket
 import time
 from typing import Any, Dict, List, Optional
 
+# EAI_* constants are POSIX getaddrinfo codes; not present in Python's errno on all platforms (e.g. macOS)
+_EAI_CODES: frozenset = frozenset(
+    c for c in (
+        getattr(errno, "EAI_NONAME", None),
+        getattr(errno, "EAI_AGAIN", None),
+        getattr(errno, "EAI_FAIL", None),
+        -2, -5,
+    )
+    if c is not None
+)
+
 import websockets
 from websockets.exceptions import ConnectionClosed
 
@@ -124,8 +135,7 @@ class BinancePriceWS:
             return True
         if isinstance(e, OSError):
             en = getattr(e, "errno", None)
-            # Linux/mac: -2 Name or service not known, -5 No address; Windows는 코드 다를 수 있음
-            if en in (errno.EAI_NONAME, errno.EAI_AGAIN, errno.EAI_FAIL, -2, -5):
+            if en in _EAI_CODES:
                 return True
         return False
 
@@ -190,17 +200,23 @@ class BinancePriceWS:
             open_timeout=30,
             max_size=2**22,
         ) as ws:
-            self._reconnect_delay = 1.0
-            self._dns_streak = 0
+            # _reconnect_delay / _dns_streak 은 첫 메시지 수신 후 리셋 (TCP 연결만으로 리셋하면
+            # 데이터 없이 즉시 timeout → 재연결 스핀루프 발생)
             self._last_rx_monotonic = time.monotonic()
+            _connect_wall = time.time()       # stale grace period 기준
+            _received_first = False
             print(f"[BinancePriceWS] connected ({self._symbols})")
 
             while self._running:
                 try:
                     raw = await asyncio.wait_for(ws.recv(), timeout=_RECV_TIMEOUT_SEC)
                 except asyncio.TimeoutError:
-                    # 소켓이 조용히 멈춘 half-open 상태 방지: 구독 심볼 중 하나라도 stale면 재연결
+                    # 소켓이 조용히 멈춘 half-open 상태 방지: 구독 심볼 중 하나라도 stale면 재연결.
+                    # 단, 연결 직후 grace period(_RECV_TIMEOUT_SEC * 2) 동안은 스킵
                     now = time.time()
+                    grace = _RECV_TIMEOUT_SEC * 2
+                    if not _received_first and (now - _connect_wall) < grace:
+                        continue
                     stale_syms = [
                         s for s in self._symbols
                         if (now - self._updated_at.get(s, 0)) > STALE_SECONDS
@@ -213,6 +229,10 @@ class BinancePriceWS:
                     continue
 
                 self._last_rx_monotonic = time.monotonic()
+                if not _received_first:
+                    _received_first = True
+                    self._reconnect_delay = 1.0
+                    self._dns_streak = 0
                 try:
                     msg = json.loads(raw)
                     stream_name = msg.get("stream", "")
