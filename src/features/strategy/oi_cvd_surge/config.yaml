@@ -1,0 +1,19 @@
+strategy_id: oi_cvd_surge
+strategy_name: OI CVD Surge
+
+timeframes:
+  all:
+    - 1h
+  entry_tf: 1h
+
+signal:
+  lookback: 20
+  oi_lookback: 5
+  oi_min_pct: 1.0
+  confidence_threshold: 1
+
+tpsl:
+  mode: fixed_rr
+  rr_ratio: 3.0
+  sl_max_pct: 2.0
+  slippage_pct: 0.05

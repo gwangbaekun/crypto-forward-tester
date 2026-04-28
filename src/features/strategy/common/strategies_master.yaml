@@ -87,3 +87,21 @@ eth_cvd_explosion_v2:
   tick:
     module: features.strategy.eth_cvd_explosion_v2.forward_test_runner
     fn: get_state
+
+oi_cvd_surge:
+  enabled: true
+  monitoring: true
+  symbol: "BTCUSDT"
+  tick_interval: 60
+  timeframes: ["1h"]
+  entry_tf: "1h"
+  strategy_tag: oi_cvd_surge
+  label: "OI CVD Surge"
+  emoji: "📈"
+  telegram_alerts: true
+  discord_alerts: true
+  binance_live: false
+  binance_leverage: 3
+  tick:
+    module: features.strategy.oi_cvd_surge.realtime_feed
+    fn: get_state

@@ -1,0 +1,167 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>OI CVD Surge — Forward Test</title>
+    <meta name="oi-cvd-surge-monitoring-start" content="{% if monitoring_start_by_default is defined %}{{ monitoring_start_by_default|tojson }}{% else %}true{% endif %}">
+    <script>
+      window.OI_CVD_SURGE_MONITORING_START = document.querySelector('meta[name="oi-cvd-surge-monitoring-start"]').getAttribute('content') === 'true';
+    </script>
+    <link rel="stylesheet" href="/static/css/dashboard_common.css">
+    <script src="/static/js/forward_test_dashboard.js?v=4"></script>
+</head>
+<body>
+<div class="container">
+
+    <div class="card" style="padding:12px 14px;">
+        <div class="main-header">
+            <div class="header-left">
+                <span class="strategy-tag">OI CVD Surge</span>
+                <span class="symbol-badge" id="symbol-label">BTCUSDT</span>
+                <span class="status-dot" id="dot"></span>
+            </div>
+            <div style="display:flex;align-items:center;gap:10px;">
+                <span class="price-display" id="price">—</span>
+                <a href="/" class="back">← Home</a>
+            </div>
+        </div>
+    </div>
+
+    <div class="card" style="padding:10px 14px">
+        <div class="ctrl">
+            <span class="ctrl-label">Monitor</span>
+            <button id="btn-toggle" class="primary" onclick="toggleMonitor()">Start</button>
+            <button onclick="loadOnce()">Refresh</button>
+        </div>
+    </div>
+
+    <div class="card">
+        <div class="card-title">Signal (OI Surge + CVD direction)</div>
+        <div class="signal-row">
+            <span class="signal-badge none" id="sig-badge">Idle</span>
+        </div>
+        <div class="metrics-grid" style="margin-top:14px">
+            <div class="metric"><span class="metric-key">OI Δ%</span><span class="metric-val" id="m-oi">—</span></div>
+            <div class="metric"><span class="metric-key">CVD net</span><span class="metric-val" id="m-cvd">—</span></div>
+            <div class="metric"><span class="metric-key">Roll High</span><span class="metric-val" id="m-rh">—</span></div>
+            <div class="metric"><span class="metric-key">Roll Low</span><span class="metric-val" id="m-rl">—</span></div>
+            <div class="metric"><span class="metric-key">TP</span><span class="metric-val" id="m-tp">—</span></div>
+            <div class="metric"><span class="metric-key">SL</span><span class="metric-val" id="m-sl">—</span></div>
+        </div>
+    </div>
+
+    <div class="card">
+        <div class="card-title">Reasons</div>
+        <ul class="reasons-list" id="reasons-list"><li>—</li></ul>
+    </div>
+
+    <div class="card">
+        <div class="step-label">Forward Test</div>
+        <div class="card-header">
+            <span>🤖 Forward test P&amp;L</span>
+            <button onclick="location.href='/quant/oi_cvd_surge/forward_test/trades?symbol=BTCUSDT'"
+                    style="font-size:0.72rem;padding:3px 8px;">All trades</button>
+        </div>
+        <div id="forward-stats" style="min-height:60px;color:var(--text-secondary);">Loading…</div>
+        <div id="forward-trades-box" style="margin-top:14px;padding-top:14px;border-top:1px solid var(--border-color);">
+            <div style="font-size:0.8rem;font-weight:bold;margin-bottom:8px;color:var(--text-primary);">📋 Recent trades</div>
+            <div id="forward-trades-list" style="font-size:0.75rem;color:var(--text-secondary);">Loading…</div>
+            <div id="forward-trades-pagination" style="margin-top:8px;display:flex;gap:6px;align-items:center;flex-wrap:wrap;"></div>
+        </div>
+    </div>
+
+</div>
+
+<script>
+(function() {
+    var SYMBOL = 'BTCUSDT';
+    var timer = null;
+    var running = false;
+
+    function _fmtPrice(v) {
+        if (v == null) return '—';
+        return '$' + Number(v).toLocaleString(undefined, { minimumFractionDigits: 1, maximumFractionDigits: 2 });
+    }
+
+    function toggleMonitor() {
+        running = !running;
+        var btn = document.getElementById('btn-toggle');
+        if (running) {
+            btn.textContent = 'Stop'; btn.className = 'active';
+            document.getElementById('dot').className = 'dot live';
+            loadOnce();
+            timer = setInterval(loadOnce, 60000);
+        } else {
+            btn.textContent = 'Start'; btn.className = 'primary';
+            document.getElementById('dot').className = 'dot';
+            clearInterval(timer); timer = null;
+        }
+    }
+    window.toggleMonitor = toggleMonitor;
+
+    function loadOnce() {
+        fetch('/api/market-stream?symbol=' + SYMBOL, { cache: 'no-store' })
+            .then(function(r) { return r.json(); })
+            .then(function(d) {
+                var lower = SYMBOL.toLowerCase();
+                var row = (((d || {}).marks || {}).symbols || {})[lower];
+                if (row && row.price != null) {
+                    document.getElementById('price').textContent =
+                        '$' + Number(row.price).toLocaleString(undefined, { minimumFractionDigits: 1 });
+                }
+            }).catch(function() {});
+
+        fetch('/quant/oi_cvd_surge/realtime_state?symbol=' + SYMBOL)
+            .then(function(r) { return r.json(); })
+            .then(function(d) {
+                var sig = d.signal || {};
+                renderSignal(sig);
+            }).catch(function() {});
+
+        if (window.ForwardTestDashboard && !window.__OI_FWD_INITED) {
+            window.__OI_FWD_INITED = true;
+            window.ForwardTestDashboard.init({
+                basePath: '/quant/oi_cvd_surge',
+                symbolFn: function() { return SYMBOL; },
+                strategyTag: null,
+                statsElId: 'forward-stats',
+                tradesListElId: 'forward-trades-list',
+                tradesPagerElId: 'forward-trades-pagination',
+                pollMs: 60000,
+                onStatsFetch: function() {},
+                onTradesFetch: function() {},
+            });
+        }
+    }
+    window.loadOnce = loadOnce;
+
+    function renderSignal(sig) {
+        var signal = sig.signal || 'none';
+        var badge = document.getElementById('sig-badge');
+        badge.textContent = signal === 'long' ? '📈 LONG' : signal === 'short' ? '📉 SHORT' : 'Idle';
+        badge.className = 'signal-badge ' + signal;
+
+        document.getElementById('m-oi').textContent  = sig.oi_pct   != null ? Number(sig.oi_pct).toFixed(2) + '%' : '—';
+        document.getElementById('m-cvd').textContent = sig.cvd_net  != null ? Number(sig.cvd_net).toFixed(0) : '—';
+        document.getElementById('m-rh').textContent  = sig.roll_high != null ? _fmtPrice(sig.roll_high) : '—';
+        document.getElementById('m-rl').textContent  = sig.roll_low  != null ? _fmtPrice(sig.roll_low)  : '—';
+        document.getElementById('m-tp').textContent  = sig.tp  != null ? _fmtPrice(sig.tp) : '—';
+        document.getElementById('m-sl').textContent  = sig.sl  != null ? _fmtPrice(sig.sl) : '—';
+
+        var reasons = sig.reasons || [];
+        var ul = document.getElementById('reasons-list');
+        ul.innerHTML = reasons.length
+            ? reasons.map(function(r) { return '<li>' + r + '</li>'; }).join('')
+            : '<li>—</li>';
+    }
+
+    if (window.OI_CVD_SURGE_MONITORING_START !== false) {
+        toggleMonitor();
+    } else {
+        loadOnce();
+    }
+})();
+</script>
+</body>
+</html>
