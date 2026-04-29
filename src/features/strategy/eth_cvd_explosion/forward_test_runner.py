@@ -78,14 +78,15 @@ async def get_state(
     )
     magnets = {"level_map": level_map} if level_map else {}
 
-    # ── 완성봉 감지 ──────────────────────────────────────────────────────────
-    # [-1] 은 현재 형성 중인 봉, [-2] 가 방금 완성된 봉
+    # ── 현재 봉 감지 ─────────────────────────────────────────────────────────
+    # advance=60 트리거(:59)에서 [-1] = 지금 막 마감 직전인 봉 (99% 완성)
+    # [-2] 를 쓰면 이전 봉 신호가 되어 1 TF 주기 늦게 진입하게 됨
     entry_df = dfs_by_tf.get(entry_tf)
-    if entry_df is None or len(entry_df) < 2:
+    if entry_df is None or len(entry_df) < 1:
         cached = _signal_cache.get(cache_key)
         return cached["state"] if cached else {}
 
-    completed_row    = entry_df.iloc[-2]
+    completed_row    = entry_df.iloc[-1]
     completed_ts_ms  = int(completed_row["open_time_ms"])   # ms
     completed_ts_sec = completed_ts_ms // 1000              # sec (캐시 키용)
     new_bar_detected = completed_ts_sec != _last_bar_time.get(cache_key, 0)

@@ -111,7 +111,7 @@ async def _strategy_loop(name: str, cfg: Dict[str, Any], symbol: str) -> None:
         except Exception as e:
             print(f"[StrategyLoop:{name}] error: {e}")
 
-        # 다음 진입 트리거(:14/:29/:44/:59)까지 sleep
+        # 봉 마감 30초 후 트리거 (advance = iv_sec - 30)
         from common.liq_series_cache import _next_trigger_time
         entry_tf = cfg.get("entry_tf") or "15m"
         next_t = _next_trigger_time(entry_tf, time.time(), advance=60)
