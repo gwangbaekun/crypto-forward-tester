@@ -1,6 +1,6 @@
 """
-Binance Futures price cache via WebSocket.
-Subscribes to markPrice stream(s) and exposes get_price(symbol) to minimize REST calls.
+Mark price cache via Bybit Futures WebSocket (v5 public/linear).
+Public API is identical to the previous Binance implementation so no callers change.
 """
 import asyncio
 import errno
@@ -11,7 +11,8 @@ import socket
 import time
 from typing import Any, Dict, List, Optional
 
-# EAI_* constants are POSIX getaddrinfo codes; not present in Python's errno on all platforms (e.g. macOS)
+import aiohttp
+
 _EAI_CODES: frozenset = frozenset(
     c for c in (
         getattr(errno, "EAI_NONAME", None),
@@ -22,22 +23,133 @@ _EAI_CODES: frozenset = frozenset(
     if c is not None
 )
 
-import websockets
-from websockets.exceptions import ConnectionClosed
-
-# Default symbols to subscribe (lowercase)
 DEFAULT_SYMBOLS = ["btcusdt", "ethusdt"]
-# Cache TTL: if WS has no update for this many seconds, get_price may fall back to None/REST
 STALE_SECONDS = 30
-# 수신 침묵 감지: 이 시간 동안 ws.recv()가 없으면 heartbeat 검사
-_RECV_TIMEOUT_SEC = float(os.getenv("BINANCE_WS_RECV_TIMEOUT_SEC", "20"))
-# Abrupt TCP drop (no close frame) / flaky DNS 시 재연결 스팸 방지
-_MIN_RECONNECT_SEC = float(os.getenv("BINANCE_WS_MIN_RECONNECT_SEC", "3.0"))
-_DNS_RECONNECT_FLOOR = float(os.getenv("BINANCE_WS_DNS_RECONNECT_FLOOR", "5.0"))
+_RECV_TIMEOUT_SEC = float(os.getenv("BYBIT_WS_RECV_TIMEOUT_SEC", "20"))
+_MIN_RECONNECT_SEC = float(os.getenv("BYBIT_WS_MIN_RECONNECT_SEC", "3.0"))
+_DNS_RECONNECT_FLOOR = float(os.getenv("BYBIT_WS_DNS_RECONNECT_FLOOR", "5.0"))
+
+_BYBIT_WS_URL = "wss://stream.bybit.com/v5/public/linear"
+
+
+class _SymbolWS:
+    """Single-symbol Bybit WebSocket worker."""
+
+    def __init__(self, symbol: str, prices: Dict[str, float], updated_at: Dict[str, float]) -> None:
+        self._symbol = symbol                     # lowercase: btcusdt
+        self._topic = f"tickers.{symbol.upper()}" # Bybit topic: tickers.BTCUSDT
+        self._prices = prices
+        self._updated_at = updated_at
+        self._running = False
+        self._task: Optional[asyncio.Task] = None
+        self._reconnect_delay = 1.0
+        self._dns_streak = 0
+
+    def start(self) -> None:
+        if self._running and self._task and not self._task.done():
+            return
+        self._running = True
+        self._task = asyncio.create_task(self._run_forever())
+
+    def stop(self) -> None:
+        self._running = False
+        if self._task:
+            self._task.cancel()
+
+    def _is_dns_error(self, e: BaseException) -> bool:
+        if isinstance(e, socket.gaierror):
+            return True
+        if isinstance(e, OSError) and getattr(e, "errno", None) in _EAI_CODES:
+            return True
+        return False
+
+    async def _run_forever(self) -> None:
+        while self._running:
+            try:
+                await self._connect_and_listen()
+            except asyncio.CancelledError:
+                break
+            except OSError as e:
+                if self._is_dns_error(e):
+                    self._dns_streak += 1
+                    base = max(self._reconnect_delay, _DNS_RECONNECT_FLOOR)
+                    delay = min(base * (1.2 ** min(self._dns_streak, 8)), 60.0) + random.uniform(0.0, 1.0)
+                    print(f"[BybitPriceWS:{self._symbol}] dns error: {e}, reconnect in {delay:.1f}s")
+                    await asyncio.sleep(delay)
+                    self._reconnect_delay = min(self._reconnect_delay * 2, 30.0)
+                else:
+                    self._dns_streak = 0
+                    delay = min(max(_MIN_RECONNECT_SEC, self._reconnect_delay) + random.uniform(0.0, 0.5), 30.0)
+                    print(f"[BybitPriceWS:{self._symbol}] error: {e}, reconnect in {delay:.1f}s")
+                    await asyncio.sleep(delay)
+                    self._reconnect_delay = min(self._reconnect_delay * 1.5, 30.0)
+            except Exception as e:
+                self._dns_streak = 0
+                delay = min(max(_MIN_RECONNECT_SEC, self._reconnect_delay) + random.uniform(0.0, 0.5), 60.0)
+                print(f"[BybitPriceWS:{self._symbol}] error: {e}, reconnect in {delay:.1f}s")
+                await asyncio.sleep(delay)
+                self._reconnect_delay = min(max(self._reconnect_delay * 1.5, _MIN_RECONNECT_SEC), 30.0)
+
+    async def _connect_and_listen(self) -> None:
+        async with aiohttp.ClientSession() as session:
+            async with session.ws_connect(
+                _BYBIT_WS_URL,
+                heartbeat=20,
+                max_msg_size=2**22,
+            ) as ws:
+                # subscribe to this symbol's ticker
+                await ws.send_str(json.dumps({"op": "subscribe", "args": [self._topic]}))
+
+                _connect_wall = time.time()
+                _received_first = False
+                print(f"[BybitPriceWS:{self._symbol}] connected")
+
+                async for msg in ws:
+                    if not self._running:
+                        break
+
+                    if msg.type == aiohttp.WSMsgType.TEXT:
+                        try:
+                            data = json.loads(msg.data)
+                        except Exception:
+                            continue
+
+                        # application-level ping from Bybit
+                        if data.get("op") == "ping":
+                            await ws.send_str(json.dumps({"op": "pong"}))
+                            continue
+
+                        if data.get("topic") != self._topic:
+                            continue
+
+                        mark_str = data.get("data", {}).get("markPrice")
+                        if mark_str is not None:
+                            try:
+                                self._prices[self._symbol] = float(mark_str)
+                                self._updated_at[self._symbol] = time.time()
+                                if not _received_first:
+                                    _received_first = True
+                                    self._reconnect_delay = 1.0
+                                    self._dns_streak = 0
+                            except (TypeError, ValueError):
+                                pass
+
+                    elif msg.type == aiohttp.WSMsgType.ERROR:
+                        raise Exception(f"ws error: {ws.exception()}")
+
+                    elif msg.type in (aiohttp.WSMsgType.CLOSED, aiohttp.WSMsgType.CLOSING):
+                        break
+
+                now = time.time()
+                if not _received_first and (now - _connect_wall) > _RECV_TIMEOUT_SEC * 2:
+                    raise OSError("ws closed with no data received")
 
 
 class BinancePriceWS:
-    """Singleton: one WS connection (combined stream), in-memory price cache."""
+    """
+    Singleton mark price cache — backed by Bybit Futures WS.
+    Class name kept for backward compatibility with all callers.
+    """
 
     _instance: Optional["BinancePriceWS"] = None
 
@@ -54,44 +166,45 @@ class BinancePriceWS:
         self._prices: Dict[str, float] = {}
         self._updated_at: Dict[str, float] = {}
         self._running = False
-        self._task: Optional[asyncio.Task] = None
-        self._symbols = list(DEFAULT_SYMBOLS)
-        self._reconnect_delay = 1.0
-        self._dns_streak = 0
-        self._last_rx_monotonic = 0.0
+        self._symbols: List[str] = []
+        self._workers: Dict[str, _SymbolWS] = {}
 
     def start(self, symbols: Optional[list] = None) -> None:
-        """Start the WebSocket listener in the background."""
-        task_alive = self._task is not None and not self._task.done()
-        if self._running and task_alive:
-            return
-        if self._running and not task_alive:
-            exc = None
-            if self._task is not None and not self._task.cancelled():
-                try:
-                    exc = self._task.exception()
-                except Exception:
-                    pass
-            print(f"[BinancePriceWS] task dead (exc={exc}), restarting")
-            self._running = False
         if symbols:
             normalized = []
             for s in symbols:
                 t = (s or "").lower().strip().replace("usdt", "")
                 normalized.append((t or "btc") + "usdt")
-            self._symbols = list(dict.fromkeys(normalized))
+            new_symbols = list(dict.fromkeys(normalized))
+        else:
+            new_symbols = list(DEFAULT_SYMBOLS)
+
         self._running = True
-        self._task = asyncio.create_task(self._run_forever())
-        print(f"[BinancePriceWS] started for {self._symbols}")
+
+        for sym in list(self._workers):
+            if sym not in new_symbols:
+                self._workers.pop(sym).stop()
+
+        added = []
+        for sym in new_symbols:
+            if sym not in self._workers:
+                w = _SymbolWS(sym, self._prices, self._updated_at)
+                self._workers[sym] = w
+                w.start()
+                added.append(sym)
+
+        self._symbols = new_symbols
+        if added:
+            print(f"[BybitPriceWS] started for {added}")
 
     def stop(self) -> None:
         self._running = False
-        if self._task:
-            self._task.cancel()
-        print("[BinancePriceWS] stopped")
+        for w in self._workers.values():
+            w.stop()
+        self._workers.clear()
+        print("[BybitPriceWS] stopped")
 
     def get_price(self, symbol: str) -> Optional[float]:
-        """Return cached price for symbol (e.g. BTCUSDT). Returns None if stale or missing."""
         key = symbol.lower().replace("usdt", "") + "usdt"
         if key not in self._prices:
             return None
@@ -100,17 +213,12 @@ class BinancePriceWS:
         return self._prices[key]
 
     def get_price_or_none_sync(self, symbol: str) -> Optional[float]:
-        """Alias for get_price (sync API for callers that cannot await)."""
         return self.get_price(symbol)
 
     def get_symbols(self) -> List[str]:
         return list(self._symbols)
 
     def get_display_snapshot(self) -> Dict[str, Any]:
-        """
-        UI/WebSocket용: 구독 심볼별 마지막 가격·수신 시각(age).
-        stale 여부는 표시용(캐시 TTL 초과해도 마지막 값은 유지).
-        """
         now = time.time()
         rows: Dict[str, Any] = {}
         for sym in self._symbols:
@@ -130,128 +238,6 @@ class BinancePriceWS:
             "symbols": rows,
         }
 
-    def _is_dns_oserror(self, e: BaseException) -> bool:
-        if isinstance(e, socket.gaierror):
-            return True
-        if isinstance(e, OSError):
-            en = getattr(e, "errno", None)
-            if en in _EAI_CODES:
-                return True
-        return False
-
-    async def _run_forever(self) -> None:
-        while self._running:
-            try:
-                await self._connect_and_listen()
-            except asyncio.CancelledError:
-                break
-            except ConnectionClosed as e:
-                # 서버/중간망이 TCP만 끊고 close frame 없이 끊는 경우가 많음 → 짧은 간격 재시도 금지
-                self._dns_streak = 0
-                jitter = random.uniform(0.0, 0.75)
-                delay = max(_MIN_RECONNECT_SEC, self._reconnect_delay) + jitter
-                delay = min(delay, 60.0)
-                code = getattr(e, "code", None)
-                print(
-                    f"[BinancePriceWS] connection closed (code={code}), reconnect in {delay:.1f}s"
-                )
-                await asyncio.sleep(delay)
-                self._reconnect_delay = min(max(self._reconnect_delay * 1.5, _MIN_RECONNECT_SEC), 30.0)
-            except OSError as e:
-                if self._is_dns_oserror(e):
-                    self._dns_streak += 1
-                    base = max(self._reconnect_delay, _DNS_RECONNECT_FLOOR)
-                    delay = min(base * (1.2 ** min(self._dns_streak, 8)), 60.0)
-                    jitter = random.uniform(0.0, 1.0)
-                    print(f"[BinancePriceWS] dns error: {e}, reconnect in {delay + jitter:.1f}s")
-                    await asyncio.sleep(delay + jitter)
-                    self._reconnect_delay = min(self._reconnect_delay * 2, 30.0)
-                else:
-                    self._dns_streak = 0
-                    jitter = random.uniform(0.0, 0.5)
-                    delay = min(self._reconnect_delay + jitter, 30.0)
-                    print(f"[BinancePriceWS] error: {e}, reconnect in {delay:.1f}s")
-                    await asyncio.sleep(delay)
-                    self._reconnect_delay = min(self._reconnect_delay * 2, 30.0)
-            except Exception as e:
-                self._dns_streak = 0
-                msg = str(e).lower()
-                # websockets: "no close frame received or sent" 등
-                floor = _MIN_RECONNECT_SEC if "close frame" in msg or "connection reset" in msg else 0.0
-                jitter = random.uniform(0.0, 0.5)
-                delay = max(floor, self._reconnect_delay) + jitter
-                delay = min(delay, 60.0)
-                print(f"[BinancePriceWS] error: {e}, reconnect in {delay:.1f}s")
-                await asyncio.sleep(delay)
-                self._reconnect_delay = min(max(self._reconnect_delay * 2, _MIN_RECONNECT_SEC), 30.0)
-
-    def _streams_query(self) -> str:
-        return "/".join(f"{s}@markPrice" for s in self._symbols)
-
-    async def _connect_and_listen(self) -> None:
-        stream = self._streams_query()
-        url = f"wss://fstream.binance.com/stream?streams={stream}"
-        async with websockets.connect(
-            url,
-            # NAT/방화벽 idle 끊김 완화 + ping 응답 지연 허용 (과도한 1011 방지)
-            ping_interval=30,
-            ping_timeout=120,
-            close_timeout=10,
-            open_timeout=30,
-            max_size=2**22,
-        ) as ws:
-            # _reconnect_delay / _dns_streak 은 첫 메시지 수신 후 리셋 (TCP 연결만으로 리셋하면
-            # 데이터 없이 즉시 timeout → 재연결 스핀루프 발생)
-            self._last_rx_monotonic = time.monotonic()
-            _connect_wall = time.time()       # stale grace period 기준
-            _received_first = False
-            print(f"[BinancePriceWS] connected ({self._symbols})")
-
-            while self._running:
-                try:
-                    raw = await asyncio.wait_for(ws.recv(), timeout=_RECV_TIMEOUT_SEC)
-                except asyncio.TimeoutError:
-                    # 소켓이 조용히 멈춘 half-open 상태 방지: 구독 심볼 중 하나라도 stale면 재연결.
-                    # 단, 연결 직후 grace period(_RECV_TIMEOUT_SEC * 2) 동안은 스킵
-                    now = time.time()
-                    grace = _RECV_TIMEOUT_SEC * 2
-                    if not _received_first and (now - _connect_wall) < grace:
-                        continue
-                    stale_syms = [
-                        s for s in self._symbols
-                        if (now - self._updated_at.get(s, 0)) > STALE_SECONDS
-                    ]
-                    if stale_syms:
-                        print(
-                            f"[BinancePriceWS] recv timeout and stale symbols {stale_syms} → reconnect"
-                        )
-                        raise OSError("ws recv timeout with stale cache")
-                    continue
-
-                self._last_rx_monotonic = time.monotonic()
-                if not _received_first:
-                    _received_first = True
-                    self._reconnect_delay = 1.0
-                    self._dns_streak = 0
-                try:
-                    msg = json.loads(raw)
-                    stream_name = msg.get("stream", "")
-                    data = msg.get("data") or msg
-                    # stream_name e.g. "btcusdt@markPrice"
-                    sym = (stream_name.split("@")[0] or "").lower()
-                    if not sym:
-                        continue
-                    p_str = data.get("p")
-                    if p_str is not None:
-                        try:
-                            self._prices[sym] = float(p_str)
-                            self._updated_at[sym] = time.time()
-                        except (TypeError, ValueError):
-                            pass
-                except Exception:
-                    continue
-
 
 def get_cached_price(symbol: str) -> Optional[float]:
-    """Convenience: return cached price from singleton. None if WS not updated recently."""
     return BinancePriceWS().get_price(symbol)
