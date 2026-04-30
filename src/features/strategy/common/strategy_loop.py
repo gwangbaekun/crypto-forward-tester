@@ -92,9 +92,10 @@ async def _strategy_loop(name: str, cfg: Dict[str, Any], symbol: str) -> None:
                             _stale_logged_at = now
                         await asyncio.sleep(max(0.5, fast_exit_interval))
                         continue
+                pos = eng.get_position()
                 tick_result = eng.tick(symbol, {
                     "current_price": ws_price,
-                    "signal":        {},
+                    "signal":        {"level_map": pos.get("level_map")} if pos else {},
                     "bar_high":      ws_price,
                     "bar_low":       ws_price,
                 })
@@ -108,13 +109,18 @@ async def _strategy_loop(name: str, cfg: Dict[str, Any], symbol: str) -> None:
             # ── 포지션 없음: :14/:29/:44/:59 에 signal check + 진입 ──────────
             await fn(symbol=symbol, tfs=tfs_str)
 
+            # 진입이 방금 발생했으면 슬립 없이 즉시 fast_exit 루프로 전환
+            if eng is not None and eng.get_position() is not None:
+                continue
+
         except Exception as e:
             print(f"[StrategyLoop:{name}] error: {e}")
 
-        # 봉 마감 30초 후 트리거 (advance = iv_sec - 30)
-        from common.liq_series_cache import _next_trigger_time
+        from common.liq_series_cache import _next_trigger_time, _interval_to_seconds
         entry_tf = cfg.get("entry_tf") or "15m"
-        next_t = _next_trigger_time(entry_tf, time.time(), advance=60)
+        iv_sec   = _interval_to_seconds(entry_tf)
+        advance  = max(5, min(60, iv_sec // 10))
+        next_t   = _next_trigger_time(entry_tf, time.time(), advance=advance)
         await asyncio.sleep(max(1.0, next_t - time.time()))
 
 

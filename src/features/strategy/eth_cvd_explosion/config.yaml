@@ -8,7 +8,7 @@ timeframes:
   higher_tf: 4h
 signal:
   vol_avg_window: 20
-  vol_mult: 3.5
+  vol_mult: 2.0
   zone_gap: 3
   cvd_accel_window: 3
   cvd_higher_window: 10
@@ -22,7 +22,7 @@ signal:
   m1_subentry_enabled: false
 tpsl:
   mode: magnet_tp_rr
-  rr_ratio: 2.0
+  rr_ratio: 3.5
   risk_pct: 1.0
   sl_max_pct: 0.5
   slippage_pct: 0.05

@@ -309,7 +309,7 @@ def _check_exit_magnet_rr(
     m1_lows:  Optional[Any] = None,
     m1_closes: Optional[Any] = None,
 ) -> Optional[tuple]:
-    level_map = list(sig.get("level_map") or [])
+    level_map = list(sig.get("level_map"))
     if m1_highs is not None and m1_lows is not None and m1_closes is not None and len(m1_highs) > 0:
         for mh, ml, mc in zip(m1_highs, m1_lows, m1_closes):
             res = _check_exit_magnet_rr_single(position, mc, level_map, mh, ml)

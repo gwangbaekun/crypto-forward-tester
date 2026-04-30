@@ -116,10 +116,10 @@ class CvdExplosionForwardTest(BaseForwardTest):
                     "confidence":     sig.get("confidence", 0),
                     "tp":             tp,
                     "sl":             sl,
-                    "tp_levels":      _init_tp_levels(tp, list(sig.get("level_map") or []), direction),
+                    "tp_levels":      _init_tp_levels(tp, list(sig.get("level_map")), direction),
                     "sl_levels":      [sl],
                     "entry_state":    str(sig.get("reasons", [])),
-                    "level_map":      list(sig.get("level_map") or []),
+                    "level_map":      list(sig.get("level_map")),
                     # ── Telegram 알림용 신호 상세 ──────────────────────────
                     "reasons":        list(sig.get("reasons") or []),
                     "vol_ratio":      sig.get("vol_ratio"),
