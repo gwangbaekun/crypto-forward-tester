@@ -2,9 +2,9 @@ strategy_id: eth_cvd_explosion_v2
 strategy_name: ETH CVD Explosion V2
 timeframes:
   all:
-  - 1m
+  - 15m
   - 1h
-  entry_tf: 1m
+  entry_tf: 15m
   higher_tf: 1h
 signal:
   vol_avg_window: 20

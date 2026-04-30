@@ -178,6 +178,27 @@ def make_router(strategy_key: str, default_tfs: str = "15m,1h,4h") -> APIRouter:
         except Exception as e:
             return JSONResponse({"success": False, "error": str(e)}, status_code=500)
 
+    @router.post("/forward_test/reset_db", response_class=JSONResponse)
+    async def reset_db(
+        symbol: str | None = Query(default=None),
+        strategy_tag: str | None = Query(default=None),
+    ):
+        """DB의 모든 ForwardTrade 레코드 삭제 + 인메모리 상태 초기화 (개발/검증용)."""
+        try:
+            ft = importlib.import_module(f"features.strategy.{strategy_key}.engine")
+            engine = None
+            if strategy_tag and hasattr(ft, "get_engine_for"):
+                try:
+                    engine = ft.get_engine_for(strategy_tag)
+                except Exception:
+                    engine = None
+            if engine is None:
+                engine = ft.get_engine()
+            result = engine.reset_db(symbol=symbol)
+            return JSONResponse(result)
+        except Exception as e:
+            return JSONResponse({"success": False, "error": str(e)}, status_code=500)
+
     @router.get("/signal/explain", response_class=JSONResponse)
     async def signal_explain(
         symbol: str = Query("BTCUSDT"),

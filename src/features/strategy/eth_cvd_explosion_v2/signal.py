@@ -196,7 +196,7 @@ def compute_signal(
     level_map: List[Dict] = list((magnets or {}).get("level_map") or [])
 
     if not bars_entry:
-        return _no_signal(f"No {entry_key} data", level_map=level_map)
+        return _no_signal(f"{entry_key} 데이터 없음", level_map=level_map)
 
     # ── 지표 계산 ─────────────────────────────────────────────────────────
     vr      = _vol_ratio(bars_entry, vol_avg_w)
@@ -215,12 +215,12 @@ def compute_signal(
     if is_exp:
         if cdir == "up":
             bull += sc_exp
-            reasons.append(f"[EXP] Bullish explosion candle vr={vr:.2f}x ✅")
+            reasons.append(f"[EXP] 상승폭발봉 vr={vr:.2f}x ✅")
         else:
             bear += sc_exp
-            reasons.append(f"[EXP] Bearish explosion candle vr={vr:.2f}x ✅")
+            reasons.append(f"[EXP] 하락폭발봉 vr={vr:.2f}x ✅")
     else:
-        reasons.append(f"[EXP] Not met vr={vr:.2f}x < {vol_mult}x")
+        reasons.append(f"[EXP] 미달 vr={vr:.2f}x < {vol_mult}x")
 
     # solo score
     if is_solo:
@@ -228,9 +228,9 @@ def compute_signal(
             bull += sc_solo
         else:
             bear += sc_solo
-        reasons.append(f"[SOLO] Solo candle ✅ (no explosion in previous {zone_gap} bars)")
+        reasons.append(f"[SOLO] 단독봉 ✅ (직전 {zone_gap}봉 내 폭발 없음)")
     elif is_exp:
-        reasons.append("[SOLO] Cluster candle — not solo")
+        reasons.append(f"[SOLO] 클러스터봉 — 단독봉 아님")
 
     # CVD 가속 score
     accel_dir = "up" if accel > 0 else "dn"
@@ -239,18 +239,18 @@ def compute_signal(
             bull += sc_cvd
         else:
             bear += sc_cvd
-        reasons.append(f"[CVD_ACCEL] Acceleration aligned {accel:+.0f} ✅")
+        reasons.append(f"[CVD_ACCEL] 가속 일치 {accel:+.0f} ✅")
     elif is_exp:
-        reasons.append(f"[CVD_ACCEL] Acceleration opposite {accel:+.0f} ❌")
+        reasons.append(f"[CVD_ACCEL] 가속 역방향 {accel:+.0f} ❌")
 
     # 상위TF CVD score
     cvd_lbl = f"CVD_{higher_key}"
     if cvd_hi > 0:
         bull += sc_cvd_hi
-        reasons.append(f"[{cvd_lbl}] {higher_key} CVD up {cvd_hi:.0f}")
+        reasons.append(f"[{cvd_lbl}] {higher_key} CVD↑ {cvd_hi:.0f}")
     elif cvd_hi < 0:
         bear += sc_cvd_hi
-        reasons.append(f"[{cvd_lbl}] {higher_key} CVD down {cvd_hi:.0f}")
+        reasons.append(f"[{cvd_lbl}] {higher_key} CVD↓ {cvd_hi:.0f}")
 
     tpsl_params = dict(get_tpsl_params())
     # tpsl_overrides 병합 — 여기서 적용되므로 position_meta 에도 자동 반영
@@ -282,33 +282,20 @@ def compute_signal(
         "m15_resistance": m15_resistance,
     }
 
-    # 전 봉 시가 (SL tightening 용)
-    prev_open: Optional[float] = None
-    if len(bars_entry) >= 2:
-        raw_po = bars_entry[-2].get("open")
-        try:
-            prev_open = float(raw_po) if raw_po is not None else None
-        except (TypeError, ValueError):
-            prev_open = None
-
     # ── 진입 판단 ─────────────────────────────────────────────────────────
     if bull >= conf_thr and bull > bear:
         if higher_tf_veto and cvd_hi < 0:
-            reasons.append(f"[VETO] {higher_key} CVD {cvd_hi:.0f} opposite — long entry rejected")
+            reasons.append(f"[VETO] {higher_key} CVD {cvd_hi:.0f} 반대 — long 진입 거부")
             return {**_no_signal(None), **common}
         tp, sl = resolve_tpsl("long", entry, level_map, tpsl_params)
         if tp is None or sl is None:
             if tpsl_params.get("mode") == "fixed_rr":
-                reasons.append("[WAIT] LONG TP/SL calc failed (check tpsl.risk_pct / rr_ratio)")
+                reasons.append("[대기] LONG TP/SL 산출 실패 (tpsl.risk_pct / rr_ratio 확인)")
             else:
-                reasons.append("[WAIT] LONG liq map missing or insufficient TP/SL — liq cache required")
+                reasons.append("[대기] LONG liq map 없음 또는 TP/SL 부족 — liq cache 필요")
             return {**_no_signal(None), **common}
-        # SL tightening: 전 봉 시가가 SL보다 위(진입가보다 아래)이면 SL을 전 봉 시가로 당김
-        if prev_open is not None and sl < prev_open < entry:
-            reasons.append(f"[SL_TIGHT] LONG SL {sl:,.2f} → previous open {prev_open:,.2f}")
-            sl = round(prev_open, 2)
         reasons.append(
-            f"[ENTRY] LONG confidence={bull}/7 mode={common['tpsl_mode']} TP={tp:,.2f} SL={sl:,.2f}"
+            f"[진입] LONG  confidence={bull}/7  mode={common['tpsl_mode']}  TP={tp:,.2f}  SL={sl:,.2f}"
         )
         out = {"signal": "long", "confidence": bull, "tp": tp, "sl": sl, **common}
         out["position_meta"] = _position_meta_for_entry(tpsl_params)
@@ -316,27 +303,23 @@ def compute_signal(
 
     if bear >= conf_thr and bear > bull:
         if higher_tf_veto and cvd_hi > 0:
-            reasons.append(f"[VETO] {higher_key} CVD {cvd_hi:.0f} opposite — short entry rejected")
+            reasons.append(f"[VETO] {higher_key} CVD {cvd_hi:.0f} 반대 — short 진입 거부")
             return {**_no_signal(None), **common}
         tp, sl = resolve_tpsl("short", entry, level_map, tpsl_params)
         if tp is None or sl is None:
             if tpsl_params.get("mode") == "fixed_rr":
-                reasons.append("[WAIT] SHORT TP/SL calc failed (check tpsl.risk_pct / rr_ratio)")
+                reasons.append("[대기] SHORT TP/SL 산출 실패 (tpsl.risk_pct / rr_ratio 확인)")
             else:
-                reasons.append("[WAIT] SHORT liq map missing or insufficient TP/SL — liq cache required")
+                reasons.append("[대기] SHORT liq map 없음 또는 TP/SL 부족 — liq cache 필요")
             return {**_no_signal(None), **common}
-        # SL tightening: 전 봉 시가가 SL보다 아래(진입가보다 위)이면 SL을 전 봉 시가로 당김
-        if prev_open is not None and entry < prev_open < sl:
-            reasons.append(f"[SL_TIGHT] SHORT SL {sl:,.2f} → previous open {prev_open:,.2f}")
-            sl = round(prev_open, 2)
         reasons.append(
-            f"[ENTRY] SHORT confidence={bear}/7 mode={common['tpsl_mode']} TP={tp:,.2f} SL={sl:,.2f}"
+            f"[진입] SHORT confidence={bear}/7  mode={common['tpsl_mode']}  TP={tp:,.2f}  SL={sl:,.2f}"
         )
         out = {"signal": "short", "confidence": bear, "tp": tp, "sl": sl, **common}
         out["position_meta"] = _position_meta_for_entry(tpsl_params)
         return out
 
-    reasons.append(f"[WAIT] bull={bull} bear={bear} — below threshold ({conf_thr}/{max_score})")
+    reasons.append(f"[대기] bull={bull} bear={bear} — 임계값({conf_thr}/{max_score}) 미달")
     return {**_no_signal(None), **common}
 
 

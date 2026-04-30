@@ -99,8 +99,12 @@
         <div class="step-label">Forward Test</div>
         <div class="card-header">
             <span>🤖 Forward test P&amp;L <span id="health-forward-stats" style="display:none;color:var(--accent-red);font-size:0.72rem;margin-left:6px;">●</span> <span id="health-forward-trades" style="display:none;color:var(--accent-red);font-size:0.72rem;margin-left:2px;">●</span></span>
-            <button onclick="location.href='/quant/eth_cvd_explosion_v2/forward_test/trades?symbol=' + encodeURIComponent(window.__CVD_EXPLOSION_SYMBOL || 'ETHUSDT')"
-                    style="font-size:0.72rem;padding:3px 8px;">All trades</button>
+            <div style="display:flex;gap:6px;align-items:center;">
+                <button onclick="location.href='/quant/eth_cvd_explosion_v2/forward_test/trades?symbol=' + encodeURIComponent(window.__CVD_EXPLOSION_SYMBOL || 'ETHUSDT')"
+                        style="font-size:0.72rem;padding:3px 8px;">All trades</button>
+                <button id="btn-reset-db" onclick="cvdResetDb()"
+                        style="font-size:0.72rem;padding:3px 8px;background:var(--accent-red,#e53e3e);color:#fff;border:none;border-radius:5px;cursor:pointer;">🗑 DB 초기화</button>
+            </div>
         </div>
         <div id="forward-stats" style="min-height:60px;color:var(--text-secondary);">Loading…</div>
         <button id="btn-open-pos-detail" style="display:none;margin-top:8px;font-size:0.78rem;padding:4px 12px;"
@@ -782,6 +786,27 @@
         loadOnce();
     }
 })();
+
+function cvdResetDb() {
+    var sym = window.__CVD_EXPLOSION_SYMBOL || 'ETHUSDT';
+    if (!confirm('⚠️ [' + sym + '] DB의 모든 ForwardTrade 레코드를 삭제하고\n인메모리 상태를 초기화합니다.\n\n계속하시겠습니까?')) return;
+    var btn = document.getElementById('btn-reset-db');
+    if (btn) { btn.disabled = true; btn.textContent = '삭제 중…'; }
+    fetch('/quant/eth_cvd_explosion_v2/forward_test/reset_db?symbol=' + encodeURIComponent(sym), { method: 'POST' })
+        .then(function(r) { return r.json(); })
+        .then(function(d) {
+            if (d.success) {
+                alert('✅ DB 초기화 완료\n삭제된 레코드: ' + d.deleted + '건\n전략: ' + d.strategy);
+                if (typeof loadOnce === 'function') loadOnce();
+            } else {
+                alert('❌ 초기화 실패\n' + (d.error || JSON.stringify(d)));
+            }
+        })
+        .catch(function(e) { alert('❌ 요청 실패: ' + e); })
+        .finally(function() {
+            if (btn) { btn.disabled = false; btn.textContent = '🗑 DB 초기화'; }
+        });
+}
 </script>
 </body>
 </html>

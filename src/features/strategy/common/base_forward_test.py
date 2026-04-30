@@ -105,6 +105,35 @@ class BaseForwardTest(ABC):
     def reset_edge_halt(self) -> None:
         """엣지 검증 중단 해제. 기본: no-op (Renaissance 등 서브클래스에서 오버라이드)."""
 
+    def reset_db(self, symbol: Optional[str] = None) -> Dict[str, Any]:
+        """
+        이 전략의 모든 ForwardTrade 레코드 삭제 + 인메모리 상태 초기화.
+
+        개발/검증 중 파라미터 변경 후 재테스트용.
+        symbol 지정 시 해당 심볼 레코드만 삭제, None 이면 전략 전체.
+        """
+        deleted = 0
+        if self._db_available():
+            from db.models import ForwardTrade
+            session = self._get_session()
+            try:
+                q = session.query(ForwardTrade).filter(
+                    ForwardTrade.strategy == self.STRATEGY_TAG
+                )
+                if symbol:
+                    q = q.filter(ForwardTrade.symbol == symbol)
+                deleted = q.delete(synchronize_session=False)
+                session.commit()
+            except Exception as e:
+                session.rollback()
+                return {"success": False, "error": str(e)}
+            finally:
+                session.close()
+
+        self._position = None
+        self._closed_trades = []
+        return {"success": True, "deleted": deleted, "strategy": self.STRATEGY_TAG, "symbol": symbol or "all"}
+
     async def sync_from_binance(self, symbol: str = "BTCUSDT") -> Dict[str, Any]:
         """
         Binance 실제 포지션 ↔ 모듈 상태 강제 동기화.
