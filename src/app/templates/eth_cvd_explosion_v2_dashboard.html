@@ -9,7 +9,7 @@
       window.CVD_EXPLOSION_MONITORING_START = document.querySelector('meta[name="cvd-explosion-monitoring-start"]').getAttribute('content') === 'true';
     </script>
     <link rel="stylesheet" href="/static/css/dashboard_common.css">
-    <script src="/static/js/forward_test_dashboard.js?v=4"></script>
+    <script src="/static/js/forward_test_dashboard.js?v=5"></script>
     <script src="https://unpkg.com/lightweight-charts@4.2.2/dist/lightweight-charts.standalone.production.js"></script>
 </head>
 <body>
@@ -47,7 +47,8 @@
             <span id="chart-title-text">Price chart (15m) <span id="health-chart-data" style="display:none;color:var(--accent-red);font-size:0.72rem;margin-left:6px;">●</span></span>
             <div style="display:flex;gap:8px;align-items:center;">
                 <select id="chart-tf-sel" style="background:var(--card);border:1px solid var(--border);color:var(--text);padding:3px 8px;border-radius:6px;font-size:0.75rem;">
-                    <option value="15m" selected>15m</option>
+                    <option value="1m" selected>1m</option>
+                    <option value="15m">15m</option>
                     <option value="1h">1h</option>
                 </select>
                 <button id="chart-toggle-btn" onclick="toggleChart()" style="font-size:0.72rem;padding:3px 9px;">Collapse</button>
@@ -102,6 +103,8 @@
                     style="font-size:0.72rem;padding:3px 8px;">All trades</button>
         </div>
         <div id="forward-stats" style="min-height:60px;color:var(--text-secondary);">Loading…</div>
+        <button id="btn-open-pos-detail" style="display:none;margin-top:8px;font-size:0.78rem;padding:4px 12px;"
+                onclick="_onOpenPosClick(window._fwdDashLastPos)">📋 Position Detail</button>
         <div id="forward-trades-box" style="margin-top:14px; padding-top:14px; border-top:1px solid var(--border-color);">
             <div style="font-size:0.8rem;font-weight:bold;margin-bottom:8px;color:var(--text-primary);">📋 Recent trades <span style="font-size:0.68rem;color:var(--text-secondary);font-weight:normal;">— 클릭 시 상세 보기</span></div>
             <div id="forward-trades-list" style="font-size:0.75rem;color:var(--text-secondary);">Loading…</div>
@@ -129,7 +132,7 @@
     var running = false;
     var HEALTH_POLL_SEC = 10.0;
     var BINANCE_POLL_SEC = 30.0;
-    var CHART_TF = '15m';
+    var CHART_TF = '1m';
     window.__CVD_EXPLOSION_SYMBOL = SYMBOL;
     var HEALTH_META = {
         market_stream: { label: '실시간 시세', expectSec: 1.0 },
@@ -327,7 +330,7 @@
 
     function _updateStructureLines(sig) {
         if (!_m15SupportSeries || !_m15ResistanceSeries) return;
-        if (CHART_TF !== '15m' || !_chartTimes.length) {
+        if (!_chartTimes.length) {
             _m15SupportSeries.setData([]);
             _m15ResistanceSeries.setData([]);
             return;
@@ -388,14 +391,32 @@
 
     function _fmtTs(ts) {
         if (!ts) return '—';
-        return new Date(ts * 1000).toISOString().slice(5, 16).replace('T', ' ') + ' UTC';
+        return new Date(ts * 1000).toISOString().slice(5, 19).replace('T', ' ') + ' UTC';
+    }
+
+    var tpPal = ['#26a69a', '#4db6ac', '#66bb6a', '#81c784', '#a5d6a7'];
+    var slPal = ['#c62828', '#e57373', '#ff8a80'];
+
+    function _renderTradeDetailHtml(opts) {
+        // opts: { header, rows, ssBtn }
+        return opts.header +
+            "<div style='border-top:1px solid #21262d;margin-top:4px;padding-top:4px;'>" +
+            opts.rows + "</div>" +
+            "<div style='margin-top:10px;'>" +
+                "<button onclick='_takeTradeScreenshot()' style='font-size:0.72rem;padding:3px 9px;'>📷 Screenshot</button>" +
+            "</div>" +
+            "<div id='trade-ss-wrap' style='margin-top:8px;'></div>";
+    }
+
+    function _row(label, val, color) {
+        return "<div style='display:flex;justify-content:space-between;padding:2px 0;'>" +
+            "<span style='color:#8b949e;'>" + label + "</span>" +
+            "<span" + (color ? " style='color:" + color + ";'" : "") + ">" + val + "</span></div>";
     }
 
     function _onFwdTradeClick(t, idx) {
         _clearFwdPriceLines();
         _addFwdPl(t.entry_price, '#c77dff', 'Entry', true);
-        var tpPal = ['#26a69a', '#4db6ac', '#66bb6a', '#81c784', '#a5d6a7'];
-        var slPal = ['#c62828', '#e57373', '#ff8a80'];
         var tps = (Array.isArray(t.tp_levels) && t.tp_levels.length) ? t.tp_levels : (t.tp1_price ? [t.tp1_price] : []);
         var sls = (Array.isArray(t.sl_levels) && t.sl_levels.length) ? t.sl_levels : (t.sl_price ? [t.sl_price] : []);
         tps.forEach(function(p, i) { _addFwdPl(p, tpPal[i % tpPal.length], 'TP' + (i + 1), i > 0); });
@@ -404,40 +425,37 @@
         var pnl = Number(t.pnl_pct || 0);
         var pnlCol = pnl >= 0 ? '#26a69a' : '#ef5350';
         var sideCol = t.side === 'long' ? '#26a69a' : '#ef5350';
+        var advStr = (t.tp_advances != null && t.tp_advances > 0) ? ' · 🔄 TP×' + t.tp_advances : '';
 
         var tpRows = tps.map(function(p, i) {
-            return "<div style='display:flex;justify-content:space-between;padding:2px 0;'>" +
-                "<span style='color:#8b949e;'>TP" + (i + 1) + "</span>" +
-                "<span style='color:" + tpPal[i % tpPal.length] + ";'>$" + Math.round(p).toLocaleString() + "</span></div>";
+            var hit = i < (t.tp_advances || 0);
+            return _row('TP' + (i + 1) + (hit ? ' ✓' : ''),
+                '$' + Math.round(p).toLocaleString(),
+                tpPal[i % tpPal.length] + (hit ? ';text-decoration:line-through;opacity:0.6' : ''));
         }).join('');
         var slRows = sls.map(function(p, i) {
-            return "<div style='display:flex;justify-content:space-between;padding:2px 0;'>" +
-                "<span style='color:#8b949e;'>" + (sls.length > 1 ? 'SL' + (i + 1) : 'SL') + "</span>" +
-                "<span style='color:" + slPal[i % slPal.length] + ";'>$" + Math.round(p).toLocaleString() + "</span></div>";
+            return _row(sls.length > 1 ? 'SL' + (i + 1) : 'SL',
+                '$' + Math.round(p).toLocaleString(), slPal[i % slPal.length]);
         }).join('');
 
-        var advStr = (t.tp_advances != null && t.tp_advances > 0) ? ' · TP×' + t.tp_advances : '';
-
-        var html =
+        var header =
             "<div style='color:#c77dff;font-weight:bold;margin-bottom:6px;'>#" + (idx + 1) +
             " · <span style='color:" + sideCol + ";'>" + (t.side || '').toUpperCase() + "</span>" +
-            " · ★" + (t.confidence != null ? t.confidence : '—') +
-            advStr + "</div>" +
-            "<div style='display:flex;justify-content:space-between;padding:2px 0;border-top:1px solid #21262d;margin-top:4px;'>" +
-                "<span style='color:#8b949e;'>Open</span><span>" + _fmtTs(t.entry_ts) + "</span></div>" +
-            "<div style='display:flex;justify-content:space-between;padding:2px 0;'>" +
-                "<span style='color:#8b949e;'>Entry</span><span>$" + Math.round(t.entry_price || 0).toLocaleString() + "</span></div>" +
+            " · ★" + (t.confidence != null ? t.confidence : '—') + advStr + "</div>";
+        var rows =
+            _row('Open', _fmtTs(t.entry_ts)) +
+            _row('Entry', '$' + Math.round(t.entry_price || 0).toLocaleString(), '#c77dff') +
             tpRows + slRows +
-            "<div style='display:flex;justify-content:space-between;padding:2px 0;border-top:1px solid #21262d;margin-top:4px;'>" +
-                "<span style='color:#8b949e;'>Exit</span><span>$" + Math.round(t.exit_price || 0).toLocaleString() + " · " + (t.exit_reason || '—') + "</span></div>" +
-            "<div style='display:flex;justify-content:space-between;padding:2px 0;'>" +
-                "<span style='color:#8b949e;'>PnL (gross)</span><span style='color:" + pnlCol + ";'>" + (pnl >= 0 ? '+' : '') + pnl.toFixed(2) + "%</span></div>" +
-            (t.net_pnl_pct != null ? "<div style='display:flex;justify-content:space-between;padding:2px 0;'>" +
-                "<span style='color:#8b949e;'>PnL (net fee)</span><span style='color:" + (Number(t.net_pnl_pct) >= 0 ? '#26a69a' : '#ef5350') + ";font-weight:bold;'>" + (Number(t.net_pnl_pct) >= 0 ? '+' : '') + Number(t.net_pnl_pct).toFixed(2) + "%</span></div>" : "") +
-            "<div style='display:flex;justify-content:space-between;padding:2px 0;'>" +
-                "<span style='color:#8b949e;'>Close</span><span>" + _fmtTs(t.exit_ts) + " (" + (t.duration_min || '—') + "m)</span></div>";
+            "<div style='border-top:1px solid #21262d;margin-top:4px;padding-top:4px;'></div>" +
+            _row('Exit', '$' + Math.round(t.exit_price || 0).toLocaleString() + ' · ' + (t.exit_reason || '—')) +
+            _row('PnL (gross)', (pnl >= 0 ? '+' : '') + pnl.toFixed(2) + '%', pnlCol) +
+            (t.net_pnl_pct != null ? _row('PnL (net fee)',
+                (Number(t.net_pnl_pct) >= 0 ? '+' : '') + Number(t.net_pnl_pct).toFixed(2) + '%',
+                Number(t.net_pnl_pct) >= 0 ? '#26a69a' : '#ef5350') : '') +
+            _row('Close', _fmtTs(t.exit_ts) + ' (' + (t.duration_min || '—') + 'm)');
 
-        document.getElementById('forward-trade-detail-body').innerHTML = html;
+        document.getElementById('forward-trade-detail-body').innerHTML =
+            _renderTradeDetailHtml({ header: header, rows: rows });
         document.getElementById('forward-trade-detail').style.display = '';
 
         // 차트 범위 이동
@@ -449,6 +467,84 @@
             });
         }
     }
+
+    function _onOpenPosClick(pos) {
+        _clearFwdPriceLines();
+        _addFwdPl(pos.entry_price, '#c77dff', 'Entry', true);
+        var tps = pos.tp_levels || (pos.tp != null ? [pos.tp] : []);
+        var sls = pos.sl_levels || (pos.sl != null ? [pos.sl] : []);
+        tps.forEach(function(p, i) { _addFwdPl(p, tpPal[i % tpPal.length], 'TP' + (i + 1), i > 0); });
+        sls.forEach(function(p, i) { _addFwdPl(p, slPal[i % slPal.length], sls.length > 1 ? 'SL' + (i + 1) : 'SL', i > 0); });
+
+        var sideCol = pos.side === 'long' ? '#26a69a' : '#ef5350';
+        var tpAdvances = pos.tp_advances || 0;
+        var entryVal = Number(pos.entry_price || 0);
+        var slVal = pos.sl != null ? Number(pos.sl) : null;
+
+        var lockedPct = null;
+        if (slVal != null && entryVal > 0) {
+            if (pos.side === 'long' && slVal > entryVal) lockedPct = (slVal - entryVal) / entryVal * 100;
+            if (pos.side === 'short' && slVal < entryVal) lockedPct = (entryVal - slVal) / entryVal * 100;
+        }
+
+        var tpRows = tps.map(function(p, i) {
+            var hit = i < tpAdvances;
+            return _row('TP' + (i + 1) + (hit ? ' ✓' : ''),
+                '$' + Math.round(p).toLocaleString(),
+                tpPal[i % tpPal.length] + (hit ? ';text-decoration:line-through;opacity:0.6' : ''));
+        }).join('');
+        var slRows = sls.map(function(p, i) {
+            return _row(sls.length > 1 ? 'SL' + (i + 1) : 'SL',
+                '$' + Math.round(p).toLocaleString(), slPal[i % slPal.length]);
+        }).join('');
+
+        var dur = pos.entry_time ? Math.round((Date.now() / 1000 - pos.entry_time) / 60) : null;
+        var unrealized = pos.unrealized_pnl_pct;
+        var pnlLine = unrealized != null
+            ? _row('Unrealized', (unrealized >= 0 ? '+' : '') + Number(unrealized).toFixed(2) + '%',
+                unrealized >= 0 ? '#26a69a' : '#ef5350')
+            : '';
+        var ratchetLine = tpAdvances > 0
+            ? _row('Ratchet', '🔄 TP advanced ×' + tpAdvances +
+                (lockedPct != null ? ' · 🔒 +' + lockedPct.toFixed(2) + '% locked' : ''), '#f0883e')
+            : (lockedPct != null ? _row('SL locked', '🔒 +' + lockedPct.toFixed(2) + '%', '#26a69a') : '');
+        var metaLine = pos.tpsl_mode ? _row('Mode', pos.tpsl_mode, '#8b949e') : '';
+
+        var header =
+            "<div style='color:#c77dff;font-weight:bold;margin-bottom:6px;'>Open Position" +
+            " · <span style='color:" + sideCol + ";'>" + (pos.side || '').toUpperCase() + "</span>" +
+            " · ★" + (pos.confidence != null ? pos.confidence : '—') + "</div>";
+        var rows =
+            _row('Open', _fmtTs(pos.entry_time)) +
+            _row('Entry', '$' + Math.round(entryVal).toLocaleString(), '#c77dff') +
+            (pos.entry_tf ? _row('TF', pos.entry_tf) : '') +
+            (dur != null ? _row('Duration', dur + 'm') : '') +
+            pnlLine +
+            "<div style='border-top:1px solid #21262d;margin-top:4px;padding-top:4px;'></div>" +
+            tpRows + slRows + ratchetLine + metaLine;
+
+        var detailEl = document.getElementById('forward-trade-detail');
+        document.getElementById('forward-trade-detail-body').innerHTML =
+            _renderTradeDetailHtml({ header: header, rows: rows });
+        detailEl.style.display = '';
+        detailEl.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    }
+
+    function _takeTradeScreenshot() {
+        if (!_priceChart) return;
+        var canvas = _priceChart.takeScreenshot();
+        var wrap = document.getElementById('trade-ss-wrap');
+        if (!wrap) return;
+        var dataUrl = canvas.toDataURL('image/png');
+        wrap.innerHTML =
+            "<div style='margin-top:4px;'>" +
+            "<img src='" + dataUrl + "' style='width:100%;border-radius:4px;border:1px solid #30363d;display:block;' />" +
+            "<div style='display:flex;gap:6px;margin-top:6px;'>" +
+            "<a href='" + dataUrl + "' download='trade_chart.png' style='font-size:0.72rem;padding:3px 9px;background:var(--card);border:1px solid var(--border);color:var(--text);border-radius:4px;text-decoration:none;'>⬇ Save</a>" +
+            "<button onclick=\"document.getElementById('trade-ss-wrap').innerHTML=''\" style='font-size:0.72rem;padding:3px 8px;'>✕</button>" +
+            "</div></div>";
+    }
+    window._takeTradeScreenshot = _takeTradeScreenshot;
 
     function _drawLiqLevels(levels, currentPrice) {
         _clearLiqLines();
@@ -614,6 +710,7 @@
                     _setHealth('forward_trades', !!ok, ok ? '정상 수신' : '요청 실패', null);
                 },
                 onTradeClick: _onFwdTradeClick,
+                onOpenPosClick: _onOpenPosClick,
             });
         }
 

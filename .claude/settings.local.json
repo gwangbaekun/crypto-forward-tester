@@ -1,0 +1,26 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(docker compose *)",
+      "Bash(grep -E \"\\\\.\\(html|js|tsx?\\)$\")",
+      "Bash(python3 -c ' *)",
+      "Bash(psql --version)",
+      "Bash(docker --version)",
+      "Bash(brew list *)",
+      "Bash(pg_isready -h localhost)",
+      "Bash(psql -h localhost -U postgres -c \"\\\\l\")",
+      "Bash(psql -h localhost -c \"\\\\l\")",
+      "Bash(psql -h localhost -d postgres -c \"\\\\l\")",
+      "Bash(psql -h localhost -U home -d postgres -c \"\\\\l\")",
+      "Bash(psql \"postgresql://localhost/postgres\" -c \"\\\\l\")",
+      "Bash(psql \"postgresql:///postgres\" -c \"\\\\l\")",
+      "Bash(docker exec *)",
+      "Bash(python3 -c \"import psycopg2; print\\('psycopg2 ok'\\)\")",
+      "Bash(pip install *)",
+      "Bash(railway --version)",
+      "Bash(railway logs *)",
+      "Skill(schedule)",
+      "Skill(schedule:*)"
+    ]
+  }
+}

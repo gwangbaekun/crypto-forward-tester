@@ -33,6 +33,7 @@
         day: "2-digit",
         hour: "2-digit",
         minute: "2-digit",
+        second: "2-digit",
         hour12: false,
       });
       var parts = formatter.formatToParts(new Date(iso));
@@ -40,7 +41,7 @@
         var p = parts.find(function (x) { return x.type === name; });
         return p ? p.value : "";
       };
-      return get("month") + "-" + get("day") + " " + get("hour") + ":" + get("minute");
+      return get("month") + "-" + get("day") + " " + get("hour") + ":" + get("minute") + ":" + get("second");
     } catch (e) {
       return iso;
     }
@@ -154,7 +155,10 @@
     }
 
     function renderStats(d) {
-      var pos = d.current_position;
+      window._fwdDashLastPos = d.current_position || null;
+      var pos = window._fwdDashLastPos;
+      var _btnEl = document.getElementById("btn-open-pos-detail");
+      if (_btnEl) _btnEl.style.display = pos ? "" : "none";
       var pnl = d.total_pnl_pct != null ? Number(d.total_pnl_pct) : 0;
       var win = d.win_count || 0;
       var loss = d.loss_count || 0;
@@ -195,33 +199,48 @@
           if (curPrice != null) pnlStr = " · mark " + fmtPrice(curPrice) + pnlStr;
         }
 
-        var tpsl = pos.tpsl || {};
-        var slVal = tpsl.sl != null ? Number(tpsl.sl) : null;
-        var tp1Val = tpsl.tp1 != null ? Number(tpsl.tp1) : null;
+        // pos.tpsl 래퍼 없이 직접 필드 접근
+        var slVal = pos.sl != null ? Number(pos.sl) : null;
+        var tpLevels = pos.tp_levels || (pos.tp != null ? [pos.tp] : []);
+        var slLevels = pos.sl_levels || (slVal != null ? [slVal] : []);
+        var tpAdvances = pos.tp_advances || 0;
         var entryVal = pos.entry_price != null ? Number(pos.entry_price) : null;
+
         var lockedPct = null;
         if (slVal != null && entryVal != null) {
           if (pos.side === "long" && slVal > entryVal) lockedPct = (slVal - entryVal) / entryVal * 100;
           if (pos.side === "short" && slVal < entryVal) lockedPct = (entryVal - slVal) / entryVal * 100;
         }
-        var slHtml = slVal != null
-          ? "<span style='color:#e74c3c;'>SL " + fmtPrice(slVal) + "</span>" +
-            (lockedPct != null ? " <span style='color:var(--accent-green);font-size:0.76em;'>🔒 +" + lockedPct.toFixed(2) + "% locked</span>" : "")
-          : "";
-        var tpHtml = tp1Val != null ? "<span style='color:var(--accent-green);'>Target " + fmtPrice(tp1Val) + "</span>" : "";
-        var tpslLine = (slHtml || tpHtml)
-          ? "<div style='margin-top:5px;font-size:0.78rem;display:flex;gap:6px;align-items:center;flex-wrap:wrap;'>" +
-              slHtml +
-              (slHtml && tpHtml ? "<span style='color:var(--text-secondary);opacity:0.5;'>→</span>" : "") +
-              tpHtml +
-            "</div>"
-          : "";
 
-        html += "<div style='background:rgba(0,0,0,0.2);padding:8px 10px;border-radius:6px;margin-bottom:10px;font-size:0.85rem;border:1px solid var(--border-color);border-left:3px solid " + pc + ";'>" +
+        var tpPal = ["#26a69a", "#4db6ac", "#66bb6a", "#81c784", "#a5d6a7"];
+        var slPal = ["#e74c3c", "#e57373", "#ff8a80"];
+        var tpRows = tpLevels.map(function(p, i) {
+          var hit = i < tpAdvances;
+          return "<div style='display:flex;justify-content:space-between;padding:1px 0;'>" +
+            "<span style='color:#8b949e;'>TP" + (i + 1) + (hit ? " ✓" : "") + "</span>" +
+            "<span style='color:" + tpPal[i % tpPal.length] + ";" + (hit ? "text-decoration:line-through;opacity:0.6;" : "") + "'>" + fmtPrice(p) + "</span></div>";
+        }).join("");
+        var slRows = slLevels.map(function(p, i) {
+          return "<div style='display:flex;justify-content:space-between;padding:1px 0;'>" +
+            "<span style='color:#8b949e;'>" + (slLevels.length > 1 ? "SL" + (i + 1) : "SL") + "</span>" +
+            "<span style='color:" + slPal[i % slPal.length] + ";'>" + fmtPrice(p) + "</span></div>";
+        }).join("");
+        var ratchetHtml = tpAdvances > 0
+          ? "<div style='font-size:0.75rem;color:var(--accent-green);margin-top:3px;'>🔄 TP advanced ×" + tpAdvances +
+            (lockedPct != null ? " · 🔒 +" + lockedPct.toFixed(2) + "% locked" : "") + "</div>"
+          : (lockedPct != null ? "<div style='font-size:0.75rem;color:var(--accent-green);margin-top:3px;'>🔒 +" + lockedPct.toFixed(2) + "% locked</div>" : "");
+
+        var openPosClickAttr = typeof opts.onOpenPosClick === "function"
+          ? " onclick=\"window._fwdDashOpenPosClick&&window._fwdDashOpenPosClick(window._fwdDashLastPos)\" style='cursor:pointer;background:rgba(0,0,0,0.2);padding:8px 10px;border-radius:6px;margin-bottom:10px;font-size:0.85rem;border:1px solid var(--border-color);border-left:3px solid " + pc + ";'"
+          : " style='background:rgba(0,0,0,0.2);padding:8px 10px;border-radius:6px;margin-bottom:10px;font-size:0.85rem;border:1px solid var(--border-color);border-left:3px solid " + pc + ";'";
+
+        html += "<div" + openPosClickAttr + ">" +
           "Open position: <strong style='color:" + pc + ";'>" + esc((pos.side || "").toUpperCase()) + "</strong> @ " + fmtPrice(pos.entry_price) +
           (pos.trigger_tfs ? " <span style='color:var(--text-secondary);font-size:0.8em;'>(" + esc(pos.trigger_tfs) + " " + confDots(pos.confidence) + ")</span>" : "") +
           pnlStr +
-          tpslLine +
+          (tpRows || slRows ? "<div style='margin-top:6px;border-top:1px solid #30363d;padding-top:6px;font-size:0.78rem;'>" + tpRows + slRows + "</div>" : "") +
+          ratchetHtml +
+          (typeof opts.onOpenPosClick === "function" ? "<div style='font-size:0.68rem;color:var(--text-secondary);margin-top:4px;'>클릭 → 차트 라인 + 상세</div>" : "") +
           "</div>";
       } else {
         html += "<div style='font-size:0.8rem;color:var(--text-secondary);margin-bottom:10px;'>No open position — enters when conditions match</div>";
@@ -313,6 +332,10 @@
       if (t && typeof opts.onTradeClick === "function") {
         opts.onTradeClick(t, globalIdx);
       }
+    }
+
+    if (typeof opts.onOpenPosClick === "function") {
+      window._fwdDashOpenPosClick = opts.onOpenPosClick;
     }
 
     // 전역 노출 (onclick 문자열에서 호출)

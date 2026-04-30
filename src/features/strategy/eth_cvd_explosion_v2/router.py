@@ -38,7 +38,7 @@ async def chart_data(
     from .config_loader import get_signal_params_for_tf
 
     tf_norm = (tf or "1m").strip().lower()
-    if tf_norm not in {"1m", "15m"}:
+    if tf_norm not in {"1m", "15m", "1h"}:
         tf_norm = "1m"
 
     params = get_signal_params_for_tf(tf_norm)
