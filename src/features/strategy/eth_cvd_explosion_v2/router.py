@@ -4,7 +4,7 @@ from fastapi.responses import JSONResponse
 
 from features.strategy.common.router_factory import make_router
 
-router = make_router("eth_cvd_explosion_v2", default_tfs="1m,15m")
+router = make_router("eth_cvd_explosion_v2", default_tfs="15m,1h,4h")
 
 
 @router.get("/liq_levels", response_class=JSONResponse)
@@ -13,7 +13,7 @@ async def liq_levels(symbol: str = Query("ETHUSDT")):
     from common.liq_series_cache import get_chart_payload_or_fetch
 
     try:
-        payload = await get_chart_payload_or_fetch(symbol, interval="15m")
+        payload = await get_chart_payload_or_fetch(symbol)
         if not payload or payload.get("error"):
             return JSONResponse({"ok": False, "levels": [], "by_window": {}})
         multi = payload.get("liq_multi_window") or {}
@@ -37,9 +37,9 @@ async def chart_data(
 
     from .config_loader import get_signal_params_for_tf
 
-    tf_norm = (tf or "1m").strip().lower()
-    if tf_norm not in {"1m", "15m", "1h"}:
-        tf_norm = "1m"
+    tf_norm = (tf or "1h").strip().lower()
+    if tf_norm not in {"15m", "1h", "4h"}:
+        tf_norm = "1h"
 
     params = get_signal_params_for_tf(tf_norm)
     vol_avg_window = int(params.get("vol_avg_window", 20))

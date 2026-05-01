@@ -282,6 +282,16 @@ def compute_signal(
         "m15_resistance": m15_resistance,
     }
 
+    # 전 봉 시가 (SL tightening 용)
+    prev_open: Optional[float] = None
+    entry_sl_tighten_enabled = bool(tpsl_params.get("entry_sl_tighten_enabled", True))
+    if len(bars_entry) >= 2:
+        raw_po = bars_entry[-2].get("open")
+        try:
+            prev_open = float(raw_po) if raw_po is not None else None
+        except (TypeError, ValueError):
+            prev_open = None
+
     # ── 진입 판단 ─────────────────────────────────────────────────────────
     if bull >= conf_thr and bull > bear:
         if higher_tf_veto and cvd_hi < 0:
@@ -294,6 +304,10 @@ def compute_signal(
             else:
                 reasons.append("[대기] LONG liq map 없음 또는 TP/SL 부족 — liq cache 필요")
             return {**_no_signal(None), **common}
+        # SL tightening: 전 봉 시가가 SL보다 위(진입가보다 아래)이면 SL을 전 봉 시가로 당김
+        if entry_sl_tighten_enabled and prev_open is not None and sl < prev_open < entry:
+            reasons.append(f"[SL_TIGHT] LONG SL {sl:,.2f} → 전봉시가 {prev_open:,.2f}")
+            sl = round(prev_open, 2)
         reasons.append(
             f"[진입] LONG  confidence={bull}/7  mode={common['tpsl_mode']}  TP={tp:,.2f}  SL={sl:,.2f}"
         )
@@ -312,6 +326,10 @@ def compute_signal(
             else:
                 reasons.append("[대기] SHORT liq map 없음 또는 TP/SL 부족 — liq cache 필요")
             return {**_no_signal(None), **common}
+        # SL tightening: 전 봉 시가가 SL보다 아래(진입가보다 위)이면 SL을 전 봉 시가로 당김
+        if entry_sl_tighten_enabled and prev_open is not None and entry < prev_open < sl:
+            reasons.append(f"[SL_TIGHT] SHORT SL {sl:,.2f} → 전봉시가 {prev_open:,.2f}")
+            sl = round(prev_open, 2)
         reasons.append(
             f"[진입] SHORT confidence={bear}/7  mode={common['tpsl_mode']}  TP={tp:,.2f}  SL={sl:,.2f}"
         )

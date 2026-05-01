@@ -1,6 +1,5 @@
 """
-Mark price cache via Bybit Futures WebSocket (v5 public/linear).
-Public API is identical to the previous Binance implementation so no callers change.
+Mark price cache via Binance Futures WebSocket (fstream).
 """
 import asyncio
 import errno
@@ -25,19 +24,19 @@ _EAI_CODES: frozenset = frozenset(
 
 DEFAULT_SYMBOLS = ["btcusdt", "ethusdt"]
 STALE_SECONDS = 30
-_RECV_TIMEOUT_SEC = float(os.getenv("BYBIT_WS_RECV_TIMEOUT_SEC", "20"))
-_MIN_RECONNECT_SEC = float(os.getenv("BYBIT_WS_MIN_RECONNECT_SEC", "3.0"))
-_DNS_RECONNECT_FLOOR = float(os.getenv("BYBIT_WS_DNS_RECONNECT_FLOOR", "5.0"))
+_RECV_TIMEOUT_SEC = float(os.getenv("BINANCE_WS_RECV_TIMEOUT_SEC", "20"))
+_MIN_RECONNECT_SEC = float(os.getenv("BINANCE_WS_MIN_RECONNECT_SEC", "3.0"))
+_DNS_RECONNECT_FLOOR = float(os.getenv("BINANCE_WS_DNS_RECONNECT_FLOOR", "5.0"))
 
-_BYBIT_WS_URL = "wss://stream.bybit.com/v5/public/linear"
+_BINANCE_WS_BASE = "wss://fstream.binance.com/ws"
 
 
 class _SymbolWS:
-    """Single-symbol Bybit WebSocket worker."""
+    """Single-symbol Binance Futures mark price WebSocket worker."""
 
     def __init__(self, symbol: str, prices: Dict[str, float], updated_at: Dict[str, float]) -> None:
-        self._symbol = symbol                     # lowercase: btcusdt
-        self._topic = f"tickers.{symbol.upper()}" # Bybit topic: tickers.BTCUSDT
+        self._symbol = symbol                          # lowercase: btcusdt
+        self._url = f"{_BINANCE_WS_BASE}/{symbol}@markPrice"
         self._prices = prices
         self._updated_at = updated_at
         self._running = False
@@ -74,35 +73,32 @@ class _SymbolWS:
                     self._dns_streak += 1
                     base = max(self._reconnect_delay, _DNS_RECONNECT_FLOOR)
                     delay = min(base * (1.2 ** min(self._dns_streak, 8)), 60.0) + random.uniform(0.0, 1.0)
-                    print(f"[BybitPriceWS:{self._symbol}] dns error: {e}, reconnect in {delay:.1f}s")
+                    print(f"[BinancePriceWS:{self._symbol}] dns error: {e}, reconnect in {delay:.1f}s")
                     await asyncio.sleep(delay)
                     self._reconnect_delay = min(self._reconnect_delay * 2, 30.0)
                 else:
                     self._dns_streak = 0
                     delay = min(max(_MIN_RECONNECT_SEC, self._reconnect_delay) + random.uniform(0.0, 0.5), 30.0)
-                    print(f"[BybitPriceWS:{self._symbol}] error: {e}, reconnect in {delay:.1f}s")
+                    print(f"[BinancePriceWS:{self._symbol}] error: {e}, reconnect in {delay:.1f}s")
                     await asyncio.sleep(delay)
                     self._reconnect_delay = min(self._reconnect_delay * 1.5, 30.0)
             except Exception as e:
                 self._dns_streak = 0
                 delay = min(max(_MIN_RECONNECT_SEC, self._reconnect_delay) + random.uniform(0.0, 0.5), 60.0)
-                print(f"[BybitPriceWS:{self._symbol}] error: {e}, reconnect in {delay:.1f}s")
+                print(f"[BinancePriceWS:{self._symbol}] error: {e}, reconnect in {delay:.1f}s")
                 await asyncio.sleep(delay)
                 self._reconnect_delay = min(max(self._reconnect_delay * 1.5, _MIN_RECONNECT_SEC), 30.0)
 
     async def _connect_and_listen(self) -> None:
         async with aiohttp.ClientSession() as session:
             async with session.ws_connect(
-                _BYBIT_WS_URL,
+                self._url,
                 heartbeat=20,
                 max_msg_size=2**22,
             ) as ws:
-                # subscribe to this symbol's ticker
-                await ws.send_str(json.dumps({"op": "subscribe", "args": [self._topic]}))
-
                 _connect_wall = time.time()
                 _received_first = False
-                print(f"[BybitPriceWS:{self._symbol}] connected")
+                print(f"[BinancePriceWS:{self._symbol}] connected")
 
                 async for msg in ws:
                     if not self._running:
@@ -114,16 +110,14 @@ class _SymbolWS:
                         except Exception:
                             continue
 
-                        # application-level ping from Bybit
-                        if data.get("op") == "ping":
-                            await ws.send_str(json.dumps({"op": "pong"}))
+                        # Binance JSON-level ping: {"ping": N} → respond {"pong": N}
+                        if "ping" in data:
+                            await ws.send_str(json.dumps({"pong": data["ping"]}))
                             continue
 
-                        if data.get("topic") != self._topic:
-                            continue
-
-                        mark_str = data.get("data", {}).get("markPrice")
-                        if mark_str is not None:
+                        # markPriceUpdate event: {"e":"markPriceUpdate","s":"ETHUSDT","p":"2300.50",...}
+                        mark_str = data.get("p")
+                        if data.get("e") == "markPriceUpdate" and mark_str is not None:
                             try:
                                 self._prices[self._symbol] = float(mark_str)
                                 self._updated_at[self._symbol] = time.time()
@@ -146,10 +140,7 @@ class _SymbolWS:
 
 
 class BinancePriceWS:
-    """
-    Singleton mark price cache — backed by Bybit Futures WS.
-    Class name kept for backward compatibility with all callers.
-    """
+    """Singleton mark price cache — Binance Futures fstream."""
 
     _instance: Optional["BinancePriceWS"] = None
 
@@ -195,14 +186,14 @@ class BinancePriceWS:
 
         self._symbols = new_symbols
         if added:
-            print(f"[BybitPriceWS] started for {added}")
+            print(f"[BinancePriceWS] started for {added}")
 
     def stop(self) -> None:
         self._running = False
         for w in self._workers.values():
             w.stop()
         self._workers.clear()
-        print("[BybitPriceWS] stopped")
+        print("[BinancePriceWS] stopped")
 
     def get_price(self, symbol: str) -> Optional[float]:
         key = symbol.lower().replace("usdt", "") + "usdt"

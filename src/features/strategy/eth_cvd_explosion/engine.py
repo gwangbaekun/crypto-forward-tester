@@ -3,7 +3,7 @@ ETH CVD Explosion — Forward Test Engine.
 
 backtest_runner.py (v1) 과 완전히 동일한 구조:
   - exit 체크: 1h 봉 마감 시 1회 (bar_high/bar_low = 완성봉 OHLC)
-  - 진입 체크: exit 이후, same-bar 재진입 금지, tp>0 AND sl>0 필수
+  - 진입 체크: 같은 tick 에서 청산 직후 반대 방향 재진입 허용, tp>0 AND sl>0 필수
   - 봉 사이 구간에서는 build_state 가 tick 자체를 호출하지 않음
 """
 from __future__ import annotations
@@ -76,7 +76,6 @@ class EthCvdExplosionForwardTest(BaseForwardTest):
         events: List[Dict[str, Any]] = []
 
         # ── 1. 청산 체크 ─────────────────────────────────────────────────────
-        just_closed = False
         if self._position is not None:
             prev_adv = int(self._position.get("tp_advances") or 0)
             result = self._check_exit_signal(
@@ -89,14 +88,13 @@ class EthCvdExplosionForwardTest(BaseForwardTest):
                 trade = self._close(exit_price, reason, self._position, close_note)
                 events.append({"event": "close", "trade": trade})
                 self._position = None
-                just_closed = True
             else:
                 new_adv = int(self._position.get("tp_advances") or 0)
                 if new_adv > prev_adv:
                     events.append({"event": "tp_advance", "position": dict(self._position)})
 
-        # ── 2. 진입 체크 ─────────────────────────────────────────────────────
-        if self._position is None and not just_closed:
+        # ── 2. 진입 체크 (청산과 동일 봉 마감 tick 에서 바로 재진입 가능) ─────
+        if self._position is None:
             direction = sig.get("signal")
             tp = _f(sig.get("tp") or 0)
             sl = _f(sig.get("sl") or 0)

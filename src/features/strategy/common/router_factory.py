@@ -20,11 +20,75 @@
 from __future__ import annotations
 
 import importlib
+from datetime import datetime, timezone
 
 from fastapi import APIRouter, Query
 from fastapi.responses import HTMLResponse, JSONResponse
 
 from common.utils import render_template
+
+
+def _iso_to_unix_sec(value: str | None) -> int | None:
+    if not value:
+        return None
+    s = str(value).strip()
+    if not s:
+        return None
+    if s.endswith("Z"):
+        s = s[:-1] + "+00:00"
+    try:
+        dt = datetime.fromisoformat(s)
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        return int(dt.timestamp())
+    except (TypeError, ValueError):
+        return None
+
+
+def _normalize_trade_rows_for_backtest_compat(rows: list[dict]) -> list[dict]:
+    """
+    forward row에 backtest 호환 키를 추가해 비교/시각화를 쉽게 만든다.
+    기존 opened_at/closed_at 키는 유지해 기존 UI 호환성도 보장한다.
+    """
+    out: list[dict] = []
+    for r in rows:
+        entry_ts = _iso_to_unix_sec(r.get("opened_at"))
+        exit_ts = _iso_to_unix_sec(r.get("closed_at"))
+        close_note = r.get("close_note")
+        status = r.get("status")
+        side = str(r.get("side") or "").lower()
+        direction = 1 if side == "long" else -1 if side == "short" else 0
+        entry_px = r.get("entry_price")
+        exit_px = r.get("exit_price")
+        tp1 = r.get("tp1_price")
+        item = {
+            **r,
+            "trade_id": r.get("id"),
+            "entry_ts": entry_ts,
+            "exit_ts": exit_ts,
+            "entry_price": entry_px,
+            "exit_price": exit_px,
+            "exit_reason": close_note or status,
+            "reason": close_note or status,
+            "note": close_note or "",
+            "tp": tp1,
+            "sl": r.get("sl_price"),
+            # backtest schema aliases (copy/paste injection compatibility)
+            "id": r.get("id"),
+            "direction": direction,
+            "entry_px": entry_px,
+            "exit_px": exit_px,
+            "entry_time": entry_ts,
+            "exit_time": exit_ts,
+            "entry": entry_px,
+            "exit": exit_px,
+            "reason_text": close_note or status,
+            "tps": [tp1] if tp1 is not None else [],
+            "advances": r.get("tp_advances", 0),
+            "final_tp_idx": 0 if tp1 is not None else None,
+        }
+        out.append(item)
+    return out
 
 
 def make_router(strategy_key: str, default_tfs: str = "15m,1h,4h") -> APIRouter:
@@ -135,16 +199,18 @@ def make_router(strategy_key: str, default_tfs: str = "15m,1h,4h") -> APIRouter:
                 engine = ft.get_engine()
 
             raw = engine.get_trades_from_db(symbol=symbol, limit=limit)
+            normalized = _normalize_trade_rows_for_backtest_compat(raw)
             if not trades_dto:
-                return JSONResponse(raw)
+                return JSONResponse({"trades": normalized})
 
             tag = strategy_tag or strategy_key
             from common.trade_dto import SCHEMA_VERSION, forward_rows_to_dtos
 
             srid = f"{tag}:{symbol}"
-            dtos = forward_rows_to_dtos(raw, strategy_run_id=srid)
+            dtos = forward_rows_to_dtos(normalized, strategy_run_id=srid)
             return JSONResponse(
                 {
+                    "trades": normalized,
                     "trades_canonical": {
                         "schema_version": SCHEMA_VERSION,
                         "strategy_run_id": srid,

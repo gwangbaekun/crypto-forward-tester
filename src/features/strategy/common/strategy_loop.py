@@ -13,6 +13,21 @@ import os
 import time
 from typing import Any, Dict, Optional
 
+from common.liq_series_cache import _interval_to_seconds
+
+PRE_ENTRY_SECONDS = 60.0
+
+
+async def _sleep_until_next_trigger(entry_tf: str, pre_entry_seconds: float = 0.0) -> None:
+    """다음 트리거까지 sleep (기본=봉 마감 정각, 선진입이면 마감 pre_entry_seconds 전)."""
+    iv = _interval_to_seconds(entry_tf)
+    now = time.time()
+    bar_close = (int(now) // iv + 1) * iv
+    trigger = bar_close - max(0.0, float(pre_entry_seconds or 0.0))
+    if trigger <= now:
+        trigger += iv
+    await asyncio.sleep(max(1.0, trigger - now))
+
 
 def _build_registry() -> Dict[str, Dict[str, Any]]:
     """strategies_master.yaml → enabled 전략 레지스트리 구성."""
@@ -106,22 +121,20 @@ async def _strategy_loop(name: str, cfg: Dict[str, Any], symbol: str) -> None:
                 await asyncio.sleep(max(0.5, fast_exit_interval))
                 continue
 
-            # ── 포지션 없음: :14/:29/:44/:59 에 signal check + 진입 ──────────
+            # ── 포지션 없음: pre-entry 트리거 시점에 1회 get_state 호출 ─────────
+            # 선진입 구조에서는 루프가 entry TF 봉 마감 60초 전에 한 번만 깨어나
+            # get_state를 호출하고, forward_test_runner가 해당 윈도우에서만
+            # REST fetch + 신호 계산을 수행한다.
             await fn(symbol=symbol, tfs=tfs_str)
 
-            # 진입이 방금 발생했으면 슬립 없이 즉시 fast_exit 루프로 전환
             if eng is not None and eng.get_position() is not None:
                 continue
 
         except Exception as e:
             print(f"[StrategyLoop:{name}] error: {e}")
 
-        from common.liq_series_cache import _next_trigger_time, _interval_to_seconds
         entry_tf = cfg.get("entry_tf") or "15m"
-        iv_sec   = _interval_to_seconds(entry_tf)
-        advance  = max(5, min(60, iv_sec // 10))
-        next_t   = _next_trigger_time(entry_tf, time.time(), advance=advance)
-        await asyncio.sleep(max(1.0, next_t - time.time()))
+        await _sleep_until_next_trigger(entry_tf, pre_entry_seconds=PRE_ENTRY_SECONDS)
 
 
 async def run_all_strategy_loops() -> None:

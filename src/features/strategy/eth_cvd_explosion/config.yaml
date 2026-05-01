@@ -12,13 +12,13 @@ signal:
   zone_gap: 3
   cvd_accel_window: 3
   cvd_higher_window: 10
-  confidence_threshold: 4
+  confidence_threshold: 5
   higher_tf_veto: false
   scoring:
-    explosion: 3
+    explosion: 4
     solo: 1
     cvd_accel: 2
-    cvd_higher: 1
+    cvd_higher: 0
   m1_subentry_enabled: false
 tpsl:
   mode: magnet_tp_rr

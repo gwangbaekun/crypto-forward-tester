@@ -25,6 +25,8 @@ from features.strategy.common.base_realtime_feed import (
 from .data_feed import get_dfs_by_tf
 from .sweep_builder import TF_TO_MINUTES, build_sweep_at
 
+PRE_ENTRY_SECONDS = 60.0
+
 
 async def _fetch_liq_level_map(symbol: str) -> List[Dict]:
     try:
@@ -52,17 +54,14 @@ async def get_state(
     cache_key = f"eth_cvd_explosion:{symbol}"
     now = _time.time()
 
-    # ── ws_only / signal_interval 구간: 캐시 즉시 반환 ───────────────────────
+    # ── pre-entry 윈도우 외에는 캐시만 반환 (REST fetch 없음) ───────────────
     _tf_sec = TF_TO_MINUTES.get(entry_tf, 60) * 60
-    _last_bt = _last_bar_time.get(cache_key, 0)
-    _near_bar_close = now >= (_last_bt + _tf_sec - 30)
+    sec_to_close = _tf_sec - (now % _tf_sec)
+    in_pre_entry_window = 0 < sec_to_close <= PRE_ENTRY_SECONDS
 
-    signal_interval: Optional[int] = master_cfg.get("signal_interval")
-    if ws_only and cache_key in _signal_cache and not _near_bar_close:
-        return _signal_cache[cache_key]["state"]
-    if signal_interval and cache_key in _signal_cache and not _near_bar_close:
-        if now - _signal_cache[cache_key]["ts"] < signal_interval:
-            return _signal_cache[cache_key]["state"]
+    if not in_pre_entry_window:
+        cached = _signal_cache.get(cache_key)
+        return cached["state"] if cached else {}
 
     # ── Full fetch: DataFrame + liq 병렬 ────────────────────────────────────
     fetch_results = await asyncio.gather(
@@ -78,29 +77,31 @@ async def get_state(
     )
     magnets = {"level_map": level_map} if level_map else {}
 
-    # ── 현재 봉 감지 ─────────────────────────────────────────────────────────
-    # advance=60 트리거(:59)에서 [-1] = 지금 막 마감 직전인 봉 (99% 완성)
-    # [-2] 를 쓰면 이전 봉 신호가 되어 1 TF 주기 늦게 진입하게 됨
+    # ── 현재 봉 기준 계산용 데이터 준비 ──────────────────────────────────────
+    # 선진입 구조에서는 pre-entry(마감 60초) 구간에 forming 봉([-1])만 신호 계산에 사용.
+    # completed 봉([-2])은 봉 전환 감지(new_bar_detected)용으로만 유지한다.
     entry_df = dfs_by_tf.get(entry_tf)
-    if entry_df is None or len(entry_df) < 1:
+    if entry_df is None or len(entry_df) < 2:
         cached = _signal_cache.get(cache_key)
         return cached["state"] if cached else {}
 
-    completed_row    = entry_df.iloc[-1]
-    completed_ts_ms  = int(completed_row["open_time_ms"])   # ms
-    completed_ts_sec = completed_ts_ms // 1000              # sec (캐시 키용)
-    new_bar_detected = completed_ts_sec != _last_bar_time.get(cache_key, 0)
+    forming_row      = entry_df.iloc[-1]                        # 현재 forming 봉 (신호 계산용)
+    completed_row    = entry_df.iloc[-2]                        # 직전 완성봉 (봉 전환 감지 보조)
+    forming_ts_sec   = int(forming_row["open_time_ms"]) // 1000
+    new_bar_detected = forming_ts_sec != _last_bar_time.get(cache_key, 0)
 
-    bar_close_price = float(completed_row["close"]) or 0.0
-    bar_high        = float(completed_row["high"])  or bar_close_price
-    bar_low         = float(completed_row["low"])   or bar_close_price
+    forming_ts_ms = int(forming_row["open_time_ms"])
+    bar_close_price = float(forming_row["close"]) or 0.0
+    bar_high        = float(forming_row["high"])  or bar_close_price
+    bar_low         = float(forming_row["low"])   or bar_close_price
 
     sig: Dict[str, Any] = {}
+    should_compute = in_pre_entry_window and bar_close_price > 0
 
-    if new_bar_detected and bar_close_price > 0:
-        # backtest 와 동일한 look-ahead 필터 적용
+    if should_compute:
+        # 선진입 전용: 마감 직전 현재 forming 봉 기반 신호 계산
         sweep_by_tf, _ = build_sweep_at(
-            dfs_by_tf, completed_ts_ms, entry_tf=entry_tf
+            dfs_by_tf, forming_ts_ms, entry_tf=entry_tf
         )
         try:
             sig = compute_signal(
@@ -113,9 +114,10 @@ async def get_state(
         except Exception as e:
             sig = {"error": str(e)}
 
-        _last_bar_time[cache_key] = completed_ts_sec
+    if new_bar_detected:
+        _last_bar_time[cache_key] = forming_ts_sec
 
-    elif cache_key in _signal_cache:
+    if not should_compute and cache_key in _signal_cache:
         cached_sig = _signal_cache[cache_key]["state"].get("signal") or {}
         sig = {**cached_sig, "signal": "none"}
 
@@ -131,7 +133,7 @@ async def get_state(
 
     _signal_cache[cache_key] = {"state": state, "ts": now}
 
-    if new_bar_detected and bar_close_price > 0:
+    if should_compute:
         _tick_and_notify("eth_cvd_explosion", symbol, bar_close_price, state)
 
     return state

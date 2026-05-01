@@ -183,6 +183,7 @@ def get_tpsl_params() -> Dict[str, Any]:
     except (TypeError, ValueError):
         m15_structure_buffer_pct = 0.05
     m15_structure_stop_enabled = bool(tp.get("m15_structure_stop_enabled", False))
+    entry_sl_tighten_enabled = bool(tp.get("entry_sl_tighten_enabled", True))
 
     return {
         "mode":                   mode,
@@ -201,6 +202,7 @@ def get_tpsl_params() -> Dict[str, Any]:
         "m15_structure_stop_enabled": m15_structure_stop_enabled,
         "m15_structure_lookback_bars": max(2, m15_structure_lookback_bars),
         "m15_structure_buffer_pct": max(0.0, m15_structure_buffer_pct),
+        "entry_sl_tighten_enabled": entry_sl_tighten_enabled,
     }
 
 
