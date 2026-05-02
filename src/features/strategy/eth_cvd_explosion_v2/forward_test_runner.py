@@ -25,7 +25,7 @@ from features.strategy.common.base_realtime_feed import (
 from .data_feed import get_dfs_by_tf
 from .sweep_builder import TF_TO_MINUTES, build_sweep_at
 
-PRE_ENTRY_SECONDS = 60.0
+PRE_ENTRY_SECONDS = 15.0
 
 
 async def _fetch_liq_level_map(symbol: str) -> List[Dict]:
