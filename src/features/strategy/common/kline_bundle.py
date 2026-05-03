@@ -22,7 +22,7 @@ from common.liq_compute import compute_liq_level_map
 TTL_SECONDS = 15
 
 
-async def _fetch_liq_level_map(symbol: str, entry_tf: str = "1h") -> List[Dict]:
+async def _fetch_liq_level_map(symbol: str, entry_tf: str) -> List[Dict]:
     """진입 직전 Binance REST에서 직접 연산. 캐시 없음."""
     try:
         return await compute_liq_level_map(symbol, entry_tf=entry_tf)
@@ -44,7 +44,7 @@ class KlineBundleHub:
             cls._instance = obj
         return cls._instance
 
-    async def get(self, symbol: str, tfs: List[str], bar_limit: int = 500, entry_tf: str = "1h") -> SimpleNamespace:
+    async def get(self, symbol: str, tfs: List[str], entry_tf: str, bar_limit: int = 500) -> SimpleNamespace:
         """TTL 내 캐시 있으면 즉시 반환, 만료 시 fetch."""
         key = f"{symbol}:{','.join(sorted(tfs))}:{entry_tf}"
         cached = self._cache.get(key)
@@ -58,7 +58,7 @@ class KlineBundleHub:
             cached = self._cache.get(key)
             if cached and (time.time() - cached.fetched_at) < TTL_SECONDS:
                 return cached
-            bundle = await _fetch_bundle(symbol, tfs, bar_limit, entry_tf=entry_tf)
+            bundle = await _fetch_bundle(symbol, tfs, entry_tf, bar_limit)
             self._cache[key] = bundle
             return bundle
 
@@ -67,7 +67,7 @@ def get_hub() -> KlineBundleHub:
     return KlineBundleHub()
 
 
-async def _fetch_bundle(symbol: str, tfs: List[str], bar_limit: int, entry_tf: str = "1h") -> SimpleNamespace:
+async def _fetch_bundle(symbol: str, tfs: List[str], entry_tf: str, bar_limit: int = 500) -> SimpleNamespace:
     """TF별 klines + liq level_map 을 병렬 fetch → sweep_by_tf + magnets 구성."""
     price: Optional[float] = get_cached_price(symbol)
 
@@ -128,8 +128,8 @@ async def _fetch_bundle(symbol: str, tfs: List[str], bar_limit: int, entry_tf: s
 async def build_kline_bundle(
     symbol: str,
     tfs: List[str],
+    entry_tf: str,
     bar_limit: int = 500,
-    entry_tf: str = "1h",
 ) -> SimpleNamespace:
     """get_hub().get() 래퍼 — 기존 코드 호환용."""
-    return await get_hub().get(symbol, tfs, bar_limit, entry_tf=entry_tf)
+    return await get_hub().get(symbol, tfs, entry_tf, bar_limit)

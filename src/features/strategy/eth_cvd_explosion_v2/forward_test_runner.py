@@ -28,7 +28,7 @@ from .sweep_builder import TF_TO_MINUTES, build_sweep_at
 PRE_ENTRY_SECONDS = 15.0
 
 
-async def _fetch_liq_level_map(symbol: str, entry_tf: str = "1h") -> List[Dict]:
+async def _fetch_liq_level_map(symbol: str, entry_tf: str) -> List[Dict]:
     try:
         from features.strategy.common.kline_bundle import _fetch_liq_level_map as _liq
         return await _liq(symbol, entry_tf=entry_tf)

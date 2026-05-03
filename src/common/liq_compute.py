@@ -196,7 +196,7 @@ def _merge_level_maps(level_maps: List[List[Dict]]) -> List[Dict]:
     return out
 
 
-async def compute_liq_level_map(symbol: str, entry_tf: str = "1h") -> List[Dict]:
+async def compute_liq_level_map(symbol: str, entry_tf: str) -> List[Dict]:
     """
     entry_tf 해상도로 Binance REST fetch → multi-window merged level_map 반환.
     backtest 와 동일: entry_tf interval 의 klines + OI 로 build_oi_liq_map 실행.
