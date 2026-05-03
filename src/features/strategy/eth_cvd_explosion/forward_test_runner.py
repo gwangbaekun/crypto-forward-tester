@@ -28,10 +28,10 @@ from .sweep_builder import TF_TO_MINUTES, build_sweep_at
 PRE_ENTRY_SECONDS = 60.0
 
 
-async def _fetch_liq_level_map(symbol: str) -> List[Dict]:
+async def _fetch_liq_level_map(symbol: str, entry_tf: str = "1h") -> List[Dict]:
     try:
         from features.strategy.common.kline_bundle import _fetch_liq_level_map as _liq
-        return await _liq(symbol)
+        return await _liq(symbol, entry_tf=entry_tf)
     except Exception:
         return []
 
@@ -66,7 +66,7 @@ async def get_state(
     # ── Full fetch: DataFrame + liq 병렬 ────────────────────────────────────
     fetch_results = await asyncio.gather(
         get_dfs_by_tf(symbol, tfs_list),
-        _fetch_liq_level_map(symbol),
+        _fetch_liq_level_map(symbol, entry_tf=entry_tf),
         return_exceptions=True,
     )
     dfs_by_tf: Dict[str, pd.DataFrame] = (

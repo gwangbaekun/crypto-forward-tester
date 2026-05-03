@@ -13,7 +13,7 @@ import os
 import time
 from typing import Any, Dict, Optional
 
-from common.liq_series_cache import _interval_to_seconds
+from common.liq_compute import interval_to_seconds as _interval_to_seconds
 
 PRE_ENTRY_SECONDS = 60.0
 

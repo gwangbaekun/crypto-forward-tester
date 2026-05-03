@@ -19,7 +19,6 @@ class _AccessLogFilter(logging.Filter):
 logging.getLogger("uvicorn.access").addFilter(_AccessLogFilter())
 
 from common.binance_price_ws import BinancePriceWS
-from common.liq_series_cache import refresh_loop
 from db.session import init_db
 from features.ctrader.router import router as ctrader_auth_router
 from features.home.router import router as home_router
@@ -38,7 +37,6 @@ async def startup_binance_price_ws() -> None:
 async def lifespan(_app: FastAPI):
     init_db()
     await startup_binance_price_ws()
-    liq_task = asyncio.create_task(refresh_loop())
     try:
         from features.strategy.common.strategy_loop import run_all_strategy_loops
         strategy_task = asyncio.create_task(run_all_strategy_loops())
@@ -46,14 +44,10 @@ async def lifespan(_app: FastAPI):
         print(f"[StrategyLoop] startup skipped: {exc}")
         strategy_task = None
     yield
-    liq_task.cancel()
     if strategy_task:
         strategy_task.cancel()
-    for t in [liq_task, strategy_task]:
-        if t is None:
-            continue
         try:
-            await t
+            await strategy_task
         except asyncio.CancelledError:
             pass
 

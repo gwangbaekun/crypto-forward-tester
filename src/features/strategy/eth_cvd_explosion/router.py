@@ -7,22 +7,6 @@ from features.strategy.common.router_factory import make_router
 router = make_router("eth_cvd_explosion", default_tfs="15m,1h,4h")
 
 
-@router.get("/liq_levels", response_class=JSONResponse)
-async def liq_levels(symbol: str = Query("ETHUSDT")):
-    """3d/2w/1m 3개 window 병합 liq level_map 반환 (차트 표시용)."""
-    from common.liq_series_cache import get_chart_payload_or_fetch
-
-    try:
-        payload = await get_chart_payload_or_fetch(symbol)
-        if not payload or payload.get("error"):
-            return JSONResponse({"ok": False, "levels": [], "by_window": {}})
-        multi = payload.get("liq_multi_window") or {}
-        merged = multi.get("merged") or []
-        by_window = {k: {"bars": v["bars"], "count": len(v["level_map"])} for k, v in (multi.get("by_window") or {}).items()}
-        return JSONResponse({"ok": True, "levels": merged, "by_window": by_window})
-    except Exception as exc:
-        return JSONResponse({"ok": False, "error": str(exc), "levels": []}, status_code=500)
-
 
 @router.get("/chart_data", response_class=JSONResponse)
 async def chart_data(

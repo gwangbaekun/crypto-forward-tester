@@ -7,37 +7,6 @@ from features.strategy.common.router_factory import make_router
 router = make_router("cvd_explosion", default_tfs="15m,4h")
 
 
-@router.get("/liq_levels", response_class=JSONResponse)
-async def liq_levels(symbol: str = Query("BTCUSDT")):
-    """
-    3d / 2w / 1m 윈도우별 liq magnet 레벨 반환 (차트 시각화용).
-    각 윈도우의 long_liq_zones + short_liq_zones 를 flat level_map 으로 변환.
-    """
-    try:
-        from common.liq_series_cache import get_chart_payload_or_fetch
-        from features.strategy.common.kline_bundle import _zones_to_level_map, _merge_level_maps
-
-        payload = await get_chart_payload_or_fetch(symbol)
-        if not payload or payload.get("error"):
-            return JSONResponse({"ok": False, "error": "liq cache 없음", "windows": {}})
-
-        windows_raw = (payload.get("liq_latest") or {}).get("windows") or {}
-        windows_out = {}
-        for key in ("3d", "2w", "1m"):
-            raw = windows_raw.get(key)
-            if not raw:
-                windows_out[key] = []
-                continue
-            levels = _zones_to_level_map(raw)
-            levels = [lv for lv in levels if (lv.get("intensity") or "") != "LOW"]
-            levels.sort(key=lambda x: x.get("price", 0))
-            windows_out[key] = levels
-
-        total = sum(len(v) for v in windows_out.values())
-        return JSONResponse({"ok": True, "windows": windows_out, "total": total})
-    except Exception as e:
-        return JSONResponse({"ok": False, "error": str(e), "windows": {}})
-
 
 @router.get("/chart_data", response_class=JSONResponse)
 async def chart_data(
