@@ -63,6 +63,7 @@ eth_cvd_explosion:
   discord_alerts: true
   binance_live: true
   binance_leverage: 3
+  ctrader_live: true
   tick:
     module: features.strategy.eth_cvd_explosion.forward_test_runner
     fn: get_state

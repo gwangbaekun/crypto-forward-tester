@@ -103,6 +103,11 @@ def _fmt_entry(
     elif synced is False:
         lines.append("")
         lines.append("Binance: ❌ Not Filled — Check Required")
+    ct = ev.get("_ctrader_synced")
+    if ct is True:
+        lines.append("cTrader: ✅ Fill Confirmed")
+    elif ct is False:
+        lines.append("cTrader: ❌ Not Filled — Check Required")
     return "\n".join(lines)
 
 
@@ -146,6 +151,11 @@ def _fmt_close(
         lines.append("Binance: ✅ Exit Confirmed")
     elif synced is False:
         lines.append("Binance: ❌ Exit Failed — Manual Exit Required")
+    ct = ev.get("_ctrader_synced")
+    if ct is True:
+        lines.append("cTrader: ✅ Exit Confirmed")
+    elif ct is False:
+        lines.append("cTrader: ❌ Exit Failed — Manual Exit Required")
     return "\n".join(lines)
 
 

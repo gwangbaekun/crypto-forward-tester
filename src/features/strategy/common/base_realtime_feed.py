@@ -284,23 +284,26 @@ async def _execute_verify_notify(
 ) -> None:
     print(f"[{strategy_key}] events: {[e.get('event') for e in events]}")
 
-    executor = None
     from features.strategy.common.config_loader import (
         is_binance_live_enabled,
         is_ctrader_live_enabled,
         get_master_config,
     )
     _binance_leverage = int((get_master_config() or {}).get(strategy_key, {}).get("binance_leverage") or 1)
+
+    binance_executor = None
     if is_binance_live_enabled(strategy_key):
         try:
-            from common.binance_executor import get_executor
-            executor = get_executor()
+            from common.binance_executor import get_executor as _get_binance
+            binance_executor = _get_binance()
         except Exception as e:
-            print(f"[{strategy_key}] executor 없음: {e}")
-    elif is_ctrader_live_enabled(strategy_key):
+            print(f"[{strategy_key}] Binance executor 없음: {e}")
+
+    ctrader_executor = None
+    if is_ctrader_live_enabled(strategy_key):
         try:
-            from common.ctrader_executor import get_executor
-            executor = get_executor()
+            from common.ctrader_executor import get_executor as _get_ctrader
+            ctrader_executor = _get_ctrader()
         except Exception as e:
             print(f"[{strategy_key}] cTrader executor 없음: {e}")
 
@@ -314,9 +317,11 @@ async def _execute_verify_notify(
             side = pos.get("side")
             tp, sl = _resolve_tp_sl(pos)
             print(f"[{strategy_key}] 진입 — side={side} tp={tp} sl={sl}")
-            if executor and side and current_price:
+
+            # ── Binance ─────────────────────────────────────────────────────
+            if binance_executor and side and current_price:
                 try:
-                    result     = await executor.open_position(symbol, side, current_price, leverage=_binance_leverage)
+                    result     = await binance_executor.open_position(symbol, side, current_price, leverage=_binance_leverage)
                     fill_price = float((result or {}).get("avgPrice") or 0)
                     sync_info["entry"] = fill_price > 0
                     if fill_price > 0:
@@ -329,21 +334,38 @@ async def _execute_verify_notify(
                             f"엔진={current_price} → Binance={fill_price:.2f}"
                         )
                     if tp or sl:
-                        await executor.place_tp_sl(symbol, side, tp=tp, sl=sl)
+                        await binance_executor.place_tp_sl(symbol, side, tp=tp, sl=sl)
                 except Exception as e:
                     sync_info["entry"] = False
                     print(f"[{strategy_key}] ❌ 진입 Binance 오류: {e}")
-            else:
+            elif not binance_executor:
                 sync_info["entry"] = None
+
+            # ── cTrader (Binance와 독립 실행) ────────────────────────────────
+            if ctrader_executor and side and current_price:
+                try:
+                    ct_result = await ctrader_executor.open_position(symbol, side, current_price)
+                    ct_fill   = float((ct_result or {}).get("avgPrice") or 0)
+                    ok = ct_fill > 0
+                    sync_info["ctrader_entry"] = ok
+                    ev["_ctrader_synced"] = ok
+                    if tp or sl:
+                        await ctrader_executor.place_tp_sl(symbol, side, tp=tp, sl=sl)
+                except Exception as e:
+                    sync_info["ctrader_entry"] = False
+                    ev["_ctrader_synced"] = False
+                    print(f"[{strategy_key}] ❌ 진입 cTrader 오류: {e}")
 
         elif kind == "close":
             trade  = ev.get("trade") or {}
             side   = trade.get("side")
             reason = trade.get("exit_reason", "")
             print(f"[{strategy_key}] 청산 — side={side} reason={reason}")
-            if executor and side:
+
+            # ── Binance ─────────────────────────────────────────────────────
+            if binance_executor and side:
                 try:
-                    result     = await executor.close_position(symbol, side)
+                    result     = await binance_executor.close_position(symbol, side)
                     fill_price = float((result or {}).get("avgPrice") or 0)
                     sync_info["close"] = fill_price > 0
                     if fill_price > 0:
@@ -368,23 +390,47 @@ async def _execute_verify_notify(
                 except Exception as e:
                     sync_info["close"] = False
                     print(f"[{strategy_key}] ❌ 청산 Binance 오류: {e}")
-            else:
+            elif not binance_executor:
                 sync_info["close"] = None
+
+            # ── cTrader ─────────────────────────────────────────────────────
+            if ctrader_executor and side:
+                try:
+                    ct_result = await ctrader_executor.close_position(symbol, side)
+                    ct_fill   = float((ct_result or {}).get("avgPrice") or 0)
+                    ok = ct_fill > 0
+                    sync_info["ctrader_close"] = ok
+                    ev["_ctrader_synced"] = ok
+                except Exception as e:
+                    sync_info["ctrader_close"] = False
+                    ev["_ctrader_synced"] = False
+                    print(f"[{strategy_key}] ❌ 청산 cTrader 오류: {e}")
 
         elif kind == "tp_advance":
             pos  = ev.get("position") or {}
             side = pos.get("side")
             tp, sl = _resolve_tp_sl(pos)
             print(f"[{strategy_key}] TP advance — side={side} new_tp={tp} sl={sl}")
-            if executor and side:
+
+            # ── Binance ─────────────────────────────────────────────────────
+            if binance_executor and side:
                 try:
-                    await executor.place_tp_sl(symbol, side, tp=tp, sl=sl)
+                    await binance_executor.place_tp_sl(symbol, side, tp=tp, sl=sl)
                     sync_info["tp_advance"] = True
                 except Exception as e:
                     sync_info["tp_advance"] = False
                     print(f"[{strategy_key}] ❌ TP/SL 갱신 오류: {e}")
-            else:
+            elif not binance_executor:
                 sync_info["tp_advance"] = None
+
+            # ── cTrader ─────────────────────────────────────────────────────
+            if ctrader_executor and side:
+                try:
+                    await ctrader_executor.place_tp_sl(symbol, side, tp=tp, sl=sl)
+                    sync_info["ctrader_tp_advance"] = True
+                except Exception as e:
+                    sync_info["ctrader_tp_advance"] = False
+                    print(f"[{strategy_key}] ❌ cTrader TP/SL 갱신 오류: {e}")
 
     try:
         from features.strategy.common.notifier import send_event_alerts
