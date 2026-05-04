@@ -182,13 +182,21 @@ def _tick_and_notify(
         else:
             engine = ft.get_engine()
 
-        tick_result = engine.tick(symbol, state, report_text=None)
+        # forward test: ws 현재가로 bar_high/bar_low/current_price 오버라이드.
+        # backtest는 봉 전체 OHLC가 필요하지만 forward test는 "지금 가격이 SL/TP에 닿았는가"만 보면 된다.
+        from common.binance_price_ws import get_cached_price
+        ws_price = get_cached_price(symbol)
+        if ws_price is None:
+            return
+        tick_state = {**state, "current_price": ws_price, "bar_high": ws_price, "bar_low": ws_price}
+
+        tick_result = engine.tick(symbol, tick_state, report_text=None)
         if not tick_result:
             return
         events = tick_result.get("events") or []
         if not events:
             return
-        _fire_and_forget(_execute_verify_notify(strategy_key, symbol, events, current_price))
+        _fire_and_forget(_execute_verify_notify(strategy_key, symbol, events, ws_price))
     except Exception as e:
         print(f"[_tick_and_notify:{strategy_key}] ❌ tick 오류: {e}")
 
