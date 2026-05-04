@@ -69,13 +69,17 @@ async def get_state(
         _fetch_liq_level_map(symbol, entry_tf=entry_tf),
         return_exceptions=True,
     )
-    dfs_by_tf: Dict[str, pd.DataFrame] = (
-        fetch_results[0] if not isinstance(fetch_results[0], Exception) else {}
-    )
-    level_map: List[Dict] = (
-        fetch_results[1] if not isinstance(fetch_results[1], Exception) else []
-    )
-    magnets = {"level_map": level_map} if level_map else {}
+    if isinstance(fetch_results[0], Exception):
+        raise fetch_results[0]
+    dfs_by_tf: Dict[str, pd.DataFrame] = fetch_results[0]
+
+    if isinstance(fetch_results[1], Exception):
+        raise fetch_results[1]
+    level_map: List[Dict] = fetch_results[1]
+    if not level_map:
+        raise ValueError(f"level_map empty for {symbol} {entry_tf} — candles present but liq compute returned nothing")
+
+    magnets = {"level_map": level_map}
 
     # ── 현재 봉 기준 계산용 데이터 준비 ──────────────────────────────────────
     # 선진입 구조에서는 pre-entry(마감 60초) 구간에 forming 봉([-1])만 신호 계산에 사용.
