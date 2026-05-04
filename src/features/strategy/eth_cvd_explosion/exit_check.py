@@ -78,7 +78,7 @@ def _check_exit_m15_structure_break(
     if px <= 0:
         return None
 
-    buf_pct = float(position.get("m15_structure_buffer_pct") or 0.0)
+    buf_pct = float(position.get("m15_structure_buffer_pct") or 0.05)
     support = _f(sig.get("m15_support"))
     resistance = _f(sig.get("m15_resistance"))
 
@@ -193,7 +193,7 @@ def _check_exit_magnet_rr_single(
                     step       = int(position.get("sl_ratchet_step", 1))
                     tp_idx     = len(position.get("tp_levels", [])) - 1
                     target_idx = tp_idx - step
-                    ratchet_mode = str(position.get("sl_ratchet_mode") or "tp_sl_mid").strip().lower()
+                    ratchet_mode = str(position.get("sl_ratchet_mode") or "tp_level").strip().lower()
                     mid_ratio = float(position.get("sl_ratchet_mid_ratio") or 0.5)
                     mid_ratio = max(0.0, min(mid_ratio, 1.0))
 
@@ -258,7 +258,7 @@ def _check_exit_magnet_rr_single(
                     step       = int(position.get("sl_ratchet_step", 1))
                     tp_idx     = len(position.get("tp_levels", [])) - 1
                     target_idx = tp_idx - step
-                    ratchet_mode = str(position.get("sl_ratchet_mode") or "tp_sl_mid").strip().lower()
+                    ratchet_mode = str(position.get("sl_ratchet_mode") or "tp_level").strip().lower()
                     mid_ratio = float(position.get("sl_ratchet_mid_ratio") or 0.5)
                     mid_ratio = max(0.0, min(mid_ratio, 1.0))
 

@@ -241,7 +241,10 @@ class BaseForwardTest(ABC):
             # 재시작 복구용 position_meta — 청산 로직에 필요한 모든 필드 직렬화
             _meta_keys = (
                 "tpsl_mode", "tp_advances", "tp_levels", "sl_levels",
-                "level_map", "sl_ratchet_step", "sl_ratchet_buffer_pct",
+                "level_map", "rr_ratio",
+                "sl_ratchet_step", "sl_ratchet_buffer_pct",
+                "sl_ratchet_mode", "sl_ratchet_mid_ratio",
+                "sl_lift_mode", "sl_lift_min_intensity", "sl_lift_rank_le",
                 "slippage_pct", "m15_structure_stop_enabled",
                 "m15_structure_lookback_bars", "m15_structure_buffer_pct",
             )
@@ -311,7 +314,10 @@ class BaseForwardTest(ABC):
             if position:
                 _meta_keys = (
                     "tpsl_mode", "tp_advances", "tp_levels", "sl_levels",
-                    "level_map", "sl_ratchet_step", "sl_ratchet_buffer_pct",
+                    "level_map", "rr_ratio",
+                    "sl_ratchet_step", "sl_ratchet_buffer_pct",
+                    "sl_ratchet_mode", "sl_ratchet_mid_ratio",
+                    "sl_lift_mode", "sl_lift_min_intensity", "sl_lift_rank_le",
                     "slippage_pct", "m15_structure_stop_enabled",
                     "m15_structure_lookback_bars", "m15_structure_buffer_pct",
                 )
@@ -328,6 +334,39 @@ class BaseForwardTest(ABC):
         except Exception as e:
             session.rollback()
             print(f"[{self.STRATEGY_TAG} FT] persist close error: {e}")
+        finally:
+            session.close()
+
+    def _persist_position_update(self, trade_id: int, position: Dict[str, Any]) -> None:
+        """TP advance 등 포지션 상태 변경 시 DB 즉시 갱신 (재시작 복구용)."""
+        if not self._db_available() or trade_id is None:
+            return
+        import json as _json
+        from db.models import ForwardTrade
+        session = self._get_session()
+        try:
+            trade = session.query(ForwardTrade).filter(ForwardTrade.id == trade_id).first()
+            if not trade or trade.status != "open":
+                return
+            _meta_keys = (
+                "tpsl_mode", "tp_advances", "tp_levels", "sl_levels",
+                "level_map", "rr_ratio",
+                "sl_ratchet_step", "sl_ratchet_buffer_pct",
+                "sl_ratchet_mode", "sl_ratchet_mid_ratio",
+                "sl_lift_mode", "sl_lift_min_intensity", "sl_lift_rank_le",
+                "slippage_pct", "m15_structure_stop_enabled",
+                "m15_structure_lookback_bars", "m15_structure_buffer_pct",
+            )
+            pos_meta = {k: position[k] for k in _meta_keys if k in position}
+            trade.position_meta = _json.dumps(pos_meta)
+            if position.get("sl"):
+                trade.sl_price = position["sl"]
+            if position.get("tp"):
+                trade.tp1_price = position["tp"]
+            session.commit()
+        except Exception as e:
+            session.rollback()
+            print(f"[{self.STRATEGY_TAG} FT] persist update error: {e}")
         finally:
             session.close()
 
