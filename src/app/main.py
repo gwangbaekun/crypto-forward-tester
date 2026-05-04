@@ -33,10 +33,35 @@ async def startup_binance_price_ws() -> None:
         print(f"[BinancePriceWS] startup skipped: {exc}")
 
 
+async def startup_ctrader() -> None:
+    try:
+        from features.strategy.common.config_loader import is_ctrader_live_enabled, get_master_config
+        master = get_master_config() or {}
+        enabled = [k for k in master if is_ctrader_live_enabled(k)]
+        if not enabled:
+            return
+        from common.ctrader_executor import get_executor
+        executor = get_executor()
+        if executor is None:
+            print("[cTrader] ⚠️  Executor not initialized — check CTRADER_ACCESS_TOKEN / ACCOUNT_ID / SYMBOL_ID")
+            return
+        print(f"[cTrader] Connecting... (strategies: {', '.join(enabled)})")
+        # 최대 15초 대기 — Twisted reactor 스레드에서 인증 완료될 때까지
+        for _ in range(30):
+            await asyncio.sleep(0.5)
+            if executor._authed:
+                print(f"[cTrader] ✅ Connected & Authenticated — account={executor._account_id} env={executor._env} symbol={executor._symbol_id}")
+                return
+        print("[cTrader] ⚠️  Connection timeout — will retry on first signal")
+    except Exception as exc:
+        print(f"[cTrader] startup error: {exc}")
+
+
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
     init_db()
     await startup_binance_price_ws()
+    await startup_ctrader()
     try:
         from features.strategy.common.strategy_loop import run_all_strategy_loops
         strategy_task = asyncio.create_task(run_all_strategy_loops())
