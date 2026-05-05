@@ -156,12 +156,12 @@ async def build_state(
 
     # tick 은 새 봉 마감 시에만 실행 (Close-only stop)
     if new_bar_detected and bundle.price:
-        _tick_and_notify(strategy_key, symbol, bar_close_price, state)
+        _fire_and_forget(_tick_and_notify(strategy_key, symbol, bar_close_price, state))
 
     return state
 
 
-def _tick_and_notify(
+async def _tick_and_notify(
     strategy_key: str,
     symbol: str,
     current_price: Optional[float],
@@ -182,18 +182,23 @@ def _tick_and_notify(
         else:
             engine = ft.get_engine()
 
+        from features.strategy.common.signal_logger import log_signal_snapshot
+        _fire_and_forget(log_signal_snapshot(strategy_key, symbol, state))
+
         # forward test: ws 현재가로 bar_high/bar_low/current_price 오버라이드.
-        # backtest는 봉 전체 OHLC가 필요하지만 forward test는 "지금 가격이 SL/TP에 닿았는가"만 보면 된다.
-        from common.binance_price_ws import get_cached_price
+        # WS stale 시 REST mark price 로 fallback → price None 으로 인한 tick 누락 방지.
+        from common.binance_price_ws import BinancePriceWS, get_cached_price
         ws_price = get_cached_price(symbol)
         if ws_price is None:
+            BinancePriceWS().start()  # 태스크 죽었으면 재시작
+            from common.binance_service import fetch_mark_price
+            ws_price = await fetch_mark_price(symbol)
+        if ws_price is None:
+            print(f"[_tick_and_notify:{strategy_key}] ⚠️ WS+REST price 모두 없음 — engine tick 스킵 ({symbol})")
             return
         tick_state = {**state, "current_price": ws_price, "bar_high": ws_price, "bar_low": ws_price}
 
         tick_result = engine.tick(symbol, tick_state, report_text=None)
-
-        from features.strategy.common.signal_logger import log_signal_snapshot
-        _fire_and_forget(log_signal_snapshot(strategy_key, symbol, state))
 
         if not tick_result:
             return

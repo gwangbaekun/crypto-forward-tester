@@ -102,6 +102,7 @@ async def get_state(
     _signal_cache[cache_key] = {"state": state, "ts": now}
 
     if new_bar_detected and bar_close_price > 0:
-        _tick_and_notify(STRATEGY_KEY, symbol, bar_close_price, state)
+        from features.strategy.common.base_realtime_feed import _fire_and_forget
+        _fire_and_forget(_tick_and_notify(STRATEGY_KEY, symbol, bar_close_price, state))
 
     return state
