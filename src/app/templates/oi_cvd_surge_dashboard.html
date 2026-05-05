@@ -60,8 +60,12 @@
         <div class="step-label">Forward Test</div>
         <div class="card-header">
             <span>🤖 Forward test P&amp;L</span>
-            <button onclick="location.href='/quant/oi_cvd_surge/forward_test/trades?symbol=BTCUSDT'"
-                    style="font-size:0.72rem;padding:3px 8px;">All trades</button>
+            <div style="display:flex;gap:6px;align-items:center;">
+                <button onclick="location.href='/quant/oi_cvd_surge/forward_test/trades?symbol=BTCUSDT'"
+                        style="font-size:0.72rem;padding:3px 8px;">All trades</button>
+                <button onclick="location.href='/quant/oi_cvd_surge/signal/logs/view?symbol=BTCUSDT'"
+                        style="font-size:0.72rem;padding:3px 8px;">Signal log</button>
+            </div>
         </div>
         <div id="forward-stats" style="min-height:60px;color:var(--text-secondary);">Loading…</div>
         <div id="forward-trades-box" style="margin-top:14px;padding-top:14px;border-top:1px solid var(--border-color);">

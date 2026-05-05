@@ -191,6 +191,10 @@ def _tick_and_notify(
         tick_state = {**state, "current_price": ws_price, "bar_high": ws_price, "bar_low": ws_price}
 
         tick_result = engine.tick(symbol, tick_state, report_text=None)
+
+        from features.strategy.common.signal_logger import log_signal_snapshot
+        _fire_and_forget(log_signal_snapshot(strategy_key, symbol, state))
+
         if not tick_result:
             return
         events = tick_result.get("events") or []

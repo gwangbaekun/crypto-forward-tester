@@ -287,6 +287,22 @@ def make_router(strategy_key: str, default_tfs: str = "15m,1h,4h") -> APIRouter:
         except Exception as e:
             return JSONResponse({"error": str(e)}, status_code=500)
 
+    # ── Signal logs ──────────────────────────────────────────────────────────
+
+    @router.get("/signal/logs", response_class=JSONResponse)
+    async def signal_logs_api(
+        symbol: str = Query("BTCUSDT"),
+        limit: int = Query(100),
+        month: str | None = Query(default=None),
+    ):
+        from features.strategy.common.signal_logger import read_signal_logs
+        entries = read_signal_logs(strategy_key, symbol=symbol, limit=limit, month=month)
+        return JSONResponse({"entries": entries, "count": len(entries)})
+
+    @router.get("/signal/logs/view", response_class=HTMLResponse)
+    async def signal_logs_view():
+        return render_template("signal_logs.html", strategy_key=strategy_key)
+
     # ── Binance execute/status — 항상 등록, 활성화 여부는 요청 시점에 확인 ────
 
     @router.get("/execute/status", response_class=JSONResponse)

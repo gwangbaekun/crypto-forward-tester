@@ -1,0 +1,214 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Signal Log — {{ strategy_key }}</title>
+    <link rel="stylesheet" href="/static/css/dashboard_common.css">
+    <style>
+        .log-table { width:100%; border-collapse:collapse; font-size:0.78rem; }
+        .log-table th { text-align:left; padding:7px 10px; border-bottom:1px solid var(--border); color:var(--text-secondary); font-weight:600; white-space:nowrap; }
+        .log-table td { padding:7px 10px; border-bottom:1px solid var(--border); vertical-align:top; }
+        .log-table tr:last-child td { border-bottom:none; }
+        .log-table tr:hover td { background:rgba(255,255,255,0.03); }
+        .sig-long  { background:#1a4a2e; color:#4caf50; padding:2px 7px; border-radius:4px; font-weight:600; font-size:0.72rem; }
+        .sig-short { background:#4a1a1a; color:#f44336; padding:2px 7px; border-radius:4px; font-weight:600; font-size:0.72rem; }
+        .sig-none  { background:rgba(255,255,255,0.06); color:var(--text-secondary); padding:2px 7px; border-radius:4px; font-size:0.72rem; }
+        .pos-badge { padding:2px 6px; border-radius:4px; font-size:0.7rem; }
+        .pos-long  { background:#1a4a2e; color:#4caf50; }
+        .pos-short { background:#4a1a1a; color:#f44336; }
+        .pos-none  { color:var(--text-secondary); }
+        .reasons-toggle { cursor:pointer; color:var(--accent); font-size:0.7rem; user-select:none; }
+        .reasons-list { display:none; margin-top:5px; padding:6px 8px; background:rgba(0,0,0,0.3); border-radius:4px; font-size:0.7rem; line-height:1.6; color:var(--text-secondary); }
+        .reasons-list.open { display:block; }
+        .conf-pill { display:inline-block; min-width:38px; text-align:center; padding:2px 6px; border-radius:4px; font-size:0.7rem; background:rgba(255,255,255,0.07); }
+        .ctrl { display:flex; gap:8px; align-items:center; flex-wrap:wrap; }
+        .empty-msg { color:var(--text-secondary); font-size:0.82rem; padding:20px 0; text-align:center; }
+        #table-wrap { overflow-x:auto; }
+    </style>
+</head>
+<body>
+<div class="container">
+
+    <div class="card" style="padding:12px 14px;">
+        <div class="main-header">
+            <div class="header-left">
+                <span class="strategy-tag" id="strategy-label">{{ strategy_key }}</span>
+                <span class="symbol-badge" id="symbol-label">—</span>
+            </div>
+            <div style="display:flex;align-items:center;gap:10px;">
+                <span style="font-size:0.82rem;color:var(--text-secondary);">Signal Log</span>
+                <a href="#" id="back-link" class="back">← Dashboard</a>
+            </div>
+        </div>
+    </div>
+
+    <div class="card" style="padding:10px 14px;">
+        <div class="ctrl">
+            <select id="symbol-sel" style="background:var(--card);border:1px solid var(--border);color:var(--text);padding:5px 8px;border-radius:6px;font-size:0.82rem">
+                <option value="ETHUSDT">ETHUSDT</option>
+                <option value="BTCUSDT">BTCUSDT</option>
+            </select>
+            <select id="limit-sel" style="background:var(--card);border:1px solid var(--border);color:var(--text);padding:5px 8px;border-radius:6px;font-size:0.82rem">
+                <option value="50">50 rows</option>
+                <option value="100" selected>100 rows</option>
+                <option value="200">200 rows</option>
+            </select>
+            <select id="month-sel" style="background:var(--card);border:1px solid var(--border);color:var(--text);padding:5px 8px;border-radius:6px;font-size:0.82rem">
+            </select>
+            <button onclick="load()" class="primary">Load</button>
+            <span id="count-label" style="font-size:0.75rem;color:var(--text-secondary);"></span>
+        </div>
+    </div>
+
+    <div class="card">
+        <div id="table-wrap">
+            <div class="empty-msg" id="empty-msg">Select options and click Load.</div>
+            <table class="log-table" id="log-table" style="display:none;">
+                <thead>
+                    <tr>
+                        <th>Time (UTC)</th>
+                        <th>Signal</th>
+                        <th>Price</th>
+                        <th>Confidence</th>
+                        <th>Vol×</th>
+                        <th>CVD accel</th>
+                        <th>Position</th>
+                        <th>Reasons</th>
+                    </tr>
+                </thead>
+                <tbody id="log-tbody"></tbody>
+            </table>
+        </div>
+    </div>
+
+</div>
+
+<script>
+(function() {
+    var STRATEGY_KEY = '{{ strategy_key }}';
+    var params = new URLSearchParams(window.location.search);
+    var initSymbol = params.get('symbol') || 'ETHUSDT';
+
+    // back link
+    document.getElementById('back-link').href = '/quant/' + STRATEGY_KEY + '/dashboard';
+
+    // symbol selector
+    var symbolSel = document.getElementById('symbol-sel');
+    var found = false;
+    for (var i = 0; i < symbolSel.options.length; i++) {
+        if (symbolSel.options[i].value === initSymbol) { symbolSel.selectedIndex = i; found = true; break; }
+    }
+    if (!found) {
+        var opt = document.createElement('option');
+        opt.value = initSymbol; opt.text = initSymbol;
+        symbolSel.add(opt);
+        symbolSel.value = initSymbol;
+    }
+    document.getElementById('symbol-label').textContent = initSymbol;
+
+    // month selector — current + last 2 months
+    var monthSel = document.getElementById('month-sel');
+    var now = new Date();
+    for (var m = 0; m < 3; m++) {
+        var d = new Date(now.getFullYear(), now.getMonth() - m, 1);
+        var val = d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0');
+        var opt = document.createElement('option');
+        opt.value = val; opt.text = val;
+        if (m === 0) opt.selected = true;
+        monthSel.add(opt);
+    }
+
+    function fmt_ts(ts) {
+        if (!ts) return '—';
+        try {
+            var d = new Date(ts);
+            return d.toISOString().replace('T', ' ').replace(/\.\d+Z$/, ' UTC');
+        } catch(e) { return ts; }
+    }
+
+    function sig_badge(signal) {
+        var cls = signal === 'long' ? 'sig-long' : signal === 'short' ? 'sig-short' : 'sig-none';
+        return '<span class="' + cls + '">' + (signal || 'none').toUpperCase() + '</span>';
+    }
+
+    function pos_badge(pos) {
+        if (!pos || !pos.side) return '<span class="pos-none">—</span>';
+        var cls = pos.side === 'long' ? 'pos-badge pos-long' : 'pos-badge pos-short';
+        var pnl = pos.pnl_pct != null ? ' (' + (pos.pnl_pct >= 0 ? '+' : '') + pos.pnl_pct.toFixed(2) + '%)' : '';
+        return '<span class="' + cls + '">' + pos.side.toUpperCase() + pnl + '</span>';
+    }
+
+    function reasons_cell(reasons, rowId) {
+        if (!reasons || !reasons.length) return '<span style="color:var(--text-secondary)">—</span>';
+        var summary = reasons[0].substring(0, 40) + (reasons[0].length > 40 ? '…' : '');
+        var full = reasons.map(function(r) { return '• ' + r; }).join('<br>');
+        return '<span class="reasons-toggle" onclick="toggleReasons(' + rowId + ')">▶ ' + summary + '</span>'
+             + '<div class="reasons-list" id="reasons-' + rowId + '">' + full + '</div>';
+    }
+
+    window.toggleReasons = function(id) {
+        var el = document.getElementById('reasons-' + id);
+        if (!el) return;
+        el.classList.toggle('open');
+        var toggle = el.previousSibling;
+        if (toggle) toggle.textContent = (toggle.textContent || '').replace(/^[▶▼]/, el.classList.contains('open') ? '▼' : '▶');
+    };
+
+    window.load = function() {
+        var symbol = symbolSel.value;
+        var limit  = document.getElementById('limit-sel').value;
+        var month  = monthSel.value;
+
+        document.getElementById('symbol-label').textContent = symbol;
+        document.getElementById('empty-msg').textContent = 'Loading…';
+        document.getElementById('empty-msg').style.display = 'block';
+        document.getElementById('log-table').style.display = 'none';
+        document.getElementById('count-label').textContent = '';
+
+        var url = '/quant/' + STRATEGY_KEY + '/signal/logs?symbol=' + encodeURIComponent(symbol)
+                + '&limit=' + limit + '&month=' + encodeURIComponent(month);
+
+        fetch(url)
+            .then(function(r) { return r.json(); })
+            .then(function(data) {
+                var entries = data.entries || [];
+                document.getElementById('count-label').textContent = entries.length + ' entries';
+                if (!entries.length) {
+                    document.getElementById('empty-msg').textContent = 'No signal log entries for this period.';
+                    return;
+                }
+                document.getElementById('empty-msg').style.display = 'none';
+                var tbody = document.getElementById('log-tbody');
+                tbody.innerHTML = '';
+                entries.forEach(function(e, i) {
+                    var tr = document.createElement('tr');
+                    var price = e.price != null ? '$' + Number(e.price).toLocaleString('en-US', {minimumFractionDigits:2, maximumFractionDigits:2}) : '—';
+                    var conf = e.max_score != null
+                        ? '<span class="conf-pill">' + (e.confidence||0) + '/' + e.max_score + '</span>'
+                        : '<span class="conf-pill">' + (e.confidence||0) + '</span>';
+                    var vr = e.vol_ratio != null ? e.vol_ratio.toFixed(2) + 'x' : '—';
+                    var accel = e.cvd_accel != null ? (e.cvd_accel >= 0 ? '+' : '') + Math.round(e.cvd_accel) : '—';
+                    tr.innerHTML = '<td style="white-space:nowrap;color:var(--text-secondary);">' + fmt_ts(e.ts) + '</td>'
+                        + '<td>' + sig_badge(e.signal) + '</td>'
+                        + '<td style="white-space:nowrap;">' + price + '</td>'
+                        + '<td>' + conf + '</td>'
+                        + '<td style="color:' + (e.is_explosion ? '#ff9800' : 'var(--text-secondary)') + '">' + vr + '</td>'
+                        + '<td>' + accel + '</td>'
+                        + '<td>' + pos_badge(e.position) + '</td>'
+                        + '<td style="max-width:260px;">' + reasons_cell(e.reasons, i) + '</td>';
+                    tbody.appendChild(tr);
+                });
+                document.getElementById('log-table').style.display = 'table';
+            })
+            .catch(function(err) {
+                document.getElementById('empty-msg').textContent = 'Load failed: ' + err;
+            });
+    };
+
+    // auto-load on open
+    load();
+})();
+</script>
+</body>
+</html>

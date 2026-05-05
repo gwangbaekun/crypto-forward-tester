@@ -1,0 +1,1 @@
+{"ts": "2026-05-05T03:12:38.805396+00:00", "strategy": "oi_cvd_surge", "symbol": "BTCUSDT", "price": null, "signal": "none", "confidence": 0, "position": {"side": "long", "entry_price": 78691.3, "tp": 83412.78, "sl": 77117.47, "pnl_pct": null}, "reasons": []}
