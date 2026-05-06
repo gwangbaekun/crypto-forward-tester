@@ -21,6 +21,7 @@ import asyncio
 import concurrent.futures
 import os
 import threading
+from collections import deque
 from typing import Any, Dict, Optional
 import httpx
 from twisted.python.failure import Failure
@@ -38,10 +39,34 @@ def _lots_to_volume(lots: float) -> int:
 
 _reactor_lock    = threading.Lock()
 _reactor_started = False
+_ctrader_tcp_isolation_patched = False
+
+
+def _patch_ctrader_tcp_protocol_for_multi_connection() -> None:
+    """
+    ctrader_open_api.TcpProtocol 는 클래스 레벨 _send_queue 를 쓴다.
+    live + demo 처럼 Client(=TcpProtocol) 가 2개 이상이면 큐가 섞여
+    다른 연결의 프레임이 나가고, 인증/응답이 깨지거나 타임아웃 난다.
+    """
+    global _ctrader_tcp_isolation_patched
+    if _ctrader_tcp_isolation_patched:
+        return
+    from ctrader_open_api import tcpProtocol as _ctp
+
+    _orig = _ctp.TcpProtocol.connectionMade
+
+    def connectionMade(self):  # type: ignore[no-untyped-def]
+        self._send_queue = deque()
+        self._lastSendMessageTime = None
+        return _orig(self)
+
+    _ctp.TcpProtocol.connectionMade = connectionMade  # type: ignore[method-assign]
+    _ctrader_tcp_isolation_patched = True
 
 
 def _ensure_reactor() -> Any:
     global _reactor_started
+    _patch_ctrader_tcp_protocol_for_multi_connection()
     from twisted.internet import reactor
     with _reactor_lock:
         if not _reactor_started:
