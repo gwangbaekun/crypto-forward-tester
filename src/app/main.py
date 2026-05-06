@@ -38,7 +38,7 @@ async def startup_ctrader() -> None:
         from features.strategy.common.config_loader import (
             is_ctrader_live_enabled, get_master_config, get_ctrader_config,
         )
-        from common.ctrader_executor import get_executor, get_executor_unavailable_reason
+        from common import ctrader_executor as ctrader_exec
 
         master  = get_master_config() or {}
         enabled = [k for k in master if is_ctrader_live_enabled(k)]
@@ -48,17 +48,21 @@ async def startup_ctrader() -> None:
         executors: dict = {}
         for strategy_key in enabled:
             cfg      = get_ctrader_config(strategy_key)
-            executor = get_executor(
+            executor = ctrader_exec.get_executor(
                 account_id=cfg.get("ctrader_account_id"),
                 env=cfg.get("ctrader_env"),
                 symbol_id=cfg.get("ctrader_symbol_id"),
                 lot_size=cfg.get("ctrader_lot_size"),
             )
             if executor is None:
-                reason = get_executor_unavailable_reason(
-                    account_id=cfg.get("ctrader_account_id"),
-                    symbol_id=cfg.get("ctrader_symbol_id"),
-                ) or "unknown"
+                reason_fn = getattr(ctrader_exec, "get_executor_unavailable_reason", None)
+                if callable(reason_fn):
+                    reason = reason_fn(
+                        account_id=cfg.get("ctrader_account_id"),
+                        symbol_id=cfg.get("ctrader_symbol_id"),
+                    ) or "unknown"
+                else:
+                    reason = "executor 생성 불가(ctrader_executor 버전 불일치)"
                 print(f"[cTrader] ⚠️  {strategy_key} — executor 없음 ({reason})")
             else:
                 executors[executor._account_id] = executor
