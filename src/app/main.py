@@ -38,7 +38,7 @@ async def startup_ctrader() -> None:
         from features.strategy.common.config_loader import (
             is_ctrader_live_enabled, get_master_config, get_ctrader_config,
         )
-        from common.ctrader_executor import get_executor
+        from common.ctrader_executor import get_executor, get_executor_unavailable_reason
 
         master  = get_master_config() or {}
         enabled = [k for k in master if is_ctrader_live_enabled(k)]
@@ -55,7 +55,11 @@ async def startup_ctrader() -> None:
                 lot_size=cfg.get("ctrader_lot_size"),
             )
             if executor is None:
-                print(f"[cTrader] ⚠️  {strategy_key} — executor 없음 (FORCE_DEMO 또는 env 미설정)")
+                reason = get_executor_unavailable_reason(
+                    account_id=cfg.get("ctrader_account_id"),
+                    symbol_id=cfg.get("ctrader_symbol_id"),
+                ) or "unknown"
+                print(f"[cTrader] ⚠️  {strategy_key} — executor 없음 ({reason})")
             else:
                 executors[executor._account_id] = executor
 

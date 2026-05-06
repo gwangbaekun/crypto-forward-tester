@@ -23,6 +23,7 @@ import os
 import threading
 from typing import Any, Dict, Optional
 import httpx
+from twisted.python.failure import Failure
 from common.ctrader_token_store import get_tokens, save_tokens
 
 _CENTILOTS_PER_LOT = 100_000
@@ -117,6 +118,29 @@ class CTraderExecutor:
         client = Client(host, EndPoints.PROTOBUF_PORT, TcpProtocol)
         self._client = client
 
+        def _start_client_service() -> None:
+            """
+            ctrader_open_api 의 startService() 는 Deferred 를 반환할 수 있는데,
+            내부 connect timeout(기본 5s)이 발생하면 errback 으로 전달된다.
+            이를 소비하지 않으면 'Unhandled error in Deferred' 로그가 누적된다.
+            """
+            try:
+                d = client.startService()
+                if d is not None:
+                    d.addErrback(_consume_start_error)
+            except Exception as exc:
+                print(f"[cTrader] startService 예외 (account={self._account_id}): {exc}")
+
+        def _consume_start_error(failure: Failure):
+            msg = str(getattr(failure, "value", "") or failure)
+            # 네트워크 변동/일시 timeout 은 재시도 루프에서 복구되므로 로그만 남기고 소비
+            if "TimeoutError" in msg and "Deferred" in msg:
+                print(f"[cTrader] 연결 타임아웃 (account={self._account_id}) — 재시도 예정")
+                return None
+            # 그 외 에러는 로그로 표면화
+            print(f"[cTrader] startService errback (account={self._account_id}): {failure}")
+            return None
+
         def on_connected(c):
             print(f"[cTrader] TCP connected (account={self._account_id} env={self._env})")
             req = ProtoOAApplicationAuthReq()
@@ -129,7 +153,7 @@ class CTraderExecutor:
             print(f"[cTrader] 연결 종료 (account={self._account_id}): {reason}")
             self._authed = False
             self._ready_event.clear()
-            self._reactor.callLater(3.0, client.startService)
+            self._reactor.callLater(3.0, _start_client_service)
 
         def on_message(c, message):
             payload = Protobuf.extract(message)
@@ -179,7 +203,7 @@ class CTraderExecutor:
         client.setConnectedCallback(on_connected)
         client.setDisconnectedCallback(on_disconnected)
         client.setMessageReceivedCallback(on_message)
-        client.startService()
+        _start_client_service()
 
     def _refresh_access_token(self) -> bool:
         if not (self._client_id and self._client_secret and self._refresh_token):
