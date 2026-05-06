@@ -22,8 +22,10 @@ import concurrent.futures
 import os
 import threading
 from typing import Any, Dict, Optional
+import httpx
 
 _CENTILOTS_PER_LOT = 100_000
+_CTRADER_TOKEN_URL = "https://openapi.ctrader.com/apps/token"
 
 
 def _lots_to_volume(lots: float) -> int:
@@ -64,6 +66,7 @@ class CTraderExecutor:
         self._client_id     = os.environ.get("CTRADER_CLIENT_ID", "").strip()
         self._client_secret = os.environ.get("CTRADER_CLIENT_SECRET", "").strip()
         self._access_token  = os.environ.get("CTRADER_ACCESS_TOKEN", "").strip()
+        self._refresh_token = os.environ.get("CTRADER_REFRESH_TOKEN", "").strip()
         self._account_id    = account_id or int(os.environ.get("CTRADER_ACCOUNT_ID", "0") or "0")
         self._env           = (env or os.environ.get("CTRADER_ENV", "demo")).strip().lower()
         self._symbol_id     = symbol_id or int(os.environ.get("CTRADER_SYMBOL_ID", "0") or "0")
@@ -77,10 +80,14 @@ class CTraderExecutor:
         self._lock                                     = threading.Lock()
         self._pending: Optional[concurrent.futures.Future] = None
         self._open_position_id: Optional[int]          = None
+        self._refresh_attempted                         = False
 
         self._reactor = _ensure_reactor()
-        # reactor가 이미 실행 중이면 callFromThread, 아직이면 callWhenRunning
-        self._reactor.callWhenRunning(self._setup_client)
+        # reactor가 이미 실행 중이면 thread-safe하게 setup 예약
+        if getattr(self._reactor, "running", False):
+            self._reactor.callFromThread(self._setup_client)
+        else:
+            self._reactor.callWhenRunning(self._setup_client)
 
     def _ready(self) -> bool:
         return bool(
@@ -107,9 +114,11 @@ class CTraderExecutor:
         self._client = client
 
         def on_connected(c):
+            print(f"[cTrader] TCP connected (account={self._account_id} env={self._env})")
             req = ProtoOAApplicationAuthReq()
             req.clientId     = self._client_id
             req.clientSecret = self._client_secret
+            print(f"[cTrader] AppAuth 요청 전송 (account={self._account_id})")
             client.send(req)
 
         def on_disconnected(c, reason):
@@ -122,19 +131,34 @@ class CTraderExecutor:
             payload = Protobuf.extract(message)
 
             if isinstance(payload, ProtoOAErrorRes):
+                desc = (getattr(payload, "description", "") or "").strip()
+                code = str(getattr(payload, "errorCode", "") or "").strip().upper()
+                denied = code == "ACCESS_DENIED" or "ACCESS_DENIED" in desc.upper()
+                if denied and not self._refresh_attempted:
+                    self._refresh_attempted = True
+                    print(f"[cTrader] ACCESS_DENIED 감지 — 토큰 refresh 시도 (account={self._account_id})")
+                    if self._refresh_access_token():
+                        req = ProtoOAAccountAuthReq()
+                        req.ctidTraderAccountId = self._account_id
+                        req.accessToken = self._access_token
+                        client.send(req)
+                        return
                 print(f"[cTrader] ❌ 에러: {payload.errorCode} — {payload.description}")
                 self._resolve_pending(None)
                 return
 
             if isinstance(payload, ProtoOAApplicationAuthRes):
+                print(f"[cTrader] AppAuth 완료 (account={self._account_id})")
                 req = ProtoOAAccountAuthReq()
                 req.ctidTraderAccountId = self._account_id
                 req.accessToken         = self._access_token
+                print(f"[cTrader] AccountAuth 요청 전송 (account={self._account_id})")
                 client.send(req)
                 return
 
             if isinstance(payload, ProtoOAAccountAuthRes):
                 self._authed = True
+                self._refresh_attempted = False
                 self._ready_event.set()
                 print(f"[cTrader] ✅ 인증 완료 (account={self._account_id} env={self._env})")
                 return
@@ -152,6 +176,39 @@ class CTraderExecutor:
         client.setDisconnectedCallback(on_disconnected)
         client.setMessageReceivedCallback(on_message)
         client.startService()
+
+    def _refresh_access_token(self) -> bool:
+        if not (self._client_id and self._client_secret and self._refresh_token):
+            print("[cTrader] refresh 불가: client/secret/refresh token 누락")
+            return False
+
+        params = {
+            "grant_type": "refresh_token",
+            "refresh_token": self._refresh_token,
+            "client_id": self._client_id,
+            "client_secret": self._client_secret,
+        }
+        try:
+            res = httpx.get(_CTRADER_TOKEN_URL, params=params, timeout=10.0)
+            if res.status_code >= 400:
+                print(f"[cTrader] refresh 실패: {res.status_code} {res.text[:200]}")
+                return False
+            data = res.json() if res.content else {}
+            new_access = (data.get("accessToken") or data.get("access_token") or "").strip()
+            new_refresh = (data.get("refreshToken") or data.get("refresh_token") or "").strip()
+            if not new_access:
+                print(f"[cTrader] refresh 응답 이상: {data}")
+                return False
+            self._access_token = new_access
+            os.environ["CTRADER_ACCESS_TOKEN"] = new_access
+            if new_refresh:
+                self._refresh_token = new_refresh
+                os.environ["CTRADER_REFRESH_TOKEN"] = new_refresh
+            print(f"[cTrader] ✅ access token refresh 완료 (account={self._account_id})")
+            return True
+        except Exception as e:
+            print(f"[cTrader] refresh 예외: {e}")
+            return False
 
     # ── 실행 이벤트 처리 ─────────────────────────────────────────────────────
 

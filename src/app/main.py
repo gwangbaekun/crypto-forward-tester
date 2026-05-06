@@ -63,7 +63,7 @@ async def startup_ctrader() -> None:
             return
 
         print(f"[cTrader] Connecting... (strategies: {', '.join(enabled)})")
-        for _ in range(30):
+        for _ in range(60):
             await asyncio.sleep(0.5)
             if all(e._authed for e in executors.values()):
                 for e in executors.values():
