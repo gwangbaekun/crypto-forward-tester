@@ -1,18 +1,19 @@
 """
 CTrader Executor — FTMO/Open API 실제 구현.
 
-ctrader-open-api 는 Twisted 기반이지만 FastAPI(asyncio) 환경에서 사용해야 하므로
-Twisted reactor 를 별도 스레드에서 구동하고,
-asyncio ↔ Twisted 간 브릿지는 concurrent.futures 로 처리한다.
+Twisted reactor 는 프로세스 전체에서 하나만 실행 가능하므로
+모듈 레벨 단일 스레드에서 구동하고, 각 CTraderExecutor 는
+reactor 위에 자신의 Client 를 붙이는 방식으로 동작한다.
 
-환경변수:
+환경변수 (전략별 yaml 오버라이드가 없을 때 기본값):
     CTRADER_CLIENT_ID
     CTRADER_CLIENT_SECRET
     CTRADER_ACCESS_TOKEN
-    CTRADER_ACCOUNT_ID       — ctidTraderAccountId (숫자)
+    CTRADER_ACCOUNT_ID
     CTRADER_ENV              "demo" | "live"  (기본 demo)
-    CTRADER_SYMBOL_ID        — cTrader 심볼 ID (숫자)
-    CTRADER_LOT_SIZE         — 주문 볼륨 lots (기본 0.01)
+    CTRADER_SYMBOL_ID
+    CTRADER_LOT_SIZE         (기본 0.01)
+    CTRADER_FORCE_DEMO       "true" 이면 모든 executor 비활성 (로컬 개발용)
 """
 from __future__ import annotations
 
@@ -20,7 +21,6 @@ import asyncio
 import concurrent.futures
 import os
 import threading
-import time
 from typing import Any, Dict, Optional
 
 _CENTILOTS_PER_LOT = 100_000
@@ -30,15 +30,30 @@ def _lots_to_volume(lots: float) -> int:
     return max(1_000, int(lots * _CENTILOTS_PER_LOT))
 
 
+# ── 공유 Twisted reactor (프로세스당 1개) ────────────────────────────────────
+
+_reactor_lock    = threading.Lock()
+_reactor_started = False
+
+
+def _ensure_reactor() -> Any:
+    global _reactor_started
+    from twisted.internet import reactor
+    with _reactor_lock:
+        if not _reactor_started:
+            _reactor_started = True
+            t = threading.Thread(
+                target=lambda: reactor.run(installSignalHandlers=False),
+                daemon=True,
+                name="ctrader-reactor",
+            )
+            t.start()
+    return reactor
+
+
+# ── Executor ─────────────────────────────────────────────────────────────────
+
 class CTraderExecutor:
-    """
-    cTrader Open API 주문 실행기.
-
-    Twisted reactor 를 데몬 스레드에서 구동.
-    FastAPI 쪽에서는 await executor.open_position(...) 형태로 호출.
-    내부적으로 스레드 간 Future 로 응답을 동기화.
-    """
-
     def __init__(
         self,
         account_id: Optional[int] = None,
@@ -55,15 +70,17 @@ class CTraderExecutor:
         self._lot_size      = lot_size or float(os.environ.get("CTRADER_LOT_SIZE", "0.01") or "0.01")
         self._is_live       = self._env == "live"
 
-        self._client        = None
-        self._reactor       = None
-        self._ready_event   = threading.Event()
-        self._authed        = False
-        self._lock          = threading.Lock()
+        self._client: Any                              = None
+        self._reactor: Any                             = None
+        self._ready_event                              = threading.Event()
+        self._authed                                   = False
+        self._lock                                     = threading.Lock()
         self._pending: Optional[concurrent.futures.Future] = None
-        self._open_position_id: Optional[int] = None
+        self._open_position_id: Optional[int]          = None
 
-        self._start_reactor_thread()
+        self._reactor = _ensure_reactor()
+        # reactor가 이미 실행 중이면 callFromThread, 아직이면 callWhenRunning
+        self._reactor.callWhenRunning(self._setup_client)
 
     def _ready(self) -> bool:
         return bool(
@@ -71,21 +88,13 @@ class CTraderExecutor:
             and self._access_token and self._account_id and self._symbol_id
         )
 
-    # ── Twisted reactor 스레드 ──────────────────────────────────────────────
+    # ── Client 초기화 (reactor 스레드에서 실행) ──────────────────────────────
 
-    def _start_reactor_thread(self) -> None:
-        t = threading.Thread(target=self._run_reactor, daemon=True, name="ctrader-reactor")
-        t.start()
-
-    def _run_reactor(self) -> None:
-        from twisted.internet import reactor
-
+    def _setup_client(self) -> None:
         from ctrader_open_api import Client, EndPoints, Protobuf, TcpProtocol
         from ctrader_open_api.messages.OpenApiMessages_pb2 import (
             ProtoOAAccountAuthReq,
             ProtoOAApplicationAuthReq,
-        )
-        from ctrader_open_api.messages.OpenApiMessages_pb2 import (
             ProtoOAAccountAuthRes,
             ProtoOAApplicationAuthRes,
             ProtoOAErrorRes,
@@ -93,12 +102,8 @@ class CTraderExecutor:
             ProtoOAOrderErrorEvent,
         )
 
-        self._reactor = reactor
-
-        host = EndPoints.PROTOBUF_LIVE_HOST if self._is_live else EndPoints.PROTOBUF_DEMO_HOST
-        port = EndPoints.PROTOBUF_PORT
-
-        client = Client(host, port, TcpProtocol)
+        host   = EndPoints.PROTOBUF_LIVE_HOST if self._is_live else EndPoints.PROTOBUF_DEMO_HOST
+        client = Client(host, EndPoints.PROTOBUF_PORT, TcpProtocol)
         self._client = client
 
         def on_connected(c):
@@ -108,11 +113,10 @@ class CTraderExecutor:
             client.send(req)
 
         def on_disconnected(c, reason):
-            print(f"[cTrader] 연결 종료: {reason}")
+            print(f"[cTrader] 연결 종료 (account={self._account_id}): {reason}")
             self._authed = False
             self._ready_event.clear()
-            # 3초 후 재연결
-            reactor.callLater(3.0, client.startService)
+            self._reactor.callLater(3.0, client.startService)
 
         def on_message(c, message):
             payload = Protobuf.extract(message)
@@ -148,7 +152,8 @@ class CTraderExecutor:
         client.setDisconnectedCallback(on_disconnected)
         client.setMessageReceivedCallback(on_message)
         client.startService()
-        reactor.run(installSignalHandlers=False)
+
+    # ── 실행 이벤트 처리 ─────────────────────────────────────────────────────
 
     def _on_execution(self, payload: Any) -> None:
         from ctrader_open_api.messages.OpenApiModelMessages_pb2 import ProtoOAExecutionType
@@ -169,7 +174,7 @@ class CTraderExecutor:
             self._resolve_pending({"avgPrice": fill_price, "positionId": pos_id})
 
         elif exec_type == ProtoOAExecutionType.SWAP:
-            pass  # 무시
+            pass
 
         else:
             self._resolve_pending({"executionType": exec_type})
@@ -182,7 +187,6 @@ class CTraderExecutor:
             f.set_result(result)
 
     def _send_and_wait(self, req: Any, timeout: float = 10.0) -> Optional[Dict]:
-        """Twisted 스레드로 메시지 전송 + 응답을 Future 로 동기 수신."""
         if not self._ready_event.wait(timeout=timeout):
             print("[cTrader] 연결 대기 타임아웃")
             return None
@@ -201,7 +205,7 @@ class CTraderExecutor:
                 self._pending = None
             return None
 
-    # ── asyncio 공개 API ────────────────────────────────────────────────────
+    # ── asyncio 공개 API ─────────────────────────────────────────────────────
 
     async def _run_in_executor(self, fn, *args):
         loop = asyncio.get_event_loop()
@@ -236,11 +240,7 @@ class CTraderExecutor:
             print(f"[cTrader] ✅ 진입 — side={side} lots={self._lot_size} fill={result.get('avgPrice', 0):.4f}")
         return result
 
-    async def close_position(
-        self,
-        symbol: str,
-        side: str,
-    ) -> Optional[Dict]:
+    async def close_position(self, symbol: str, side: str) -> Optional[Dict]:
         if not self._ready():
             return None
         if not self._open_position_id:
