@@ -392,26 +392,41 @@ class CTraderExecutor:
 _executors: Dict[int, CTraderExecutor] = {}
 
 
+def get_executor_unavailable_reason(
+    account_id: Optional[int] = None,
+    symbol_id: Optional[int] = None,
+) -> Optional[str]:
+    """executor 생성이 불가한 이유를 반환. 생성 가능하면 None."""
+    token = os.environ.get("CTRADER_ACCESS_TOKEN", "").strip()
+    if not token:
+        token, _ = get_tokens()
+    if not token:
+        return "CTRADER_ACCESS_TOKEN 누락"
+
+    force_demo = os.environ.get("CTRADER_FORCE_DEMO", "").strip()
+    if force_demo.lower() in {"1", "true", "yes", "on"}:
+        return f"CTRADER_FORCE_DEMO={force_demo}"
+
+    _account_id = account_id or int(os.environ.get("CTRADER_ACCOUNT_ID", "0") or "0")
+    _symbol_id = symbol_id or int(os.environ.get("CTRADER_SYMBOL_ID", "0") or "0")
+    if not _account_id:
+        return "ctrader_account_id 미설정"
+    if not _symbol_id:
+        return "ctrader_symbol_id 미설정"
+    return None
+
+
 def get_executor(
     account_id: Optional[int] = None,
     env: Optional[str] = None,
     symbol_id: Optional[int] = None,
     lot_size: Optional[float] = None,
 ) -> Optional[CTraderExecutor]:
-    token = os.environ.get("CTRADER_ACCESS_TOKEN", "").strip()
-    if not token:
-        token, _ = get_tokens()
-    if not token:
-        return None
-
-    # 로컬 개발 시 cTrader 전체 비활성화
-    if os.environ.get("CTRADER_FORCE_DEMO", "").strip().lower() == "true":
+    if get_executor_unavailable_reason(account_id=account_id, symbol_id=symbol_id):
         return None
 
     _account_id = account_id or int(os.environ.get("CTRADER_ACCOUNT_ID", "0") or "0")
     _symbol_id  = symbol_id  or int(os.environ.get("CTRADER_SYMBOL_ID",  "0") or "0")
-    if not _account_id or not _symbol_id:
-        return None
 
     if _account_id not in _executors:
         _executors[_account_id] = CTraderExecutor(
