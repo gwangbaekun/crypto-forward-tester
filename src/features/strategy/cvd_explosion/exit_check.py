@@ -109,13 +109,22 @@ def _check_exit_simple(
     m1_highs: Optional[Any] = None,
     m1_lows:  Optional[Any] = None,
     m1_closes: Optional[Any] = None,
+    intrabar: bool = False,
 ) -> Optional[tuple]:
-    """SL/TP 단일 구간 청산 (magnet / fixed_rr). TP 우선 (m1 resolution 있으면 먼저 터치된 쪽)."""
+    """SL/TP 단일 구간 청산 (magnet / fixed_rr). TP 우선 (m1 resolution 있으면 먼저 터치된 쪽).
+
+    intrabar=True: 봉 진행 중 호출 (live exit tick). bar_high/bar_low 가
+    단일 ws_price 지점에 불과하므로 wick 기준 SL/TP 판정을 피하기 위해
+    current_price 만으로 직접 SL/TP 가 닿았는지 확인한다.
+    """
     side = position.get("side")
     sl   = _f(position.get("sl"))
     tp   = _f(position.get("tp"))
-    bh   = bar_high if bar_high else current_price
-    bl   = bar_low  if bar_low  else current_price
+    if intrabar:
+        bh = bl = float(current_price)
+    else:
+        bh = bar_high if bar_high else current_price
+        bl = bar_low  if bar_low  else current_price
 
     if side == "long":
         tp_hit = bool(tp and bh >= tp)
@@ -157,13 +166,31 @@ def _check_exit_magnet_rr_single(
     level_map: List[Dict],
     bar_high: Optional[float] = None,
     bar_low:  Optional[float] = None,
+    intrabar: bool = False,
 ) -> Optional[tuple]:
+    """magnet_rr 청산 (단일 바).
+
+    intrabar=True: ratchet/TP advance 수행 안 함 — 현재가 vs 보유 SL 만 판정.
+    Backtest 가 봉 마감 시 OHLC 기준 1회만 ratchet 하는 것과 동일.
+    """
     side      = position.get("side")
     tp        = _f(position.get("tp"))
     sl        = _f(position.get("sl"))
 
-    bh = bar_high if bar_high else current_price
-    bl = bar_low  if bar_low  else current_price
+    if intrabar:
+        bh = bl = float(current_price)
+    else:
+        bh = bar_high if bar_high else current_price
+        bl = bar_low  if bar_low  else current_price
+
+    if intrabar:
+        if side == "long":
+            if sl and current_price <= sl:
+                return (sl, _sl_reason(position, sl), None)
+        elif side == "short":
+            if sl and current_price >= sl:
+                return (sl, _sl_reason(position, sl), None)
+        return None
 
     if side == "long":
         tp_triggered = bool(tp and bh >= tp)
@@ -308,8 +335,12 @@ def _check_exit_magnet_rr(
     m1_highs: Optional[Any] = None,
     m1_lows:  Optional[Any] = None,
     m1_closes: Optional[Any] = None,
+    intrabar: bool = False,
 ) -> Optional[tuple]:
     level_map = list(sig.get("level_map"))
+    if intrabar:
+        return _check_exit_magnet_rr_single(position, current_price, level_map,
+                                             bar_high, bar_low, intrabar=True)
     if m1_highs is not None and m1_lows is not None and m1_closes is not None and len(m1_highs) > 0:
         for mh, ml, mc in zip(m1_highs, m1_lows, m1_closes):
             res = _check_exit_magnet_rr_single(position, mc, level_map, mh, ml)
@@ -329,14 +360,24 @@ def check_exit(
     m1_highs: Optional[Any] = None,
     m1_lows:  Optional[Any] = None,
     m1_closes: Optional[Any] = None,
+    intrabar: bool = False,
 ) -> Optional[tuple]:
+    """청산 판정.
+
+    intrabar=True (live exit tick, 봉 진행 중):
+      - ratchet / TP advance 절대 수행 안 함 (backtest 봉 마감 시 1회 원칙).
+      - 현재가만으로 (이미 보유 중인) SL 직접 판정.
+    intrabar=False (봉 마감 tick): backtest 와 동일하게 bar_high/bar_low 로 ratchet 수행.
+    """
     m15_exit = _check_exit_m15_structure_break(position, current_price, sig)
     if m15_exit is not None:
         return m15_exit
     if position.get("tpsl_mode") in (MODE_MAGNET_RR, MODE_MAGNET_TP_RR):
         return _check_exit_magnet_rr(position, current_price, sig,
                                       bar_high=bar_high, bar_low=bar_low,
-                                      m1_highs=m1_highs, m1_lows=m1_lows, m1_closes=m1_closes)
+                                      m1_highs=m1_highs, m1_lows=m1_lows, m1_closes=m1_closes,
+                                      intrabar=intrabar)
     return _check_exit_simple(position, current_price,
                                bar_high=bar_high, bar_low=bar_low,
-                               m1_highs=m1_highs, m1_lows=m1_lows, m1_closes=m1_closes)
+                               m1_highs=m1_highs, m1_lows=m1_lows, m1_closes=m1_closes,
+                               intrabar=intrabar)

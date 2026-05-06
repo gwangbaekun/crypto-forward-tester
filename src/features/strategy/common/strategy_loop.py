@@ -71,6 +71,11 @@ async def _strategy_loop(name: str, cfg: Dict[str, Any], symbol: str) -> None:
     포지션 없음: tick_interval 마다 realtime_feed 호출 (bar close 기준 신호 체크).
     포지션 있음: exit_tick_interval 마다 BinancePriceWS 캐시 가격으로 engine.tick() 직접 호출.
                  WS stale → REST mark price fallback.
+
+    포지션 보유 tick 은 intrabar=True 로 호출 (state["intrabar"]=True).
+    → ratchet/TP advance 는 봉 마감 tick (realtime_feed → _tick_and_notify) 에서만 수행.
+       봉 진행 중에는 현재 보유 SL 만 직접 가격으로 판정 (가격 진동에 의한 ratchet 직후
+       SL 즉시 청산 버그 차단).
     """
     base_interval = float(cfg["tick_interval"])
     fast_exit_interval = float(cfg.get("exit_tick_interval") or 1.0)
@@ -113,6 +118,7 @@ async def _strategy_loop(name: str, cfg: Dict[str, Any], symbol: str) -> None:
                     "signal":        {"level_map": pos.get("level_map")} if pos else {},
                     "bar_high":      ws_price,
                     "bar_low":       ws_price,
+                    "intrabar":      True,  # 봉 진행 중 — ratchet 비활성, SL 만 판정
                 })
                 events = (tick_result or {}).get("events") or []
                 if events:

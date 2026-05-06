@@ -44,6 +44,7 @@ class EthCvdExplosionForwardTest(BaseForwardTest):
         m1_highs: Optional[np.ndarray] = None,
         m1_lows: Optional[np.ndarray] = None,
         m1_closes: Optional[np.ndarray] = None,
+        intrabar: bool = False,
     ) -> Optional[tuple]:
         return check_exit(
             position, current_price, sig,
@@ -52,6 +53,7 @@ class EthCvdExplosionForwardTest(BaseForwardTest):
             m1_highs=m1_highs,
             m1_lows=m1_lows,
             m1_closes=m1_closes,
+            intrabar=intrabar,
         )
 
     def tick(
@@ -72,6 +74,8 @@ class EthCvdExplosionForwardTest(BaseForwardTest):
         m1_highs = state.get("m1_highs")
         m1_lows = state.get("m1_lows")
         m1_closes = state.get("m1_closes")
+        # 봉 진행 중 호출 (live exit tick): ratchet 비활성화 → backtest semantics 유지
+        intrabar = bool(state.get("intrabar", False))
 
         events: List[Dict[str, Any]] = []
 
@@ -82,6 +86,7 @@ class EthCvdExplosionForwardTest(BaseForwardTest):
                 self._position, current_price, sig,
                 bar_high=bar_high, bar_low=bar_low,
                 m1_highs=m1_highs, m1_lows=m1_lows, m1_closes=m1_closes,
+                intrabar=intrabar,
             )
             if result:
                 exit_price, reason, close_note = result
@@ -94,7 +99,8 @@ class EthCvdExplosionForwardTest(BaseForwardTest):
                     events.append({"event": "tp_advance", "position": dict(self._position)})
 
         # ── 2. 진입 체크 (청산과 동일 봉 마감 tick 에서 바로 재진입 가능) ─────
-        if self._position is None:
+        # intrabar tick (live exit tick) 에서는 진입 금지: 봉 마감 tick 에서만 진입 가능.
+        if self._position is None and not intrabar:
             direction = sig.get("signal")
             tp = _f(sig.get("tp") or 0)
             sl = _f(sig.get("sl") or 0)

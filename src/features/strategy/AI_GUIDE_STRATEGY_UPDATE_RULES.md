@@ -17,8 +17,19 @@ Here is the exact rulebook for copying, pasting, and modifying strategy files be
 - **Status:** 🟡 **Similar Logic, Different Parameters (DO NOT Copy & Paste directly)**
 - **Rule:** 
   - **Backtest (`btc_backtest`)**: Historical candles hide intra-bar price trajectories. Did the price hit Take Profit (TP) or Stop Loss (SL) first within that 1-hour candle? To simulate this, the backtest `check_exit()` takes `bar_high` and `bar_low` to resolve intra-bar conflicts conservatively.
-  - **Forward Test (`btc_forwardtest`)**: Live environments process tick-by-tick data in real-time. There is no "intra-bar" ambiguity. The forwardtest `check_exit()` only takes `current_price` (WebSocket price) to make instant decisions.
+  - **Forward Test (`btc_forwardtest`)**: Live environments process tick-by-tick data in real-time. The forwardtest `check_exit()` accepts `bar_high`/`bar_low` (for the **bar-close tick** path → backtest-faithful) AND an extra `intrabar: bool = False` flag.
 - **Action:** If you update how TP/SL advances (e.g., changing the ratchet logic), you must apply the conceptual changes to both files, but **keep their respective method signatures intact**.
+
+### 2-a. ⚠️ Intrabar Ratchet Rule (Forward Test ONLY)
+**Critical:** Backtest only ratchets at bar close (only OHLCV available). Live exit ticks fire every 1s with the WS price, so naïvely passing `bar_high = bar_low = ws_price` makes ratchet fire on a single price spike, then any oscillation triggers the ratcheted SL → spurious closes.
+
+The fix: live exit ticks (`strategy_loop` fast tick when `has_open_pos=True`) pass `state["intrabar"] = True`. In that mode, `check_exit`:
+1. Skips the entire ratchet / TP advance loop.
+2. Only checks the **currently-held SL** against `current_price` directly.
+3. Defers TP touches to the next bar-close tick (where `bar_high` is the bar's actual high → ratchet runs as in backtest).
+4. Engines also skip the **entry** branch when `intrabar=True` (entry only happens on bar-close / pre-entry ticks).
+
+When you add a new strategy with ratchet logic (`magnet_rr` / `magnet_tp_rr`), `check_exit` MUST accept `intrabar` and short-circuit ratchet when `intrabar=True`. The engine MUST read `state.get("intrabar", False)` and forward it.
 
 ## 3. `engine.py` (The Execution Runner)
 - **Status:** 🔴 **Completely Different Execution Models (NEVER Copy & Paste)**

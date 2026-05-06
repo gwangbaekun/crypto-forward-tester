@@ -185,18 +185,22 @@ async def _tick_and_notify(
         from features.strategy.common.signal_logger import log_signal_snapshot
         _fire_and_forget(log_signal_snapshot(strategy_key, symbol, state))
 
-        # forward test: ws 현재가로 bar_high/bar_low/current_price 오버라이드.
-        # WS stale 시 REST mark price 로 fallback → price None 으로 인한 tick 누락 방지.
+        # forward test: 봉 마감/pre-entry tick — bar_high/bar_low 는 state 의 값 그대로 사용
+        # (= 완성봉 또는 forming 봉의 실제 OHLC). ws_price 단일 지점으로 덮어쓰면 ratchet 이
+        # 가격 spike 에 과민 반응해 같은 봉에서 SL 청산되는 버그 발생 (backtest 와 불일치).
+        # current_price 만 ws (live) 로 보강 — state["current_price"] 가 비었거나 stale 일 때.
         from common.binance_price_ws import BinancePriceWS, get_cached_price
         ws_price = get_cached_price(symbol)
         if ws_price is None:
             BinancePriceWS().start()  # 태스크 죽었으면 재시작
             from common.binance_service import fetch_mark_price
             ws_price = await fetch_mark_price(symbol)
-        if ws_price is None:
+        live_price = ws_price if ws_price is not None else state.get("current_price")
+        if not live_price:
             print(f"[_tick_and_notify:{strategy_key}] ⚠️ WS+REST price 모두 없음 — engine tick 스킵 ({symbol})")
             return
-        tick_state = {**state, "current_price": ws_price, "bar_high": ws_price, "bar_low": ws_price}
+        # bar_high/bar_low 는 그대로 — backtest semantics 보존 (ratchet 은 봉 OHLC 기준)
+        tick_state = {**state, "current_price": live_price}
 
         tick_result = engine.tick(symbol, tick_state, report_text=None)
 
@@ -205,7 +209,7 @@ async def _tick_and_notify(
         events = tick_result.get("events") or []
         if not events:
             return
-        _fire_and_forget(_execute_verify_notify(strategy_key, symbol, events, ws_price))
+        _fire_and_forget(_execute_verify_notify(strategy_key, symbol, events, live_price))
     except Exception as e:
         print(f"[_tick_and_notify:{strategy_key}] ❌ tick 오류: {e}")
 
