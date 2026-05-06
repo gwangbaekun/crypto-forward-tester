@@ -108,6 +108,21 @@ def is_ctrader_live_enabled(strategy_id: str) -> bool:
     return isinstance(strat, dict) and bool(strat.get("ctrader_live", False))
 
 
+def get_ctrader_config(strategy_id: str) -> dict:
+    """
+    전략별 cTrader 계좌 오버라이드 설정 반환.
+    strategies_master.yaml 에 없으면 빈 dict (executor가 env var 기본값 사용).
+    """
+    strat = get_master_config().get(strategy_id)
+    if not isinstance(strat, dict):
+        return {}
+    return {
+        k: strat[k]
+        for k in ("ctrader_account_id", "ctrader_env", "ctrader_symbol_id", "ctrader_lot_size")
+        if k in strat
+    }
+
+
 def is_alerts_enabled(strategy_id: str) -> bool:
     """하위 호환 공통 알림 게이트 (Telegram/Discord 중 하나라도 켜져 있으면 true)."""
     return is_telegram_alerts_enabled(strategy_id) or is_discord_alerts_enabled(strategy_id)

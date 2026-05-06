@@ -39,14 +39,20 @@ class CTraderExecutor:
     내부적으로 스레드 간 Future 로 응답을 동기화.
     """
 
-    def __init__(self) -> None:
+    def __init__(
+        self,
+        account_id: Optional[int] = None,
+        env: Optional[str] = None,
+        symbol_id: Optional[int] = None,
+        lot_size: Optional[float] = None,
+    ) -> None:
         self._client_id     = os.environ.get("CTRADER_CLIENT_ID", "").strip()
         self._client_secret = os.environ.get("CTRADER_CLIENT_SECRET", "").strip()
         self._access_token  = os.environ.get("CTRADER_ACCESS_TOKEN", "").strip()
-        self._account_id    = int(os.environ.get("CTRADER_ACCOUNT_ID", "0") or "0")
-        self._env           = os.environ.get("CTRADER_ENV", "demo").strip().lower()
-        self._symbol_id     = int(os.environ.get("CTRADER_SYMBOL_ID", "0") or "0")
-        self._lot_size      = float(os.environ.get("CTRADER_LOT_SIZE", "0.01") or "0.01")
+        self._account_id    = account_id or int(os.environ.get("CTRADER_ACCOUNT_ID", "0") or "0")
+        self._env           = (env or os.environ.get("CTRADER_ENV", "demo")).strip().lower()
+        self._symbol_id     = symbol_id or int(os.environ.get("CTRADER_SYMBOL_ID", "0") or "0")
+        self._lot_size      = lot_size or float(os.environ.get("CTRADER_LOT_SIZE", "0.01") or "0.01")
         self._is_live       = self._env == "live"
 
         self._client        = None
@@ -84,6 +90,7 @@ class CTraderExecutor:
             ProtoOAApplicationAuthRes,
             ProtoOAErrorRes,
             ProtoOAExecutionEvent,
+            ProtoOAOrderErrorEvent,
         )
 
         self._reactor = reactor
@@ -126,6 +133,11 @@ class CTraderExecutor:
                 self._authed = True
                 self._ready_event.set()
                 print(f"[cTrader] ✅ 인증 완료 (account={self._account_id} env={self._env})")
+                return
+
+            if isinstance(payload, ProtoOAOrderErrorEvent):
+                print(f"[cTrader] ❌ 주문 오류: {payload.errorCode} — {getattr(payload, 'description', '')}")
+                self._resolve_pending(None)
                 return
 
             if isinstance(payload, ProtoOAExecutionEvent):
@@ -289,18 +301,36 @@ class CTraderExecutor:
         pass
 
 
-# ── 싱글톤 ──────────────────────────────────────────────────────────────────
+# ── per-account 인스턴스 캐시 ────────────────────────────────────────────────
 
-_executor: Optional[CTraderExecutor] = None
+_executors: Dict[int, CTraderExecutor] = {}
 
 
-def get_executor() -> Optional[CTraderExecutor]:
-    global _executor
-    if _executor is None:
-        token      = os.environ.get("CTRADER_ACCESS_TOKEN", "").strip()
-        account_id = os.environ.get("CTRADER_ACCOUNT_ID", "").strip()
-        symbol_id  = os.environ.get("CTRADER_SYMBOL_ID", "").strip()
-        if not token or not account_id or not symbol_id:
-            return None
-        _executor = CTraderExecutor()
-    return _executor
+def get_executor(
+    account_id: Optional[int] = None,
+    env: Optional[str] = None,
+    symbol_id: Optional[int] = None,
+    lot_size: Optional[float] = None,
+) -> Optional[CTraderExecutor]:
+    token = os.environ.get("CTRADER_ACCESS_TOKEN", "").strip()
+    if not token:
+        return None
+
+    # 로컬 개발 시 cTrader 전체 비활성화
+    if os.environ.get("CTRADER_FORCE_DEMO", "").strip().lower() == "true":
+        return None
+
+    _account_id = account_id or int(os.environ.get("CTRADER_ACCOUNT_ID", "0") or "0")
+    _symbol_id  = symbol_id  or int(os.environ.get("CTRADER_SYMBOL_ID",  "0") or "0")
+    if not _account_id or not _symbol_id:
+        return None
+
+    if _account_id not in _executors:
+        _executors[_account_id] = CTraderExecutor(
+            account_id=_account_id,
+            env=env,
+            symbol_id=_symbol_id,
+            lot_size=lot_size,
+        )
+        print(f"[cTrader] 새 executor 생성 — account={_account_id} env={env or 'env_default'} symbol={_symbol_id}")
+    return _executors[_account_id]

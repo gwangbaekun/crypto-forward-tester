@@ -64,6 +64,9 @@ eth_cvd_explosion:
   binance_live: true
   binance_leverage: 3
   ctrader_live: true
+  ctrader_account_id: 47198415  # FTMO live
+  ctrader_env: live
+  ctrader_symbol_id: 323        # ETHUSD on FTMO live
   tick:
     module: features.strategy.eth_cvd_explosion.forward_test_runner
     fn: get_state
@@ -85,6 +88,10 @@ eth_cvd_explosion_v2:
   discord_alerts: true
   binance_live: false
   binance_leverage: 3
+  ctrader_live: true
+  ctrader_account_id: 47028214  # demo
+  ctrader_env: demo
+  ctrader_symbol_id: 22397      # ETHUSD on demo
   tick:
     module: features.strategy.eth_cvd_explosion_v2.forward_test_runner
     fn: get_state

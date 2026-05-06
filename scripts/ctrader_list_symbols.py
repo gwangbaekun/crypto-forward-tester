@@ -78,7 +78,8 @@ def run() -> None:
         ProtoOASymbolsListRes,
     )
 
-    env = _load_env(ENV_PATH)
+    import os as _os
+    env = {**_load_env(ENV_PATH), **{k: v for k, v in _os.environ.items() if k.startswith("CTRADER_")}}
 
     client_id     = env.get("CTRADER_CLIENT_ID", "").strip()
     client_secret = env.get("CTRADER_CLIENT_SECRET", "").strip()

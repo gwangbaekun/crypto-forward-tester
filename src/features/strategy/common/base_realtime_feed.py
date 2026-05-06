@@ -296,6 +296,7 @@ async def _execute_verify_notify(
     from features.strategy.common.config_loader import (
         is_binance_live_enabled,
         is_ctrader_live_enabled,
+        get_ctrader_config,
         get_master_config,
     )
     _binance_leverage = int((get_master_config() or {}).get(strategy_key, {}).get("binance_leverage") or 1)
@@ -312,7 +313,13 @@ async def _execute_verify_notify(
     if is_ctrader_live_enabled(strategy_key):
         try:
             from common.ctrader_executor import get_executor as _get_ctrader
-            ctrader_executor = _get_ctrader()
+            _ct_cfg = get_ctrader_config(strategy_key)
+            ctrader_executor = _get_ctrader(
+                account_id=_ct_cfg.get("ctrader_account_id"),
+                env=_ct_cfg.get("ctrader_env"),
+                symbol_id=_ct_cfg.get("ctrader_symbol_id"),
+                lot_size=_ct_cfg.get("ctrader_lot_size"),
+            )
         except Exception as e:
             print(f"[{strategy_key}] cTrader executor 없음: {e}")
 
