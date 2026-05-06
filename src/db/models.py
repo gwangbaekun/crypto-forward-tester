@@ -82,3 +82,14 @@ class ForwardTrade(Base):
     duration_min: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
     close_note: Mapped[Optional[str]] = mapped_column(String(256), nullable=True)
     strategy: Mapped[Optional[str]] = mapped_column(String(32), nullable=True, index=True)
+
+
+class CTraderToken(Base):
+    """cTrader OAuth tokens (singleton row, key='default')."""
+
+    __tablename__ = "ctrader_tokens"
+
+    key: Mapped[str] = mapped_column(String(32), primary_key=True, default="default")
+    access_token: Mapped[str] = mapped_column(Text, nullable=False)
+    refresh_token: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.utcnow)

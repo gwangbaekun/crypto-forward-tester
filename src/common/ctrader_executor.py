@@ -23,6 +23,7 @@ import os
 import threading
 from typing import Any, Dict, Optional
 import httpx
+from common.ctrader_token_store import get_tokens, save_tokens
 
 _CENTILOTS_PER_LOT = 100_000
 _CTRADER_TOKEN_URL = "https://openapi.ctrader.com/apps/token"
@@ -65,8 +66,11 @@ class CTraderExecutor:
     ) -> None:
         self._client_id     = os.environ.get("CTRADER_CLIENT_ID", "").strip()
         self._client_secret = os.environ.get("CTRADER_CLIENT_SECRET", "").strip()
-        self._access_token  = os.environ.get("CTRADER_ACCESS_TOKEN", "").strip()
-        self._refresh_token = os.environ.get("CTRADER_REFRESH_TOKEN", "").strip()
+        env_access_token = os.environ.get("CTRADER_ACCESS_TOKEN", "").strip()
+        env_refresh_token = os.environ.get("CTRADER_REFRESH_TOKEN", "").strip()
+        db_access_token, db_refresh_token = get_tokens()
+        self._access_token  = env_access_token or db_access_token
+        self._refresh_token = env_refresh_token or db_refresh_token
         self._account_id    = account_id or int(os.environ.get("CTRADER_ACCOUNT_ID", "0") or "0")
         self._env           = (env or os.environ.get("CTRADER_ENV", "demo")).strip().lower()
         self._symbol_id     = symbol_id or int(os.environ.get("CTRADER_SYMBOL_ID", "0") or "0")
@@ -204,6 +208,7 @@ class CTraderExecutor:
             if new_refresh:
                 self._refresh_token = new_refresh
                 os.environ["CTRADER_REFRESH_TOKEN"] = new_refresh
+            save_tokens(self._access_token, self._refresh_token)
             print(f"[cTrader] ✅ access token refresh 완료 (account={self._account_id})")
             return True
         except Exception as e:
@@ -370,6 +375,8 @@ def get_executor(
     lot_size: Optional[float] = None,
 ) -> Optional[CTraderExecutor]:
     token = os.environ.get("CTRADER_ACCESS_TOKEN", "").strip()
+    if not token:
+        token, _ = get_tokens()
     if not token:
         return None
 

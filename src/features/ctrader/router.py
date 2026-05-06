@@ -10,6 +10,7 @@ from urllib.parse import urlencode
 import httpx
 from fastapi import APIRouter, HTTPException, Query
 from fastapi.responses import JSONResponse, RedirectResponse
+from common.ctrader_token_store import save_tokens
 
 router = APIRouter(prefix="/auth/ctrader", tags=["ctrader-auth"])
 
@@ -100,6 +101,7 @@ async def ctrader_callback(
 
     # .env 자동 저장
     if access_token:
+        save_tokens(access_token, refresh_token)
         _update_env({
             "CTRADER_ACCESS_TOKEN":  access_token,
             "CTRADER_REFRESH_TOKEN": refresh_token,
@@ -107,7 +109,7 @@ async def ctrader_callback(
 
     return JSONResponse({
         "ok":      True,
-        "message": "Token saved to .env — 다음: /auth/ctrader/accounts 에서 ACCOUNT_ID 확인",
+        "message": "Token saved to DB(.env도 동기화). 필요시 Railway Variables에도 동일 값 반영.",
         "token":   token,
         "env_example": {
             "CTRADER_ACCESS_TOKEN":  access_token,
@@ -142,6 +144,7 @@ async def ctrader_refresh(refresh_token: str = Query(default="")):
     refresh_token = token.get("refreshToken") or token.get("refresh_token", "")
 
     if access_token:
+        save_tokens(access_token, refresh_token)
         _update_env({
             "CTRADER_ACCESS_TOKEN":  access_token,
             "CTRADER_REFRESH_TOKEN": refresh_token,
