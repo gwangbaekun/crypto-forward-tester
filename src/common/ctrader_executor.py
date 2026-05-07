@@ -13,6 +13,7 @@ reactor 위에 자신의 Client 를 붙이는 방식으로 동작한다.
     CTRADER_ENV              "demo" | "live"  (기본 demo)
     CTRADER_SYMBOL_ID
     CTRADER_LOT_SIZE         (기본 0.01) — 표준 lot; API volume = lot × 100 (0.01 lot 단위)
+    CTRADER_UNITS_PER_LOT    (선택) — volume 환산 배수 (기본 100)
     CTRADER_MAX_VOLUME       (선택) — 브로커 ProtoOASymbol.maxVolume 상한으로 클램프 (정수)
     CTRADER_FORCE_DEMO       "true" 이면 모든 executor 비활성 (로컬 개발용)
 """
@@ -29,12 +30,19 @@ from twisted.python.failure import Failure
 from common.ctrader_token_store import get_tokens, save_tokens
 
 _CTRADER_TOKEN_URL = "https://openapi.ctrader.com/apps/token"
-# Open API volume: 0.01-lot steps (100 == 1.00 lot). Doc: help.ctrader.com/open-api/messages/
-_UNITS_PER_LOT = 100
+def _get_units_per_lot() -> int:
+    raw = os.environ.get("CTRADER_UNITS_PER_LOT", "100").strip()
+    try:
+        units = int(raw)
+        if units > 0:
+            return units
+    except ValueError:
+        pass
+    return 100
 
 
 def _lots_to_volume(lots: float) -> int:
-    vol = max(1, int(round(float(lots) * _UNITS_PER_LOT)))
+    vol = max(1, int(round(float(lots) * _get_units_per_lot())))
     cap = os.environ.get("CTRADER_MAX_VOLUME", "").strip()
     if cap:
         try:
