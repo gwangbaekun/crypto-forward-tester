@@ -70,7 +70,7 @@ async def fetch_mark_price(symbol: str) -> Optional[float]:
             resp.raise_for_status()
             return float(resp.json()["markPrice"])
     except Exception as e:
-        print(f"[fetch_mark_price] {symbol} REST fallback 실패: {e}")
+        print(f"[fetch_mark_price] {symbol} REST fallback 실패: {type(e).__name__}: {e}")
         return None
 
 
