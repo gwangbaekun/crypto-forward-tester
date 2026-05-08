@@ -96,6 +96,9 @@ class EthCvdExplosionForwardTest(BaseForwardTest):
             else:
                 new_adv = int(self._position.get("tp_advances") or 0)
                 if new_adv > prev_adv:
+                    trade_id = self._position.get("trade_id")
+                    if trade_id is not None:
+                        self._persist_position_update(trade_id, self._position)
                     events.append({"event": "tp_advance", "position": dict(self._position)})
 
         # ── 2. 진입 체크 (청산과 동일 봉 마감 tick 에서 바로 재진입 가능) ─────
