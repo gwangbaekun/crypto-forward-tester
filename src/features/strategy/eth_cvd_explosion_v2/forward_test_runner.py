@@ -137,7 +137,7 @@ async def get_state(
 
     _signal_cache[cache_key] = {"state": state, "ts": now}
 
-    if should_compute:
+    if should_compute and new_bar_detected:
         from features.strategy.common.base_realtime_feed import _fire_and_forget
         _fire_and_forget(_tick_and_notify("eth_cvd_explosion_v2", symbol, bar_close_price, state))
 

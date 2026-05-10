@@ -68,19 +68,16 @@ STRATEGY_REGISTRY: Dict[str, Dict[str, Any]] = _build_registry()
 async def _strategy_loop(name: str, cfg: Dict[str, Any], symbol: str) -> None:
     """단일 전략 무한 루프.
 
-    포지션 없음: tick_interval 마다 realtime_feed 호출 (bar close 기준 신호 체크).
-    포지션 있음: exit_tick_interval 마다 BinancePriceWS 캐시 가격으로 engine.tick() 직접 호출.
-                 WS stale → REST mark price fallback.
-
-    포지션 보유 tick 은 intrabar=True 로 호출 (state["intrabar"]=True).
-    → ratchet/TP advance 는 봉 마감 tick (realtime_feed → _tick_and_notify) 에서만 수행.
-       봉 진행 중에는 현재 보유 SL 만 직접 가격으로 판정 (가격 진동에 의한 ratchet 직후
-       SL 즉시 청산 버그 차단).
+    포지션 없음: entry_tf 봉 마감 시점에 realtime_feed(fn) 호출.
+    포지션 있음:
+      - pre-entry window(봉 마감 60초 전)에 fn() 1회 호출 → ratchet/TP advance 수행.
+        dedup은 fn() 내부 _last_bar_time 로 처리 (봉당 1회 tick 보장).
+      - 봉 사이에는 WS 가격으로 intrabar SL 판정.
     """
-    base_interval = float(cfg["tick_interval"])
+    entry_tf = cfg.get("entry_tf") or "15m"
     fast_exit_interval = float(cfg.get("exit_tick_interval") or 1.0)
     tfs_str = ",".join(str(t) for t in cfg["timeframes"]) if cfg["timeframes"] else "15m,1h"
-    _stale_logged_at: float = 0.0  # 스팸 억제: 마지막 stale 로그 시각
+    _stale_logged_at: float = 0.0
 
     while True:
         try:
@@ -90,19 +87,36 @@ async def _strategy_loop(name: str, cfg: Dict[str, Any], symbol: str) -> None:
             try:
                 eng_mod = importlib.import_module(f"features.strategy.{name}.engine")
                 eng = eng_mod.get_engine()
-                st  = eng.get_stats(symbol=symbol) or {}
-                has_open_pos = bool(st.get("current_position"))
+                has_open_pos = bool(eng.get_position())
             except Exception:
                 has_open_pos = False
                 eng = None
 
             if has_open_pos and eng is not None:
-                # ── 포지션 보유: WS → REST fallback 순으로 가격 취득 ──────────
+                # ── pre-entry window: fn() 호출 → ratchet 수행 (봉당 1회) ──────
+                # dedup: fn() 안에서 new_bar_detected 시에만 tick 실행 + _last_bar_time 갱신.
+                # _last_bar_time 을 보고 이번 봉에 이미 fn()을 호출했는지 판단.
+                from features.strategy.common.base_realtime_feed import _last_bar_time
+                iv              = _interval_to_seconds(entry_tf)
+                now             = time.time()
+                sec_to_close    = iv - (now % iv)
+                in_pre_entry    = 0 < sec_to_close <= PRE_ENTRY_SECONDS
+                forming_bar_start = int(now / iv) * iv   # 현재 forming 봉 open_time (UTC sec)
+                cache_key       = f"{name}:{symbol}"
+
+                if in_pre_entry and _last_bar_time.get(cache_key, 0) < forming_bar_start:
+                    await fn(symbol=symbol, tfs=tfs_str)
+                    # fn() 내부에서 _last_bar_time[cache_key] = forming_bar_start 로 갱신됨.
+                    # 청산됐으면 intrabar tick 스킵
+                    if eng.get_position() is None:
+                        await _sleep_until_next_trigger(entry_tf, pre_entry_seconds=PRE_ENTRY_SECONDS)
+                        continue
+
+                # ── 봉 사이: WS → REST fallback으로 intrabar SL tick ───────────
                 from common.binance_price_ws import BinancePriceWS, get_cached_price
-                BinancePriceWS().start()  # 태스크 죽었으면 재시작
+                BinancePriceWS().start()
                 ws_price = get_cached_price(symbol)
                 if ws_price is None:
-                    # WS stale: REST fallback (포지션 보유 중 exit tick 누락 방지)
                     from common.binance_service import fetch_mark_price
                     ws_price = await fetch_mark_price(symbol)
                     if ws_price is None:
@@ -118,7 +132,7 @@ async def _strategy_loop(name: str, cfg: Dict[str, Any], symbol: str) -> None:
                     "signal":        {"level_map": pos.get("level_map")} if pos else {},
                     "bar_high":      ws_price,
                     "bar_low":       ws_price,
-                    "intrabar":      True,  # 봉 진행 중 — ratchet 비활성, SL 만 판정
+                    "intrabar":      True,
                 })
                 events = (tick_result or {}).get("events") or []
                 if events:
@@ -127,10 +141,7 @@ async def _strategy_loop(name: str, cfg: Dict[str, Any], symbol: str) -> None:
                 await asyncio.sleep(max(0.5, fast_exit_interval))
                 continue
 
-            # ── 포지션 없음: pre-entry 트리거 시점에 1회 get_state 호출 ─────────
-            # 선진입 구조에서는 루프가 entry TF 봉 마감 60초 전에 한 번만 깨어나
-            # get_state를 호출하고, forward_test_runner가 해당 윈도우에서만
-            # REST fetch + 신호 계산을 수행한다.
+            # ── 포지션 없음: pre-entry 트리거 시점에 fn() 호출 ─────────────────
             await fn(symbol=symbol, tfs=tfs_str)
 
             if eng is not None and eng.get_position() is not None:
@@ -139,7 +150,6 @@ async def _strategy_loop(name: str, cfg: Dict[str, Any], symbol: str) -> None:
         except Exception as e:
             print(f"[StrategyLoop:{name}] error: {e}")
 
-        entry_tf = cfg.get("entry_tf") or "15m"
         await _sleep_until_next_trigger(entry_tf, pre_entry_seconds=PRE_ENTRY_SECONDS)
 
 

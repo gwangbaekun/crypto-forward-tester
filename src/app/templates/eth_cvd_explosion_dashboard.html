@@ -254,6 +254,7 @@
     var _candleSeries = null, _volSeries = null, _threshSeries = null;
     var _m15SupportSeries = null, _m15ResistanceSeries = null;
     var _liqPriceLines = [];
+    var _positionPriceLines = [];
     var _chartTimes = [];
     var _chartOpen = true;
 
@@ -354,6 +355,50 @@
         MEDIUM:   { line: '#eccc68', text: '#eccc68' },
         LOW:      { line: '#57606f', text: '#57606f' },
     };
+
+    function _clearPositionLines() {
+        if (!_candleSeries) return;
+        _positionPriceLines.forEach(function(pl) {
+            try { _candleSeries.removePriceLine(pl); } catch(e) {}
+        });
+        _positionPriceLines = [];
+    }
+
+    function _drawPositionLines(pos) {
+        _clearPositionLines();
+        if (!_candleSeries || !pos) return;
+        var tpLevels  = pos.tp_levels  || (pos.tp  != null ? [pos.tp]  : []);
+        var slLevels  = pos.sl_levels  || (pos.sl  != null ? [pos.sl]  : []);
+        var tpAdv     = pos.tp_advances || 0;
+
+        if (pos.entry_price) {
+            _positionPriceLines.push(_candleSeries.createPriceLine({
+                price: Number(pos.entry_price), color: '#f0883e',
+                lineWidth: 1, lineStyle: 1, axisLabelVisible: true, title: 'Entry',
+            }));
+        }
+        tpLevels.forEach(function(p, i) {
+            var hit = i < tpAdv;
+            _positionPriceLines.push(_candleSeries.createPriceLine({
+                price: Number(p),
+                color: hit ? '#1abc9c' : '#2ecc71',
+                lineWidth: hit ? 1 : 2,
+                lineStyle: hit ? 2 : 0,
+                axisLabelVisible: true,
+                title: 'TP' + (i + 1) + (hit ? ' ✓' : ''),
+            }));
+        });
+        slLevels.forEach(function(p, i) {
+            _positionPriceLines.push(_candleSeries.createPriceLine({
+                price: Number(p),
+                color: i === 0 ? '#e74c3c' : '#ff6b81',
+                lineWidth: i === 0 ? 2 : 1,
+                lineStyle: 0,
+                axisLabelVisible: true,
+                title: i === 0 ? 'SL' : 'SL' + (i + 1),
+            }));
+        });
+    }
 
     function _clearLiqLines() {
         if (!_candleSeries) return;
@@ -520,6 +565,9 @@
                 tradesListElId: 'forward-trades-list',
                 tradesPagerElId: 'forward-trades-pagination',
                 pollMs: 30000,
+                onRendered: function(d) {
+                    _drawPositionLines((d && d.current_position) || null);
+                },
                 onStatsFetch: function(ok) {
                     _setHealth('forward_stats', !!ok, ok ? '정상 수신' : '요청 실패', null);
                 },
