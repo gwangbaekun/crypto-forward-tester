@@ -111,11 +111,25 @@ def is_ctrader_live_enabled(strategy_id: str) -> bool:
 def get_ctrader_config(strategy_id: str) -> dict:
     """
     전략별 cTrader 계좌 오버라이드 설정 반환.
-    strategies_master.yaml 에 없으면 빈 dict (executor가 env var 기본값 사용).
+    ctrader_accounts + ctrader_mode 구조가 있으면 mode에 맞는 계좌를 선택.
+    없으면 flat 필드 그대로 사용 (하위 호환).
     """
     strat = get_master_config().get(strategy_id)
     if not isinstance(strat, dict):
         return {}
+    accounts = strat.get("ctrader_accounts")
+    if isinstance(accounts, dict):
+        mode = strat.get("ctrader_mode", "demo")
+        account_cfg = accounts.get(mode)
+        if not isinstance(account_cfg, dict):
+            raise ValueError(
+                f"[{strategy_id}] ctrader_mode='{mode}' 이지만 "
+                f"ctrader_accounts.{mode} 설정이 없습니다."
+            )
+        result = dict(account_cfg)
+        if "ctrader_lot_size" in strat:
+            result["ctrader_lot_size"] = strat["ctrader_lot_size"]
+        return result
     return {
         k: strat[k]
         for k in ("ctrader_account_id", "ctrader_env", "ctrader_symbol_id", "ctrader_lot_size")

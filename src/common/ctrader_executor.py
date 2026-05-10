@@ -29,6 +29,17 @@ import httpx
 from twisted.python.failure import Failure
 from common.ctrader_token_store import get_tokens, save_tokens
 
+
+def _tg(msg: str) -> None:
+    """Telegram 으로 cTrader 연결 상태 알림 (블로킹 없이 별도 스레드)."""
+    def _send():
+        try:
+            from features.notifications.alert_dispatcher import AlertDispatcher
+            AlertDispatcher().send_message(msg, send_telegram=True, send_discord=False)
+        except Exception as e:
+            print(f"[cTrader] Telegram 알림 실패: {e}")
+    threading.Thread(target=_send, daemon=True).start()
+
 _CTRADER_TOKEN_URL = "https://openapi.ctrader.com/apps/token"
 def _get_units_per_lot() -> int:
     raw = os.environ.get("CTRADER_UNITS_PER_LOT", "100").strip()
@@ -198,10 +209,17 @@ class CTraderExecutor:
             client.send(req)
 
         def on_disconnected(c, reason):
+            msg = str(getattr(reason, "value", "") or reason)
+            clean = "ConnectionDone" in msg
             print(f"[cTrader] 연결 종료 (account={self._account_id}): {reason}")
+            if not clean:
+                _tg(f"⚠️ <b>[cTrader {self._env}]</b> 연결 끊김\naccount: <code>{self._account_id}</code>\n{msg[:120]}")
             self._authed = False
             self._ready_event.clear()
-            self._reactor.callLater(3.0, _start_client_service)
+            # 같은 Client 객체에 startService() 재호출 시 stale on_connected가
+            # 조기 발화되어 AppAuth 이중 전송 → 서버 강제 종료 루프 발생.
+            # 새 Client 인스턴스를 생성해 클린하게 재연결한다.
+            self._reactor.callLater(3.0, self._setup_client)
 
         def on_message(c, message):
             payload = Protobuf.extract(message)
@@ -237,10 +255,13 @@ class CTraderExecutor:
                 self._refresh_attempted = False
                 self._ready_event.set()
                 print(f"[cTrader] ✅ 인증 완료 (account={self._account_id} env={self._env})")
+                _tg(f"✅ <b>[cTrader {self._env}]</b> 인증 완료\naccount: <code>{self._account_id}</code>")
                 return
 
             if isinstance(payload, ProtoOAOrderErrorEvent):
-                print(f"[cTrader] ❌ 주문 오류: {payload.errorCode} — {getattr(payload, 'description', '')}")
+                desc = getattr(payload, "description", "")
+                print(f"[cTrader] ❌ 주문 오류: {payload.errorCode} — {desc}")
+                _tg(f"❌ <b>[cTrader {self._env}]</b> 주문 오류\n<code>{payload.errorCode}</code>: {desc}")
                 self._resolve_pending(None)
                 return
 
@@ -305,6 +326,10 @@ class CTraderExecutor:
             if pos_id:
                 self._open_position_id = pos_id
             print(f"[cTrader] ✅ 체결 — fill={fill_price:.4f} positionId={pos_id}")
+            _tg(
+                f"✅ <b>[cTrader {self._env}]</b> 체결\n"
+                f"fill: <code>{fill_price:.4f}</code>  posId: <code>{pos_id}</code>"
+            )
             self._resolve_pending({"avgPrice": fill_price, "positionId": pos_id})
 
         elif exec_type == ProtoOAExecutionType.SWAP:
