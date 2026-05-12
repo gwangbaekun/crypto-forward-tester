@@ -23,10 +23,11 @@ _EAI_CODES: frozenset = frozenset(
 )
 
 DEFAULT_SYMBOLS = ["btcusdt", "ethusdt"]
-STALE_SECONDS = 30
+STALE_SECONDS = 60
 _RECV_TIMEOUT_SEC = float(os.getenv("BINANCE_WS_RECV_TIMEOUT_SEC", "20"))
 _MIN_RECONNECT_SEC = float(os.getenv("BINANCE_WS_MIN_RECONNECT_SEC", "3.0"))
 _DNS_RECONNECT_FLOOR = float(os.getenv("BINANCE_WS_DNS_RECONNECT_FLOOR", "5.0"))
+_WS_RECEIVE_TIMEOUT = float(os.getenv("BINANCE_WS_RECEIVE_TIMEOUT", "45.0"))
 
 _BINANCE_WS_BASE = "wss://fstream.binance.com/ws"
 
@@ -94,6 +95,7 @@ class _SymbolWS:
             async with session.ws_connect(
                 self._url,
                 heartbeat=20,
+                receive_timeout=_WS_RECEIVE_TIMEOUT,
                 max_msg_size=2**22,
             ) as ws:
                 _connect_wall = time.time()
