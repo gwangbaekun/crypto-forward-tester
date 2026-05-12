@@ -181,8 +181,8 @@ class BinancePriceWS:
             if sym not in self._workers:
                 w = _SymbolWS(sym, self._prices, self._updated_at)
                 self._workers[sym] = w
-                w.start()
                 added.append(sym)
+            self._workers[sym].start()
 
         self._symbols = new_symbols
         if added:

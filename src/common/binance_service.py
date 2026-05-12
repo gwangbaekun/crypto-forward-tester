@@ -1,7 +1,10 @@
 import math
+import time
 from typing import List, Optional
 import pandas as pd
 import httpx
+
+_rest_429_until: float = 0.0
 
 
 async def fetch_binance_klines(
@@ -63,12 +66,22 @@ async def fetch_binance_klines(
 
 async def fetch_mark_price(symbol: str) -> Optional[float]:
     """Binance Futures mark price REST fallback (WS stale 시 사용)."""
+    global _rest_429_until
+    if time.time() < _rest_429_until:
+        return None
     try:
         url = "https://fapi.binance.com/fapi/v1/premiumIndex"
         async with httpx.AsyncClient(timeout=5.0) as client:
             resp = await client.get(url, params={"symbol": symbol.upper()})
             resp.raise_for_status()
             return float(resp.json()["markPrice"])
+    except httpx.HTTPStatusError as e:
+        if e.response.status_code == 429:
+            _rest_429_until = time.time() + 30.0
+            print(f"[fetch_mark_price] 429 rate limit — REST fallback 30초 중단")
+        else:
+            print(f"[fetch_mark_price] {symbol} REST fallback 실패: {type(e).__name__}: {e}")
+        return None
     except Exception as e:
         print(f"[fetch_mark_price] {symbol} REST fallback 실패: {type(e).__name__}: {e}")
         return None
