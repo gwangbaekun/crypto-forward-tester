@@ -63,7 +63,7 @@ eth_cvd_explosion:
   discord_alerts: true
   binance_live: true
   binance_leverage: 3
-  ctrader_live: false
+  ctrader_live: true
   ctrader_account_id: 47198415  # FTMO live
   ctrader_env: live
   ctrader_symbol_id: 323        # ETHUSD on FTMO live
@@ -88,7 +88,7 @@ eth_cvd_explosion_v2:
   discord_alerts: true
   binance_live: false
   binance_leverage: 3
-  ctrader_live: true
+  ctrader_live: false
   ctrader_mode: demo   # "demo" 또는 "live" 로 전환
   ctrader_accounts:
     demo:

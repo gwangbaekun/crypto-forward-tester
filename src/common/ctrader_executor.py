@@ -10,12 +10,11 @@ reactor 위에 자신의 Client 를 붙이는 방식으로 동작한다.
     CTRADER_CLIENT_SECRET
     CTRADER_ACCESS_TOKEN
     CTRADER_ACCOUNT_ID
-    CTRADER_ENV              "demo" | "live"  (기본 demo)
+    CTRADER_ENV              → strategies_master.yaml ctrader_mode 로 일원화. 직접 설정 불필요.
     CTRADER_SYMBOL_ID
     CTRADER_LOT_SIZE         (기본 0.01) — 표준 lot; API volume = lot × 100 (0.01 lot 단위)
     CTRADER_UNITS_PER_LOT    (선택) — volume 환산 배수 (기본 100)
     CTRADER_MAX_VOLUME       (선택) — 브로커 ProtoOASymbol.maxVolume 상한으로 클램프 (정수)
-    CTRADER_FORCE_DEMO       "true" 이면 모든 executor 비활성 (로컬 개발용)
 """
 from __future__ import annotations
 
@@ -132,7 +131,9 @@ class CTraderExecutor:
         self._access_token  = env_access_token or db_access_token
         self._refresh_token = env_refresh_token or db_refresh_token
         self._account_id    = account_id or int(os.environ.get("CTRADER_ACCOUNT_ID", "0") or "0")
-        self._env           = (env or os.environ.get("CTRADER_ENV", "demo")).strip().lower()
+        if not env:
+            raise ValueError("ctrader_executor: env('demo'|'live') 가 없습니다. strategies_master.yaml의 ctrader_mode 를 확인하세요.")
+        self._env           = env.strip().lower()
         self._symbol_id     = symbol_id or int(os.environ.get("CTRADER_SYMBOL_ID", "0") or "0")
         self._lot_size      = lot_size or float(os.environ.get("CTRADER_LOT_SIZE", "0.01") or "0.01")
         self._is_live       = self._env == "live"
@@ -475,10 +476,6 @@ def get_executor_unavailable_reason(
         token, _ = get_tokens()
     if not token:
         return "CTRADER_ACCESS_TOKEN 누락"
-
-    force_demo = os.environ.get("CTRADER_FORCE_DEMO", "").strip()
-    if force_demo.lower() in {"1", "true", "yes", "on"}:
-        return f"CTRADER_FORCE_DEMO={force_demo}"
 
     _account_id = account_id or int(os.environ.get("CTRADER_ACCOUNT_ID", "0") or "0")
     _symbol_id = symbol_id or int(os.environ.get("CTRADER_SYMBOL_ID", "0") or "0")
