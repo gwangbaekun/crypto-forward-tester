@@ -39,6 +39,32 @@ async def ctrader_positions():
         **({"errors": errors} if errors else {}),
     })
 
+@router.post("/positions/{position_id}/close")
+async def ctrader_close_position(
+    position_id: int,
+    volume: int = Query(default=None, description="청산 볼륨 (units). 미입력 시 executor lot_size 기본값 사용"),
+):
+    """positionId로 cTrader 포지션 강제 청산."""
+    from common.ctrader_executor import get_all_executors
+    executors = get_all_executors()
+    if not executors:
+        raise HTTPException(status_code=503, detail="executor 없음 — 전략이 시작되지 않았습니다.")
+
+    for account_id, ex in executors.items():
+        result = await ex.close_position_by_id(position_id, volume=volume)
+        if result is not None:
+            fill = float((result or {}).get("avgPrice") or 0)
+            return JSONResponse({
+                "ok": True,
+                "positionId": position_id,
+                "account_id": account_id,
+                "fill": fill if fill > 0 else None,
+                "raw": result,
+            })
+
+    raise HTTPException(status_code=404, detail=f"positionId={position_id} 청산 실패 — executor가 응답하지 않거나 포지션을 찾을 수 없습니다.")
+
+
 _TOKEN_BASE = "https://openapi.ctrader.com/apps/token"
 _AUTH_BASE  = "https://id.ctrader.com/my/settings/openapi/grantingaccess/"
 _state_store: Dict[str, bool] = {}

@@ -464,6 +464,26 @@ class CTraderExecutor:
         await self._run_in_executor(_send)
         print(f"[cTrader] ✅ TP/SL — positionId={self._open_position_id} tp={tp} sl={sl}")
 
+    async def close_position_by_id(self, position_id: int, volume: Optional[int] = None) -> Optional[Dict]:
+        """positionId를 직접 지정해서 청산 (메모리 상태와 무관)."""
+        if not self._ready():
+            return None
+
+        def _send():
+            from ctrader_open_api.messages.OpenApiMessages_pb2 import ProtoOAClosePositionReq
+            req = ProtoOAClosePositionReq()
+            req.ctidTraderAccountId = self._account_id
+            req.positionId          = position_id
+            req.volume              = volume if volume is not None else _lots_to_volume(self._lot_size)
+            return self._send_and_wait(req)
+
+        result = await self._run_in_executor(_send)
+        if result:
+            if self._open_position_id == position_id:
+                self._open_position_id = None
+            print(f"[cTrader] ✅ 강제 청산 — positionId={position_id} fill={result.get('avgPrice', 0):.4f}")
+        return result
+
     async def get_position(self, symbol: str) -> Optional[Dict]:
         if not self._ready():
             return None
