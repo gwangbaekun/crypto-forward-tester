@@ -270,6 +270,25 @@ class CTraderExecutor:
                 self._on_execution(payload)
                 return
 
+            from ctrader_open_api.messages.OpenApiMessages_pb2 import ProtoOAReconcileRes
+            if isinstance(payload, ProtoOAReconcileRes):
+                from ctrader_open_api.messages.OpenApiModelMessages_pb2 import ProtoOATradeSide
+                positions = []
+                for pos in payload.position:
+                    side = "BUY" if pos.tradeData.tradeSide == ProtoOATradeSide.BUY else "SELL"
+                    positions.append({
+                        "positionId": pos.positionId,
+                        "symbolId": pos.tradeData.symbolId,
+                        "side": side,
+                        "volume": pos.tradeData.volume,
+                        "price": pos.price,
+                        "stopLoss": pos.stopLoss if pos.stopLoss else None,
+                        "takeProfit": pos.takeProfit if pos.takeProfit else None,
+                        "openTimestamp": pos.tradeData.openTimestamp,
+                    })
+                self._resolve_pending({"positions": positions, "account_id": self._account_id, "env": self._env})
+                return
+
         client.setConnectedCallback(on_connected)
         client.setDisconnectedCallback(on_disconnected)
         client.setMessageReceivedCallback(on_message)
@@ -464,6 +483,11 @@ class CTraderExecutor:
 # ── per-account 인스턴스 캐시 ────────────────────────────────────────────────
 
 _executors: Dict[int, CTraderExecutor] = {}
+
+
+def get_all_executors() -> Dict[int, "CTraderExecutor"]:
+    """생성된 모든 executor 반환 (positions API 등에서 사용)."""
+    return _executors
 
 
 def get_executor_unavailable_reason(

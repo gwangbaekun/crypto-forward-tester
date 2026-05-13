@@ -14,6 +14,31 @@ from common.ctrader_token_store import save_tokens
 
 router = APIRouter(prefix="/auth/ctrader", tags=["ctrader-auth"])
 
+
+@router.get("/positions")
+async def ctrader_positions():
+    """현재 cTrader 계정의 오픈 포지션 조회 (ProtoOAReconcileReq 사용)."""
+    from common.ctrader_executor import get_all_executors
+    executors = get_all_executors()
+    if not executors:
+        return JSONResponse({"positions": [], "error": "executor 없음 — 전략이 아직 시작되지 않았습니다."})
+
+    all_positions: list = []
+    errors: list = []
+    for account_id, ex in executors.items():
+        try:
+            result = await ex.get_position(symbol="")
+            if result and "positions" in result:
+                all_positions.extend(result["positions"])
+        except Exception as e:
+            errors.append(f"account={account_id}: {e}")
+
+    return JSONResponse({
+        "positions": all_positions,
+        "account_count": len(executors),
+        **({"errors": errors} if errors else {}),
+    })
+
 _TOKEN_BASE = "https://openapi.ctrader.com/apps/token"
 _AUTH_BASE  = "https://id.ctrader.com/my/settings/openapi/grantingaccess/"
 _state_store: Dict[str, bool] = {}
