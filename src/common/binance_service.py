@@ -5,6 +5,7 @@ import pandas as pd
 import httpx
 
 _rest_429_until: float = 0.0
+_klines_ban_until: float = 0.0  # 418 IP ban / 429 rate limit
 
 
 async def fetch_binance_klines(
@@ -18,6 +19,13 @@ async def fetch_binance_klines(
     - interval: 1m, 5m, 15m, 1h, 4h, 1d 등
     - limit: 최대 1500
     """
+    global _klines_ban_until
+    now = time.time()
+    if now < _klines_ban_until:
+        remaining = int(_klines_ban_until - now)
+        print(f"[binance_service] klines banned — skip ({remaining}s 남음, {symbol} {interval})")
+        return None
+
     try:
         url = "https://fapi.binance.com/fapi/v1/klines"
         params = {
@@ -25,12 +33,19 @@ async def fetch_binance_klines(
             "interval": interval,
             "limit": min(limit, 1500)
         }
-        
+
         async with httpx.AsyncClient(timeout=10.0) as client:
             resp = await client.get(url, params=params)
+            if resp.status_code in (418, 429):
+                retry_after = int(resp.headers.get("Retry-After", 0))
+                cooldown = retry_after if retry_after > 0 else (300 if resp.status_code == 418 else 60)
+                _klines_ban_until = time.time() + cooldown
+                label = "418 IP ban" if resp.status_code == 418 else "429 rate limit"
+                print(f"[binance_service] {label} ({symbol} {interval}) — {cooldown}s 대기")
+                return None
             resp.raise_for_status()
             klines = resp.json()
-        
+
         if not klines:
             return None
         
@@ -58,7 +73,18 @@ async def fetch_binance_klines(
         df = df[['Open', 'High', 'Low', 'Close', 'Volume', 'TakerBuyBase']]
 
         return df
-        
+
+    except httpx.HTTPStatusError as e:
+        status = e.response.status_code
+        retry_after = int(e.response.headers.get("Retry-After", 0))
+        if status in (418, 429):
+            cooldown = retry_after if retry_after > 0 else (300 if status == 418 else 60)
+            _klines_ban_until = time.time() + cooldown
+            label = "418 IP ban" if status == 418 else "429 rate limit"
+            print(f"[binance_service] {label} ({symbol} {interval}) — {cooldown}s 대기")
+        else:
+            print(f"[binance_service] klines fetch error ({symbol} {interval}): {e}")
+        return None
     except Exception as e:
         print(f"[binance_service] klines fetch error ({symbol} {interval}): {e}")
         return None

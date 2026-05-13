@@ -133,11 +133,10 @@ async def build_market_stream_payload(
             _fetch_ticker_24h(client, sym),
             fetch_binance_lsr(client, sym),
             fetch_all_oi(sym, cache_seconds=oi_cache_sec),
-            _fetch_last_bar_taker_cvd_proxy(sym, "15m"),
             _fetch_agg_cvd_tail(sym, 1000),
             return_exceptions=True,
         )
-        premium, ticker24, lsr, oi_rows, bar_proxy, agg_cvd = _unwrap_gather(results)
+        premium, ticker24, lsr, oi_rows, agg_cvd = _unwrap_gather(results)
 
     out["premium"] = premium
     if premium is None:
@@ -160,12 +159,11 @@ async def build_market_stream_payload(
         errors["open_interest"] = "unavailable"
 
     out["cvd"] = {
-        "last_closed_15m_bar": bar_proxy,
+        "last_closed_15m_bar": None,
         "recent_agg_trades": agg_cvd,
     }
-    for key, block in (("last_closed_15m_bar", bar_proxy), ("recent_agg_trades", agg_cvd)):
-        if isinstance(block, dict) and block.get("error"):
-            errors[f"cvd_{key}"] = str(block["error"])
+    if isinstance(agg_cvd, dict) and agg_cvd.get("error"):
+        errors["cvd_recent_agg_trades"] = str(agg_cvd["error"])
 
     if errors:
         out["errors"] = errors
