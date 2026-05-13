@@ -15,13 +15,47 @@ from common.ctrader_token_store import save_tokens
 router = APIRouter(prefix="/auth/ctrader", tags=["ctrader-auth"])
 
 
+def _get_or_bootstrap_executors() -> dict:
+    """
+    실행 중인 executor가 없으면 strategies_master.yaml의 ctrader_live 전략을 읽어서
+    executor를 직접 생성한다. positions/close API가 전략 루프 시작 전에도 동작하게 한다.
+    """
+    from common.ctrader_executor import get_all_executors, get_executor
+    executors = get_all_executors()
+    if executors:
+        return executors
+
+    try:
+        from features.strategy.common.config_loader import get_master_config, get_ctrader_config
+        master = get_master_config() or {}
+        for strategy_key, cfg in master.items():
+            if not isinstance(cfg, dict):
+                continue
+            if not cfg.get("ctrader_live"):
+                continue
+            ct = get_ctrader_config(strategy_key)
+            account_id = ct.get("ctrader_account_id")
+            env        = ct.get("ctrader_env")
+            symbol_id  = ct.get("ctrader_symbol_id")
+            lot_size   = ct.get("ctrader_lot_size")
+            if account_id and env and symbol_id:
+                get_executor(account_id=account_id, env=env, symbol_id=symbol_id, lot_size=lot_size)
+    except Exception as e:
+        print(f"[ctrader/router] bootstrap executor 실패: {e}")
+
+    return get_all_executors()
+
+
 @router.get("/positions")
 async def ctrader_positions():
     """현재 cTrader 계정의 오픈 포지션 조회 (ProtoOAReconcileReq 사용)."""
-    from common.ctrader_executor import get_all_executors
-    executors = get_all_executors()
+    import asyncio
+    executors = _get_or_bootstrap_executors()
     if not executors:
-        return JSONResponse({"positions": [], "error": "executor 없음 — 전략이 아직 시작되지 않았습니다."})
+        return JSONResponse({"positions": [], "error": "executor 없음 — CTRADER_ACCESS_TOKEN 등 환경변수를 확인하세요."})
+
+    # 새로 bootstrap된 executor는 인증 완료까지 대기
+    await asyncio.sleep(1.0)
 
     all_positions: list = []
     errors: list = []
@@ -39,16 +73,20 @@ async def ctrader_positions():
         **({"errors": errors} if errors else {}),
     })
 
+
 @router.post("/positions/{position_id}/close")
 async def ctrader_close_position(
     position_id: int,
     volume: int = Query(default=None, description="청산 볼륨 (units). 미입력 시 executor lot_size 기본값 사용"),
 ):
     """positionId로 cTrader 포지션 강제 청산."""
-    from common.ctrader_executor import get_all_executors
-    executors = get_all_executors()
+    import asyncio
+    executors = _get_or_bootstrap_executors()
     if not executors:
-        raise HTTPException(status_code=503, detail="executor 없음 — 전략이 시작되지 않았습니다.")
+        raise HTTPException(status_code=503, detail="executor 없음 — CTRADER_ACCESS_TOKEN 등 환경변수를 확인하세요.")
+
+    # 새로 bootstrap된 executor는 인증 완료까지 대기
+    await asyncio.sleep(2.0)
 
     for account_id, ex in executors.items():
         result = await ex.close_position_by_id(position_id, volume=volume)
