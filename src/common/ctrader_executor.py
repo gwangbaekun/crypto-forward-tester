@@ -174,6 +174,17 @@ class CTraderExecutor:
             ProtoOAOrderErrorEvent,
         )
 
+        # 이전 client의 내부 TCPClient 서비스가 살아있으면 자동 재연결을 시도한다.
+        # self._client를 먼저 None으로 비운 뒤 stopService를 호출해야
+        # stopService가 유발하는 on_disconnected 콜백이 재진입하지 않는다.
+        if self._client is not None:
+            old_client = self._client
+            self._client = None
+            try:
+                old_client.stopService()
+            except Exception:
+                pass
+
         host   = EndPoints.PROTOBUF_LIVE_HOST if self._is_live else EndPoints.PROTOBUF_DEMO_HOST
         client = Client(host, EndPoints.PROTOBUF_PORT, TcpProtocol)
         self._client = client
@@ -210,6 +221,10 @@ class CTraderExecutor:
             client.send(req)
 
         def on_disconnected(c, reason):
+            # c가 현재 활성 client가 아니면 이미 교체된 구 client의 콜백이므로 무시한다.
+            # stopService() 호출이 on_disconnected를 재트리거해도 여기서 차단된다.
+            if c is not self._client:
+                return
             msg = str(getattr(reason, "value", "") or reason)
             clean = "ConnectionDone" in msg
             print(f"[cTrader] 연결 종료 (account={self._account_id}): {reason}")
@@ -217,9 +232,6 @@ class CTraderExecutor:
                 _tg(f"⚠️ <b>[cTrader {self._env}]</b> 연결 끊김\naccount: <code>{self._account_id}</code>\n{msg[:120]}")
             self._authed = False
             self._ready_event.clear()
-            # 같은 Client 객체에 startService() 재호출 시 stale on_connected가
-            # 조기 발화되어 AppAuth 이중 전송 → 서버 강제 종료 루프 발생.
-            # 새 Client 인스턴스를 생성해 클린하게 재연결한다.
             self._reactor.callLater(3.0, self._setup_client)
 
         def on_message(c, message):
