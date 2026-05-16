@@ -189,6 +189,23 @@ class CTraderExecutor:
         client = Client(host, EndPoints.PROTOBUF_PORT, TcpProtocol)
         self._client = client
 
+        def _consume_deferred_error(failure: Failure):
+            """client.send() 가 반환한 Deferred의 에러를 소비해 'Unhandled error in Deferred' 방지."""
+            msg = str(getattr(failure, "value", "") or failure)
+            if "TimeoutError" in msg and "Deferred" in msg:
+                return None
+            print(f"[cTrader] send errback (account={self._account_id}): {failure}")
+            return None
+
+        def _safe_send(req) -> None:
+            """send() 반환 Deferred에 errback을 붙여 unhandled error 방지."""
+            try:
+                d = client.send(req)
+                if d is not None and hasattr(d, "addErrback"):
+                    d.addErrback(_consume_deferred_error)
+            except Exception as exc:
+                print(f"[cTrader] send 예외 (account={self._account_id}): {exc}")
+
         def _start_client_service() -> None:
             """
             ctrader_open_api 의 startService() 는 Deferred 를 반환할 수 있는데,
@@ -198,19 +215,9 @@ class CTraderExecutor:
             try:
                 d = client.startService()
                 if d is not None:
-                    d.addErrback(_consume_start_error)
+                    d.addErrback(_consume_deferred_error)
             except Exception as exc:
                 print(f"[cTrader] startService 예외 (account={self._account_id}): {exc}")
-
-        def _consume_start_error(failure: Failure):
-            msg = str(getattr(failure, "value", "") or failure)
-            # 네트워크 변동/일시 timeout 은 재시도 루프에서 복구되므로 로그만 남기고 소비
-            if "TimeoutError" in msg and "Deferred" in msg:
-                print(f"[cTrader] 연결 타임아웃 (account={self._account_id}) — 재시도 예정")
-                return None
-            # 그 외 에러는 로그로 표면화
-            print(f"[cTrader] startService errback (account={self._account_id}): {failure}")
-            return None
 
         def on_connected(c):
             print(f"[cTrader] TCP connected (account={self._account_id} env={self._env})")
@@ -218,7 +225,7 @@ class CTraderExecutor:
             req.clientId     = self._client_id
             req.clientSecret = self._client_secret
             print(f"[cTrader] AppAuth 요청 전송 (account={self._account_id})")
-            client.send(req)
+            _safe_send(req)
 
         def on_disconnected(c, reason):
             # c가 현재 활성 client가 아니면 이미 교체된 구 client의 콜백이므로 무시한다.
@@ -248,7 +255,7 @@ class CTraderExecutor:
                         req = ProtoOAAccountAuthReq()
                         req.ctidTraderAccountId = self._account_id
                         req.accessToken = self._access_token
-                        client.send(req)
+                        _safe_send(req)
                         return
                 print(f"[cTrader] ❌ 에러: {payload.errorCode} — {payload.description}")
                 self._resolve_pending(None)
@@ -260,7 +267,7 @@ class CTraderExecutor:
                 req.ctidTraderAccountId = self._account_id
                 req.accessToken         = self._access_token
                 print(f"[cTrader] AccountAuth 요청 전송 (account={self._account_id})")
-                client.send(req)
+                _safe_send(req)
                 return
 
             if isinstance(payload, ProtoOAAccountAuthRes):
@@ -386,7 +393,14 @@ class CTraderExecutor:
         with self._lock:
             self._pending = loop
 
-        self._reactor.callFromThread(self._client.send, req)
+        def _send_from_thread():
+            try:
+                d = self._client.send(req)
+                if d is not None and hasattr(d, "addErrback"):
+                    d.addErrback(lambda f: None)
+            except Exception as exc:
+                print(f"[cTrader] send 예외 (account={self._account_id}): {exc}")
+        self._reactor.callFromThread(_send_from_thread)
 
         try:
             return loop.result(timeout=timeout)
