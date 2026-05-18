@@ -28,5 +28,20 @@ services:
     volumes:
       - .:/app
 
+  value-scanner:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: btc-value-scanner
+    restart: unless-stopped
+    env_file:
+      - .env
+    working_dir: /app
+    environment:
+      PYTHONPATH: /app/src
+    command: ["python", "scripts/scan_value_forward.py", "--loop", "--market", "all"]
+    volumes:
+      - .:/app
+
 volumes:
   redis_forwardtest:

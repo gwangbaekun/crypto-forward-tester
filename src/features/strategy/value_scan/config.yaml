@@ -1,0 +1,6 @@
+buy_per_ratio: 0.70        # per < sector_median × 0.70
+sell_per_ratio: 1.20       # per > sector_median × 1.20
+fwd_eps_growth_min: 1.05   # fwd_eps >= eps × 1.05 (5% 성장)
+sell_eps_decline: 0.75     # fwd_eps < eps × 0.75 (25% 하락 시 SELL)
+max_workers: 10
+scan_hour_utc: 22          # 매일 22:00 UTC 자동 실행

@@ -63,7 +63,7 @@ eth_cvd_explosion:
   discord_alerts: true
   binance_live: true
   binance_leverage: 3
-  ctrader_live: true
+  ctrader_live: false
   ctrader_account_id: 47198415  # FTMO live
   ctrader_env: live
   ctrader_symbol_id: 323        # ETHUSD on FTMO live
@@ -102,6 +102,19 @@ eth_cvd_explosion_v2:
   tick:
     module: features.strategy.eth_cvd_explosion_v2.forward_test_runner
     fn: get_state
+
+value_scan:
+  enabled: true
+  monitoring: false
+  strategy_tag: value_scan
+  label: "Value Scan"
+  emoji: "📊"
+  telegram_alerts: false
+  discord_alerts: false
+  binance_live: false
+  tick:
+    module: features.strategy.value_scan.engine
+    fn: get_scan_status
 
 oi_cvd_surge:
   enabled: false
