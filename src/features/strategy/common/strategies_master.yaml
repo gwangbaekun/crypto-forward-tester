@@ -47,8 +47,8 @@ cvd_explosion:
     fn: get_state
 
 eth_cvd_explosion:
-  enabled: false
-  monitoring: false
+  enabled: true
+  monitoring: true
   symbol: "ETHUSDT"
   tick_interval: 10
   exit_tick_interval: 1.0
@@ -59,11 +59,11 @@ eth_cvd_explosion:
   strategy_tag: eth_cvd_explosion
   label: "ETH CVD Explosion"
   emoji: "🔷"
-  telegram_alerts: false
-  discord_alerts: false
-  binance_live: false
+  telegram_alerts: true
+  discord_alerts: true
+  binance_live: true
   binance_leverage: 3
-  ctrader_live: false
+  ctrader_live: true
   ctrader_account_id: 47198415  # FTMO live
   ctrader_env: live
   ctrader_symbol_id: 323        # ETHUSD on FTMO live
