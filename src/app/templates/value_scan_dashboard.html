@@ -110,6 +110,8 @@
     <div class="stat-card"><div class="val" id="s-closed">—</div><div class="lbl">Closed</div></div>
     <div class="stat-card"><div class="val" id="s-winrate">—</div><div class="lbl">Win Rate</div></div>
     <div class="stat-card"><div class="val" id="s-avgpnl">—</div><div class="lbl">Avg P&amp;L</div></div>
+    <div class="stat-card"><div class="val" id="s-invested">—</div><div class="lbl">Invested $</div></div>
+    <div class="stat-card"><div class="val" id="s-histpnl">—</div><div class="lbl">Realized P&amp;L $</div></div>
   </div>
 
   <!-- Scan control -->
@@ -128,6 +130,7 @@
   <div class="card">
     <div class="tab-bar">
       <button class="tab-btn active" onclick="switchTab('positions', this)">Open Positions</button>
+      <button class="tab-btn" onclick="switchTab('activity', this)" id="tab-btn-activity">Activity</button>
       <button class="tab-btn" onclick="switchTab('history', this)">History</button>
     </div>
 
@@ -137,12 +140,51 @@
         <thead>
           <tr>
             <th>Market</th><th>Symbol</th><th class="name-col">Name</th><th>Sector</th>
-            <th class="r">Entry</th><th class="r">Current</th><th class="r">P&L</th>
-            <th class="r">PER</th><th class="r">Median</th><th class="r">Fwd EPS</th>
+            <th class="r">Lots</th><th class="r">Invested</th>
+            <th class="r">Avg Entry</th><th class="r">Current</th>
+            <th class="r">P&amp;L %</th><th class="r">P&amp;L $</th>
+            <th class="r">PER</th><th class="r">Median</th>
             <th>Since</th>
           </tr>
         </thead>
-        <tbody id="pos-tbody"><tr><td colspan="11" class="empty">Loading...</td></tr></tbody>
+        <tbody id="pos-tbody"><tr><td colspan="13" class="empty">Loading...</td></tr></tbody>
+      </table>
+    </div>
+
+    <!-- Activity -->
+    <div class="tab-pane" id="tab-activity">
+      <div id="act-summary" style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:14px;padding:10px 4px;border-bottom:1px solid var(--border)">
+        <span class="scan-info" id="act-date">—</span>
+        <span class="scan-info" style="color:var(--border)">|</span>
+        <span class="scan-info">Scanned: <b id="act-scanned">—</b></span>
+        <span class="scan-info" style="color:var(--border)">|</span>
+        <span class="scan-info" style="color:#3fb950">BUY signals: <b id="act-buy">—</b></span>
+        <span class="scan-info" style="color:var(--border)">|</span>
+        <span class="scan-info" style="color:#f85149">SELL signals: <b id="act-sell">—</b></span>
+      </div>
+
+      <div style="margin-bottom:6px;font-size:0.72rem;font-weight:700;color:#3fb950;letter-spacing:0.07em;text-transform:uppercase">
+        New Entries <span id="act-entries-count" style="color:var(--text-secondary);font-weight:400"></span>
+      </div>
+      <table style="margin-bottom:18px">
+        <thead><tr>
+          <th>Market</th><th>Symbol</th><th>Name</th><th>Sector</th>
+          <th class="r">Entry Price</th><th class="r">PER</th><th class="r">Sector Med</th><th class="r">Fwd EPS</th>
+        </tr></thead>
+        <tbody id="act-entries-tbody"><tr><td colspan="8" class="empty">No data yet — run a scan first</td></tr></tbody>
+      </table>
+
+      <div style="margin-bottom:6px;font-size:0.72rem;font-weight:700;color:#f85149;letter-spacing:0.07em;text-transform:uppercase">
+        Exits <span id="act-exits-count" style="color:var(--text-secondary);font-weight:400"></span>
+      </div>
+      <table>
+        <thead><tr>
+          <th>Market</th><th>Symbol</th><th>Name</th>
+          <th class="r">Lots</th><th class="r">Exit Price</th>
+          <th class="r">P&amp;L %</th><th class="r">P&amp;L $</th>
+          <th>Reason</th><th>Held</th>
+        </tr></thead>
+        <tbody id="act-exits-tbody"><tr><td colspan="9" class="empty">No exits</td></tr></tbody>
       </table>
     </div>
 
@@ -152,11 +194,13 @@
         <thead>
           <tr>
             <th>Market</th><th>Symbol</th><th class="name-col">Name</th>
-            <th class="r">Entry</th><th class="r">Exit</th><th class="r">P&L</th>
-            <th class="r">Days</th><th>Reason</th><th>Entry Date</th><th>Exit Date</th>
+            <th class="r">Lots</th><th class="r">Invested</th>
+            <th class="r">Avg Entry</th><th class="r">Exit</th>
+            <th class="r">P&amp;L %</th><th class="r">P&amp;L $</th>
+            <th class="r">Days</th><th>Reason</th><th>Exit Date</th>
           </tr>
         </thead>
-        <tbody id="hist-tbody"><tr><td colspan="10" class="empty">Loading...</td></tr></tbody>
+        <tbody id="hist-tbody"><tr><td colspan="12" class="empty">Loading...</td></tr></tbody>
       </table>
     </div>
   </div>
@@ -166,6 +210,15 @@
 <script>
 const BASE = "/quant/value_scan";
 let pollTimer = null;
+
+async function safeFetch(url) {
+  const r = await fetch(url);
+  if (!r.ok) {
+    const txt = await r.text();
+    throw new Error(`${r.status} ${txt.slice(0, 120)}`);
+  }
+  return r.json();
+}
 
 function switchTab(name, btn) {
   document.querySelectorAll(".tab-pane").forEach(p => p.classList.remove("active"));
@@ -200,7 +253,7 @@ function marketPill(m) {
 }
 
 async function loadStats() {
-  const d = await fetch(`${BASE}/stats`).then(r => r.json());
+  const d = await safeFetch(`${BASE}/stats`);
   const dot = document.getElementById("dot");
 
   document.getElementById("s-open").textContent    = d.open_count  ?? "—";
@@ -214,6 +267,19 @@ async function loadStats() {
   ap.textContent = d.avg_pnl_pct != null ? `${d.avg_pnl_pct > 0 ? "+" : ""}${d.avg_pnl_pct}%` : "—";
   ap.className = "val" + (d.avg_pnl_pct > 0 ? " green" : d.avg_pnl_pct != null ? " red" : "");
 
+  const si = document.getElementById("s-invested");
+  si.textContent = d.total_invested_usd != null ? `$${d.total_invested_usd.toFixed(2)}` : "—";
+
+  const hp = document.getElementById("s-histpnl");
+  if (d.hist_pnl_usd != null) {
+    const sign = d.hist_pnl_usd >= 0 ? "+" : "";
+    hp.textContent = `${sign}$${d.hist_pnl_usd.toFixed(4)}`;
+    hp.className = "val" + (d.hist_pnl_usd >= 0 ? " green" : " red");
+  } else {
+    hp.textContent = "—";
+    hp.className = "val";
+  }
+
   if (d.last_scan_at) {
     const dt = new Date(d.last_scan_at);
     document.getElementById("scan-info").textContent = `Last scan: ${dt.toLocaleString()}`;
@@ -221,11 +287,18 @@ async function loadStats() {
   dot.style.background = d.scan_running ? "#d29922" : "#3fb950";
 }
 
+function pnlUsdHtml(v) {
+  if (v == null) return '<span class="dash">—</span>';
+  const cls  = v >= 0 ? "pnl-pos" : "pnl-neg";
+  const sign = v >= 0 ? "+" : "";
+  return `<span class="${cls}">${sign}$${Math.abs(v).toFixed(4)}</span>`;
+}
+
 async function loadPositions() {
-  const d  = await fetch(`${BASE}/positions`).then(r => r.json());
+  const d  = await safeFetch(`${BASE}/positions`);
   const tb = document.getElementById("pos-tbody");
   if (!d.positions.length) {
-    tb.innerHTML = `<tr><td colspan="11" class="empty">No open positions</td></tr>`;
+    tb.innerHTML = `<tr><td colspan="13" class="empty">No open positions</td></tr>`;
     return;
   }
   tb.innerHTML = d.positions.map(p => {
@@ -235,42 +308,100 @@ async function loadPositions() {
       <td><b>${p.symbol}</b></td>
       <td class="name muted">${p.name}</td>
       <td class="muted">${p.sector || "—"}</td>
-      <td class="r">${fmtPrice(p.entry_price, p.market)}</td>
+      <td class="r muted">${p.lot_count ?? "—"}</td>
+      <td class="r muted">$${(p.invested_usd ?? 0).toFixed(2)}</td>
+      <td class="r">${fmtPrice(p.avg_entry_price, p.market)}</td>
       <td class="r">${fmtPrice(p.current_price, p.market)}</td>
       <td class="r">${pnlHtml(p.pnl_pct)}</td>
+      <td class="r">${pnlUsdHtml(p.pnl_usd)}</td>
       <td class="r ${perCls}">${fmt(p.per)}</td>
       <td class="r muted">${fmt(p.sector_median)}</td>
-      <td class="r">${fmt(p.fwd_eps, 2)}</td>
-      <td class="muted">${p.entry_date || "—"}</td>
+      <td class="muted">${p.first_entry_date || "—"}</td>
     </tr>`;
   }).join("");
 }
 
 async function loadHistory() {
-  const d  = await fetch(`${BASE}/history`).then(r => r.json());
+  const d  = await safeFetch(`${BASE}/history`);
   const tb = document.getElementById("hist-tbody");
   if (!d.history.length) {
-    tb.innerHTML = `<tr><td colspan="10" class="empty">No closed trades yet</td></tr>`;
+    tb.innerHTML = `<tr><td colspan="12" class="empty">No closed trades yet</td></tr>`;
     return;
   }
   tb.innerHTML = d.history.map(h => {
-    const reason = h.exit_reason || "—";
-    const reasonCls = reason === "SELL" ? "badge badge-sell"
-                    : reason === "HOLD" ? "badge badge-hold"
-                    : "badge badge-hold";
+    const reason    = h.exit_reason || "—";
+    const reasonCls = reason === "SELL" ? "badge badge-sell" : "badge badge-hold";
+    const lots      = h.lots ?? [];
+    const validPrices = lots.filter(l => l.price).map(l => l.price);
+    const avgEntry  = validPrices.length
+      ? validPrices.reduce((a, b) => a + b, 0) / validPrices.length
+      : null;
     return `<tr>
       <td>${marketPill(h.market)}</td>
       <td><b>${h.symbol}</b></td>
       <td class="name muted">${h.name}</td>
-      <td class="r">${fmtPrice(h.entry_price, h.market)}</td>
+      <td class="r muted">${lots.length || "—"}</td>
+      <td class="r muted">$${(h.invested_usd ?? 0).toFixed(2)}</td>
+      <td class="r">${fmtPrice(avgEntry, h.market)}</td>
       <td class="r">${fmtPrice(h.exit_price, h.market)}</td>
       <td class="r">${pnlHtml(h.pnl_pct)}</td>
+      <td class="r">${pnlUsdHtml(h.pnl_usd)}</td>
       <td class="r muted">${h.hold_days ?? "—"}</td>
       <td><span class="${reasonCls}">${reason}</span></td>
-      <td class="muted">${h.entry_date || "—"}</td>
-      <td class="muted">${h.exit_date  || "—"}</td>
+      <td class="muted">${h.exit_date || "—"}</td>
     </tr>`;
   }).join("");
+}
+
+async function loadActivity() {
+  let d;
+  try { d = await safeFetch(`${BASE}/activity`); } catch { return; }
+  if (!d || !d.date) return;
+
+  document.getElementById("act-date").textContent     = `Scan date: ${d.date}`;
+  document.getElementById("act-scanned").textContent  = d.scanned ?? "—";
+  document.getElementById("act-buy").textContent      = d.buy ?? "—";
+  document.getElementById("act-sell").textContent     = d.sell ?? "—";
+
+  const entries = d.new_entries || [];
+  const exits   = d.new_exits   || [];
+  document.getElementById("act-entries-count").textContent = entries.length ? `(${entries.length})` : "";
+  document.getElementById("act-exits-count").textContent   = exits.length   ? `(${exits.length})`   : "";
+
+  const etb = document.getElementById("act-entries-tbody");
+  etb.innerHTML = entries.length ? entries.map(e => {
+    const lots = e.lots ?? [];
+    const prices = lots.filter(l => l.price).map(l => l.price);
+    const avgP = prices.length ? prices.reduce((a,b)=>a+b,0)/prices.length : null;
+    return `<tr>
+      <td>${marketPill(e.market)}</td>
+      <td><b>${e.symbol}</b></td>
+      <td class="name muted">${e.name}</td>
+      <td class="muted">${e.sector || "—"}</td>
+      <td class="r">${fmtPrice(avgP, e.market)}</td>
+      <td class="r per-low">${fmt(e.per)}</td>
+      <td class="r muted">${fmt(e.sector_median)}</td>
+      <td class="r">${fmt(e.fwd_eps, 2)}</td>
+    </tr>`;
+  }).join("") : `<tr><td colspan="8" class="empty">No new entries</td></tr>`;
+
+  const xtb = document.getElementById("act-exits-tbody");
+  xtb.innerHTML = exits.length ? exits.map(x => {
+    const lots = x.lots ?? [];
+    const reason = x.exit_reason || "—";
+    const reasonCls = reason === "SELL" ? "badge badge-sell" : "badge badge-hold";
+    return `<tr>
+      <td>${marketPill(x.market)}</td>
+      <td><b>${x.symbol}</b></td>
+      <td class="name muted">${x.name}</td>
+      <td class="r muted">${lots.length || "—"}</td>
+      <td class="r">${fmtPrice(x.exit_price, x.market)}</td>
+      <td class="r">${pnlHtml(x.pnl_pct)}</td>
+      <td class="r">${pnlUsdHtml(x.pnl_usd)}</td>
+      <td><span class="${reasonCls}">${reason}</span></td>
+      <td class="muted">${x.hold_days ?? "—"}d</td>
+    </tr>`;
+  }).join("") : `<tr><td colspan="9" class="empty">No exits</td></tr>`;
 }
 
 async function triggerScan(market) {
@@ -299,20 +430,20 @@ async function triggerScan(market) {
 function pollScanStatus() {
   if (pollTimer) clearInterval(pollTimer);
   pollTimer = setInterval(async () => {
-    const d = await fetch(`${BASE}/scan/status`).then(r => r.json());
+    const d = await safeFetch(`${BASE}/scan/status`);
     if (!d.running) {
       clearInterval(pollTimer);
       document.getElementById("scan-spinner").style.display = "none";
       document.getElementById("dot").style.background = "#3fb950";
-      await Promise.all([loadStats(), loadPositions(), loadHistory()]);
+      await Promise.all([loadStats(), loadPositions(), loadHistory(), loadActivity()]);
     }
   }, 3000);
 }
 
 async function init() {
-  await Promise.all([loadStats(), loadPositions(), loadHistory()]);
+  await Promise.all([loadStats(), loadPositions(), loadHistory(), loadActivity()]);
   // 스캔 중이면 자동으로 polling 시작
-  const s = await fetch(`${BASE}/scan/status`).then(r => r.json());
+  const s = await safeFetch(`${BASE}/scan/status`);
   if (s.running) {
     document.getElementById("scan-spinner").style.display = "inline";
     pollScanStatus();

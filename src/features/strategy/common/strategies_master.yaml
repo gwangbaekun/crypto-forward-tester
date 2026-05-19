@@ -19,7 +19,7 @@ atr_breakout:
   strategy_tag: atr_breakout
   label: "ATR Breakout"
   emoji: "💥"
-  telegram_alerts: true
+  telegram_alerts: false
   discord_alerts: false
   binance_live: false
   tick:
@@ -47,8 +47,8 @@ cvd_explosion:
     fn: get_state
 
 eth_cvd_explosion:
-  enabled: true
-  monitoring: true
+  enabled: false
+  monitoring: false
   symbol: "ETHUSDT"
   tick_interval: 10
   exit_tick_interval: 1.0
@@ -59,9 +59,9 @@ eth_cvd_explosion:
   strategy_tag: eth_cvd_explosion
   label: "ETH CVD Explosion"
   emoji: "🔷"
-  telegram_alerts: true
-  discord_alerts: true
-  binance_live: true
+  telegram_alerts: false
+  discord_alerts: false
+  binance_live: false
   binance_leverage: 3
   ctrader_live: false
   ctrader_account_id: 47198415  # FTMO live
@@ -72,8 +72,8 @@ eth_cvd_explosion:
     fn: get_state
 
 eth_cvd_explosion_v2:
-  enabled: true
-  monitoring: true
+  enabled: false
+  monitoring: false
   symbol: "ETHUSDT"
   tick_interval: 10
   exit_tick_interval: 1.0
@@ -85,7 +85,7 @@ eth_cvd_explosion_v2:
   label: "ETH CVD Explosion V2"
   emoji: "🔷"
   telegram_alerts: false
-  discord_alerts: true
+  discord_alerts: false
   binance_live: false
   binance_leverage: 3
   ctrader_live: false
@@ -104,7 +104,7 @@ eth_cvd_explosion_v2:
     fn: get_state
 
 value_scan:
-  enabled: true
+  enabled: false
   monitoring: false
   strategy_tag: value_scan
   label: "Value Scan"

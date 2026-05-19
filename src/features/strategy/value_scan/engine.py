@@ -18,10 +18,13 @@ from pathlib import Path
 from statistics import median
 from typing import Any, Optional
 
-DATA_DIR       = Path(__file__).resolve().parents[5] / "data" / "value_forward"
-POSITIONS_FILE = DATA_DIR / "positions.json"
-HISTORY_FILE   = DATA_DIR / "history.json"
-SCANS_DIR      = DATA_DIR / "scans"
+DATA_DIR            = Path(__file__).resolve().parents[5] / "data" / "value_forward"
+POSITIONS_FILE      = DATA_DIR / "positions.json"
+HISTORY_FILE        = DATA_DIR / "history.json"
+SCANS_DIR           = DATA_DIR / "scans"
+LAST_ACTIVITY_FILE  = DATA_DIR / "last_activity.json"
+
+UNIT_USD = 1.0  # $1 per BUY signal
 
 _KRX_ETF_CODES = {"069500", "122630", "114800", "091160"}
 
@@ -238,12 +241,11 @@ def _rate(r: dict, sector_med: dict) -> str:
 
 def _fetch_kospi_price(symbol: str) -> float:
     try:
-        from pykrx import stock
-        for delta in range(5):
-            d = (datetime.now() - timedelta(days=delta)).strftime("%Y%m%d")
-            df = stock.get_market_ohlcv(d, ticker=symbol)
-            if not df.empty:
-                return float(df["종가"].iloc[-1])
+        import yfinance as yf
+        fi = yf.Ticker(f"{symbol}.KS").fast_info
+        price = fi.get("lastPrice") or fi.get("regularMarketPreviousClose")
+        if price:
+            return float(price)
     except Exception:
         pass
     return math.nan
@@ -334,60 +336,86 @@ def _clean_row(r: dict) -> dict:
 
 # ── 일간 업데이트 ─────────────────────────────────────────────────────────────
 
+def _calc_pnl(lots: list[dict], exit_price: float) -> tuple[Optional[float], Optional[float]]:
+    """lots 리스트와 exit_price로 (avg_pnl_pct, pnl_usd) 계산."""
+    if math.isnan(exit_price) or not lots:
+        return None, None
+    valid = [l for l in lots if l.get("price") and l["price"] > 0]
+    if not valid:
+        return None, None
+    returns = [(exit_price - l["price"]) / l["price"] for l in valid]
+    avg_pnl_pct = sum(returns) / len(returns) * 100
+    invested = len(lots) * UNIT_USD
+    pnl_usd = invested * avg_pnl_pct / 100
+    return round(avg_pnl_pct, 2), round(pnl_usd, 4)
+
+
 def update_positions(all_rows: list[dict], today: str) -> dict:
     positions = load_positions()
     history   = load_history()
-    buy_keys  = {_pos_key(r["market"], r["symbol"]) for r in all_rows if r["rating"] == "BUY"}
+
+    rating_map = {_pos_key(r["market"], r["symbol"]): r for r in all_rows}
+    sell_keys  = {
+        _pos_key(r["market"], r["symbol"])
+        for r in all_rows if r["rating"] == "SELL"
+    }
 
     new_entries: list[dict] = []
     new_exits:   list[dict] = []
 
+    # ── SELL 또는 상장폐지 → 청산 ────────────────────────────────────────────
     for key, pos in list(positions.items()):
-        if key not in buy_keys:
-            exit_price  = _fetch_price(pos["market"], pos["symbol"])
-            entry_price = pos.get("entry_price") or 0
-            pnl_pct = (
-                (exit_price - entry_price) / entry_price * 100
-                if not math.isnan(exit_price) and entry_price > 0 else None
-            )
-            cur = next((r for r in all_rows if r["symbol"] == pos["symbol"]), None)
+        cur = rating_map.get(key)
+        if (cur is None) or (key in sell_keys):
+            exit_price = _fetch_price(pos["market"], pos["symbol"])
+            lots       = pos.get("lots", [])
+            avg_pnl_pct, pnl_usd = _calc_pnl(lots, exit_price)
             record = {
                 **pos,
                 "exit_date":   today,
                 "exit_price":  None if math.isnan(exit_price) else exit_price,
                 "exit_reason": cur["rating"] if cur else "DELISTED",
-                "pnl_pct":     round(pnl_pct, 2) if pnl_pct is not None else None,
+                "pnl_pct":     avg_pnl_pct,
+                "pnl_usd":     pnl_usd,
                 "hold_days":   (
                     datetime.strptime(today, "%Y-%m-%d")
-                    - datetime.strptime(pos["entry_date"], "%Y-%m-%d")
+                    - datetime.strptime(pos["first_entry_date"], "%Y-%m-%d")
                 ).days,
             }
             history.append(record)
             del positions[key]
             new_exits.append(record)
 
+    # ── BUY → $1 lot 추가 (신규 or 기존 포지션) ─────────────────────────────
     for r in all_rows:
         if r["rating"] != "BUY":
             continue
-        key = _pos_key(r["market"], r["symbol"])
-        if key in positions:
-            continue
+        key   = _pos_key(r["market"], r["symbol"])
         price = _fetch_price(r["market"], r["symbol"])
-        entry = _clean_row({
-            "symbol":        r["symbol"],
-            "name":          r["name"],
-            "market":        r["market"],
-            "sector":        r["sector"],
-            "entry_date":    today,
-            "entry_price":   price,
-            "per":           r["per"],
-            "sector_median": r.get("sector_median", math.nan),
-            "eps":           r["eps"],
-            "fwd_eps":       r["forward_eps"],
-            "pbr":           r["pbr"],
-        })
-        positions[key] = entry
-        new_entries.append(entry)
+        lot   = {"date": today, "price": None if math.isnan(price) else price}
+
+        if key in positions:
+            positions[key]["lots"].append(lot)
+            positions[key]["invested_usd"] = round(
+                positions[key].get("invested_usd", 0) + UNIT_USD, 4
+            )
+        else:
+            entry = _clean_row({
+                "symbol":           r["symbol"],
+                "name":             r["name"],
+                "market":           r["market"],
+                "sector":           r["sector"],
+                "first_entry_date": today,
+                "lots":             [lot],
+                "invested_usd":     UNIT_USD,
+                "per":              r["per"],
+                "sector_median":    r.get("sector_median", math.nan),
+                "eps":              r["eps"],
+                "fwd_eps":          r["forward_eps"],
+                "pbr":              r["pbr"],
+            })
+            positions[key] = entry
+            new_entries.append(entry)
 
     _save_positions(positions)
     _save_history(history)
@@ -427,6 +455,19 @@ def run_daily(markets: list[str] = None, max_workers: int = 10) -> dict:
 
         buy_n  = sum(1 for r in all_rows if r["rating"] == "BUY")
         sell_n = sum(1 for r in all_rows if r["rating"] == "SELL")
+
+        activity = {
+            "date":        today,
+            "saved_at":    _last_scan_at,
+            "scanned":     len(all_rows),
+            "buy":         buy_n,
+            "sell":        sell_n,
+            "new_entries": result["new_entries"],
+            "new_exits":   result["new_exits"],
+        }
+        DATA_DIR.mkdir(parents=True, exist_ok=True)
+        LAST_ACTIVITY_FILE.write_text(json.dumps(activity, ensure_ascii=False, indent=2))
+
         return {
             "date":        today,
             "scanned":     len(all_rows),
@@ -440,23 +481,45 @@ def run_daily(markets: list[str] = None, max_workers: int = 10) -> dict:
         _scan_running = False
 
 
-def get_scan_status() -> dict:
+def get_last_activity() -> dict:
+    if LAST_ACTIVITY_FILE.exists():
+        return json.loads(LAST_ACTIVITY_FILE.read_text())
+    return {}
+
+
+async def get_scan_status(**kwargs) -> dict:
     return {"running": _scan_running, "last_scan_at": _last_scan_at}
 
 
-def get_positions_with_pnl() -> list[dict]:
+def _enrich_position(pos: dict) -> dict:
+    """단일 포지션에 현재가·P&L 계산 (스레드 안전)."""
+    lots = pos.get("lots", [])
+    cur  = _fetch_price(pos["market"], pos["symbol"])
+    avg_pnl_pct, pnl_usd = _calc_pnl(lots, cur)
+
+    valid_prices = [l["price"] for l in lots if l.get("price") and l["price"] > 0]
+    avg_entry    = sum(valid_prices) / len(valid_prices) if valid_prices else None
+
+    return {
+        **pos,
+        "lot_count":       len(lots),
+        "avg_entry_price": avg_entry,
+        "current_price":   None if math.isnan(cur) else cur,
+        "pnl_pct":         avg_pnl_pct,
+        "pnl_usd":         pnl_usd,
+    }
+
+
+def get_positions_with_pnl(max_workers: int = 20) -> list[dict]:
     positions = load_positions()
-    result = []
-    for pos in positions.values():
-        entry = pos.get("entry_price") or 0
-        cur   = _fetch_price(pos["market"], pos["symbol"])
-        pnl   = (cur - entry) / entry * 100 if not math.isnan(cur) and entry > 0 else None
-        result.append({
-            **pos,
-            "current_price": None if math.isnan(cur) else cur,
-            "pnl_pct":       round(pnl, 2) if pnl is not None else None,
-        })
-    result.sort(key=lambda x: (x.get("pnl_pct") or 0), reverse=True)
+    if not positions:
+        return []
+
+    with ThreadPoolExecutor(max_workers=max_workers) as ex:
+        futures = [ex.submit(_enrich_position, pos) for pos in positions.values()]
+        result  = [f.result() for f in futures]
+
+    result.sort(key=lambda x: (x.get("pnl_usd") or 0), reverse=True)
     return result
 
 
@@ -466,11 +529,17 @@ def get_summary_stats() -> dict:
     closed    = [h for h in history if h.get("pnl_pct") is not None]
     wins      = [h for h in closed if (h["pnl_pct"] or 0) > 0]
     avg_pnl   = sum(h["pnl_pct"] for h in closed) / len(closed) if closed else None
+
+    total_invested = sum(p.get("invested_usd", 0) for p in positions.values())
+    hist_pnl_usd   = sum(h.get("pnl_usd") or 0 for h in history)
+
     return {
-        "open_count":    len(positions),
-        "closed_count":  len(closed),
-        "win_rate":      round(len(wins) / len(closed) * 100, 1) if closed else None,
-        "avg_pnl_pct":   round(avg_pnl, 2) if avg_pnl is not None else None,
-        "last_scan_at":  _last_scan_at,
-        "scan_running":  _scan_running,
+        "open_count":        len(positions),
+        "closed_count":      len(closed),
+        "win_rate":          round(len(wins) / len(closed) * 100, 1) if closed else None,
+        "avg_pnl_pct":       round(avg_pnl, 2) if avg_pnl is not None else None,
+        "total_invested_usd": round(total_invested, 2),
+        "hist_pnl_usd":      round(hist_pnl_usd, 4),
+        "last_scan_at":      _last_scan_at,
+        "scan_running":      _scan_running,
     }

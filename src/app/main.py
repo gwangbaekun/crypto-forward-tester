@@ -2,7 +2,9 @@
 import asyncio
 import logging
 from contextlib import asynccontextmanager
+from datetime import datetime, timezone
 from pathlib import Path
+from zoneinfo import ZoneInfo
 
 import uvicorn
 from fastapi import FastAPI
@@ -85,6 +87,51 @@ async def startup_ctrader() -> None:
         print(f"[cTrader] startup error: {exc}")
 
 
+_KST = ZoneInfo("Asia/Seoul")
+_ET  = ZoneInfo("America/New_York")
+
+# KOSPI closes 15:30 KST → scan at 15:35 KST (weekdays only)
+# NASDAQ closes 16:00 ET  → scan at 16:05 ET  (weekdays only)
+_SCHEDULES = [
+    {"market": "kospi",  "tz": _KST, "hour": 15, "minute": 35},
+    {"market": "nasdaq", "tz": _ET,  "hour": 16, "minute":  5},
+]
+
+
+def _seconds_until(hour: int, minute: int, tz: ZoneInfo) -> float:
+    now = datetime.now(tz)
+    target = now.replace(hour=hour, minute=minute, second=0, microsecond=0)
+    if target <= now:
+        from datetime import timedelta
+        target += timedelta(days=1)
+    return (target - now).total_seconds()
+
+
+async def _value_scan_scheduler() -> None:
+    from features.strategy.value_scan.engine import run_daily, get_scan_status
+    while True:
+        # sleep until the nearest upcoming schedule
+        waits = [
+            (_seconds_until(s["hour"], s["minute"], s["tz"]), s)
+            for s in _SCHEDULES
+        ]
+        waits.sort(key=lambda x: x[0])
+        secs, sched = waits[0]
+        print(f"[ValueScan] next auto-scan: {sched['market'].upper()} in {secs/3600:.1f}h")
+        await asyncio.sleep(secs)
+
+        now_tz = datetime.now(sched["tz"])
+        if now_tz.weekday() >= 5:  # skip weekends
+            continue
+        status = await get_scan_status()
+        if status["running"]:
+            continue
+        print(f"[ValueScan] auto-scan starting: {sched['market'].upper()}")
+        loop = asyncio.get_event_loop()
+        await loop.run_in_executor(None, lambda: run_daily(markets=[sched["market"]]))
+        print(f"[ValueScan] auto-scan done: {sched['market'].upper()}")
+
+
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
     init_db()
@@ -96,7 +143,13 @@ async def lifespan(_app: FastAPI):
     except Exception as exc:
         print(f"[StrategyLoop] startup skipped: {exc}")
         strategy_task = None
+    scan_task = asyncio.create_task(_value_scan_scheduler())
     yield
+    scan_task.cancel()
+    try:
+        await scan_task
+    except asyncio.CancelledError:
+        pass
     if strategy_task:
         strategy_task.cancel()
         try:
