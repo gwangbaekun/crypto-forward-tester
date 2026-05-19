@@ -69,6 +69,29 @@ src/features/strategy/
 - `STRATEGY_TAG` / 폴더명 / `strategies_master` 키는 **동일**하게 유지.
 - 헷갈리는 약어 대신 `entry_timeframe`, `sweep_bars` 같이 **역할이 드러나는 이름** 권장 (기존 tradingview 일부 변수는 맥락 없이 짧음).
 
+## Value Scan 저장소 (주식 forward test)
+
+| 용도 | 저장 |
+|------|------|
+| **오픈 포지션·청산** | PostgreSQL (`DATABASE_URL`) — `value_scan_positions` ↔ `value_scan_lots`, `value_scan_closed_trades` ↔ `value_scan_closed_lots` |
+| 스캔 스냅샷 | `data/value_forward/scans/{date}_{market}.json` (파일 유지) |
+| 마지막 activity | `data/value_forward/last_activity.json` (파일 유지) |
+
+레거시 JSON (이전): `data/value_forward/positions.json`, `history.json`  
+→ DB 비어 있고 json만 있으면 **앱 기동 시 1회 자동 이전** 후 `.json.bak` 으로 rename.  
+수동: `POST /quant/value_scan/migrate/json-to-db` · 상태: `GET /quant/value_scan/storage`
+
+**일간 스캔 스케줄** (`value_scan_market_meta` 테이블):
+
+| 시장 | 스캔 가능 시각 (현지) | 거래일 기준 |
+|------|----------------------|-------------|
+| KOSPI | 평일 **15:35 KST** 이후 | `last_trading_date` (KST 날짜) |
+| NASDAQ | 평일 **16:05 ET** 이후 | ET 날짜 |
+
+- 스캔 완료 시 `record_market_scan()` → DB에 `last_scan_at` (UTC) + `last_trading_date` 저장
+- API: `GET /quant/value_scan/scan/status` · `GET /quant/value_scan/scan/schedule`
+- **catch-up**: 앱 기동 후 + **10분마다** `should_run_catchup` → 오늘 아직 안 돌린 시장만 `run_daily([market])` (하루 1회)
+
 ## 참고 원본
 
 - `tradingview_mcp/CLAUDE.md` — 프로젝트 전체 메모리

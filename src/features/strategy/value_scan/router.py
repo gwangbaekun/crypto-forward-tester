@@ -39,12 +39,28 @@ async def history(limit: int = Query(100)):
 
 
 @router.get("/stats", response_class=JSONResponse)
-async def stats():
+async def stats(fast: bool = Query(False, description="DB only, no live quotes")):
     try:
-        from features.strategy.value_scan.engine import get_summary_stats
-        return JSONResponse(get_summary_stats())
+        from features.strategy.value_scan.engine import get_book_stats, get_summary_stats
+
+        payload = get_book_stats() if fast else get_summary_stats()
+        return JSONResponse(payload)
     except Exception as e:
         logger.exception("stats error")
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+
+@router.get("/famous", response_class=JSONResponse)
+async def famous_watchlist():
+    """static/famous_*.txt 워치리스트 + 오픈 포지션 매칭."""
+    try:
+        from features.strategy.value_scan.engine import get_positions_with_pnl
+        from features.strategy.value_scan.famous import build_famous_status
+
+        positions = get_positions_with_pnl()
+        return JSONResponse(build_famous_status(positions))
+    except Exception as e:
+        logger.exception("famous error")
         return JSONResponse({"error": str(e)}, status_code=500)
 
 
@@ -58,10 +74,80 @@ async def activity():
         return JSONResponse({"error": str(e)}, status_code=500)
 
 
+@router.get("/storage", response_class=JSONResponse)
+async def storage_info():
+    """포지션·청산 저장소 (DB + legacy json 경로)."""
+    from db.config import get_engine_url
+    from features.strategy.value_scan.paths import (
+        DATA_DIR,
+        HISTORY_FILE,
+        LAST_ACTIVITY_FILE,
+        POSITIONS_FILE,
+        SCANS_DIR,
+    )
+    from features.strategy.value_scan.repository import db_counts
+
+    return JSONResponse({
+        "primary": "postgresql" if get_engine_url().startswith("postgres") else "sqlite",
+        "database_url_set": bool(get_engine_url().startswith("postgres")),
+        "tables": {
+            "open": "value_scan_positions + value_scan_lots",
+            "closed": "value_scan_closed_trades + value_scan_closed_lots",
+        },
+        "counts": db_counts(),
+        "json_legacy": {
+            "dir": str(DATA_DIR),
+            "positions": str(POSITIONS_FILE),
+            "positions_exists": POSITIONS_FILE.exists(),
+            "history": str(HISTORY_FILE),
+            "history_exists": HISTORY_FILE.exists(),
+            "scans_dir": str(SCANS_DIR),
+            "last_activity": str(LAST_ACTIVITY_FILE),
+        },
+    })
+
+
+@router.post("/positions/restore-mistaken-exits", response_class=JSONResponse)
+async def restore_mistaken_exits(
+    market: str = Query("nasdaq", description="kospi | nasdaq"),
+    exit_reason: str = Query("DELISTED"),
+    exit_date: str | None = Query(None, description="YYYY-MM-DD, default all dates"),
+):
+    """타 시장 스캔 등으로 잘못 DELISTED 된 포지션을 오픈으로 되돌림."""
+    try:
+        from features.strategy.value_scan.repository import restore_mistaken_exits as _restore
+
+        return JSONResponse(_restore(market, exit_reason=exit_reason, exit_date=exit_date))
+    except Exception as e:
+        logger.exception("restore mistaken exits error")
+        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+
+
+@router.post("/migrate/json-to-db", response_class=JSONResponse)
+async def migrate_json_to_db(archive: bool = Query(True)):
+    """data/value_forward/positions.json·history.json → PostgreSQL/SQLite."""
+    try:
+        from features.strategy.value_scan.repository import migrate_json_files_to_db
+
+        return JSONResponse(migrate_json_files_to_db(archive=archive))
+    except Exception as e:
+        logger.exception("json-to-db migrate error")
+        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+
+
 @router.get("/scan/status", response_class=JSONResponse)
 async def scan_status():
     from features.strategy.value_scan.engine import get_scan_status
     return JSONResponse(await get_scan_status())
+
+
+@router.get("/scan/schedule", response_class=JSONResponse)
+async def scan_schedule():
+    """시장별 마지막 스캔 시각·오늘 스캔 여부 (DB)."""
+    from features.strategy.value_scan.engine import is_scan_running
+    from features.strategy.value_scan.scan_schedule import build_schedule_status
+
+    return JSONResponse(build_schedule_status(running=is_scan_running()))
 
 
 @router.post("/positions/migrate", response_class=JSONResponse)
@@ -112,6 +198,18 @@ async def fix_null_prices():
     except Exception as e:
         logger.exception("fix_prices error")
         return JSONResponse({"error": str(e)}, status_code=500)
+
+
+@router.post("/reset", response_class=JSONResponse)
+async def reset_all(wipe_files: bool = Query(True)):
+    """포지션·청산·스캔 메타 전부 삭제 후 처음부터."""
+    try:
+        from features.strategy.value_scan.repository import reset_value_scan_data
+
+        return JSONResponse(reset_value_scan_data(wipe_files=wipe_files))
+    except Exception as e:
+        logger.exception("reset error")
+        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
 
 
 @router.post("/scan", response_class=JSONResponse)

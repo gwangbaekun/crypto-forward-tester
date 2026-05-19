@@ -6,57 +6,204 @@
 <title>Value Scan — Forward Test</title>
 <link rel="stylesheet" href="/static/css/dashboard_common.css">
 <style>
-  .container { max-width: 1100px; }
+  body.vs-app {
+    padding: 10px 12px 24px;
+  }
 
-  .summary-row {
-    display: flex; gap: 10px; flex-wrap: wrap;
+  .app-shell {
+    max-width: 1400px;
+    margin: 0 auto;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
   }
-  .stat-card {
-    flex: 1; min-width: 110px;
-    background: var(--card); border: 1px solid var(--border);
-    border-radius: 8px; padding: 12px 14px; text-align: center;
-  }
-  .stat-card .val {
-    font-size: 1.5rem; font-weight: 700; color: var(--text-primary); line-height: 1.1;
-  }
-  .stat-card .lbl {
-    font-size: 0.7rem; color: var(--text-secondary); text-transform: uppercase;
-    letter-spacing: 0.08em; margin-top: 3px;
-  }
-  .val.green  { color: #3fb950; }
-  .val.red    { color: #f85149; }
-  .val.yellow { color: #d29922; }
 
-  .tab-bar { display: flex; gap: 4px; border-bottom: 1px solid var(--border); margin-bottom: 14px; }
+  .top-row {
+    flex-shrink: 0;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 8px 12px;
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+  }
+  .header-left { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+
+  .market-filter {
+    flex-shrink: 0;
+    display: flex;
+    gap: 6px;
+    padding: 4px;
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+  }
+  .mfilter-btn {
+    flex: 1;
+    min-width: 0;
+    padding: 6px 14px;
+    font-size: 0.75rem;
+    font-weight: 600;
+    border: none;
+    border-radius: 6px;
+    background: transparent;
+    color: var(--text-secondary);
+    cursor: pointer;
+    transition: background .12s, color .12s;
+  }
+  .mfilter-btn.active { background: rgba(88,166,255,0.15); color: var(--blue); }
+  .mfilter-btn[data-market="kospi"].active { background: rgba(74,144,217,0.18); color: #4a90d9; }
+  .mfilter-btn[data-market="nasdaq"].active { background: rgba(163,113,247,0.18); color: #a371f7; }
+  .mfilter-btn .sub {
+    display: block;
+    font-size: 0.62rem;
+    font-weight: 500;
+    opacity: 0.85;
+    margin-top: 1px;
+  }
+
+  .portfolio-grid {
+    flex-shrink: 0;
+    display: grid;
+    grid-template-columns: repeat(6, minmax(0, 1fr));
+    gap: 8px;
+  }
+  @media (max-width: 1100px) {
+    .portfolio-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  }
+  @media (max-width: 640px) {
+    .portfolio-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  }
+
+  .pf-card {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 10px 12px;
+    min-width: 0;
+  }
+  .pf-card .pf-val {
+    font-size: 1.15rem;
+    font-weight: 700;
+    font-variant-numeric: tabular-nums;
+    line-height: 1.2;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .pf-card .pf-lbl {
+    font-size: 0.65rem;
+    color: var(--text-secondary);
+    text-transform: uppercase;
+    letter-spacing: 0.07em;
+    margin-top: 2px;
+  }
+  .pf-card .pf-sub {
+    font-size: 0.68rem;
+    color: var(--text-secondary);
+    margin-top: 2px;
+  }
+  .pf-val.green  { color: #3fb950; }
+  .pf-val.red    { color: #f85149; }
+  .pf-val.yellow { color: #d29922; }
+  .pf-card.loading .pf-val { opacity: 0.35; }
+  .pf-card.loading .pf-sub::after {
+    content: " · loading…";
+    font-size: 0.62rem;
+    color: var(--text-secondary);
+  }
+  .pf-card.err .pf-val { color: #f85149; font-size: 0.85rem; }
+
+  .ctrl-row {
+    flex-shrink: 0;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex-wrap: wrap;
+    padding: 8px 12px;
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+  }
+  .ctrl-row .scan-info { font-size: 0.72rem; color: var(--text-secondary); margin-left: auto; }
+
+  .main-panel {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+  }
+
+  .tab-bar {
+    flex-shrink: 0;
+    display: flex;
+    gap: 4px;
+    padding: 0 10px;
+    border-bottom: 1px solid var(--border);
+  }
   .tab-btn {
-    padding: 6px 14px; font-size: 0.78rem; font-weight: 600; border: none;
-    background: none; color: var(--text-secondary); cursor: pointer; border-bottom: 2px solid transparent;
-    transition: color .15s;
+    padding: 8px 14px;
+    font-size: 0.78rem;
+    font-weight: 600;
+    border: none;
+    background: none;
+    color: var(--text-secondary);
+    cursor: pointer;
+    border-bottom: 2px solid transparent;
+    margin-bottom: -1px;
   }
   .tab-btn.active { color: var(--blue); border-bottom-color: var(--blue); }
 
   .tab-pane { display: none; }
   .tab-pane.active { display: block; }
 
-  table { width: 100%; border-collapse: collapse; font-size: 0.78rem; }
+  .table-scroll {
+    overflow-x: auto;
+    padding: 0 4px 8px;
+  }
+
+  table { width: 100%; border-collapse: collapse; font-size: 0.76rem; }
   thead th {
-    text-align: left; padding: 5px 8px; font-size: 0.67rem; font-weight: 600;
-    letter-spacing: 0.09em; text-transform: uppercase; color: var(--text-secondary);
-    border-bottom: 1px solid var(--border); white-space: nowrap;
+    position: sticky;
+    top: 0;
+    z-index: 2;
+    background: var(--card);
+    text-align: left;
+    padding: 6px 8px;
+    font-size: 0.65rem;
+    font-weight: 600;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--text-secondary);
+    border-bottom: 1px solid var(--border);
+    white-space: nowrap;
   }
   th.r, td.r { text-align: right; }
-  tbody tr { border-bottom: 1px solid rgba(48,54,61,0.5); transition: background .1s; }
+  tbody tr { border-bottom: 1px solid rgba(48,54,61,0.45); }
   tbody tr:hover { background: rgba(255,255,255,0.03); }
-  tbody td { padding: 6px 8px; color: var(--text-primary); white-space: nowrap; }
-  td.muted  { color: var(--text-secondary); font-size: 0.72rem; }
-  td.name   { font-weight: 600; max-width: 160px; overflow: hidden; text-overflow: ellipsis; }
+  tbody td {
+    padding: 5px 8px;
+    color: var(--text-primary);
+    white-space: nowrap;
+  }
+  td.muted { color: var(--text-secondary); font-size: 0.72rem; }
+  td.name {
+    font-weight: 600;
+    max-width: 140px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
 
   .badge {
-    display: inline-flex; align-items: center; padding: 1px 7px;
-    border-radius: 4px; font-size: 0.67rem; font-weight: 700; letter-spacing: 0.04em;
+    display: inline-flex;
+    align-items: center;
+    padding: 1px 7px;
+    border-radius: 4px;
+    font-size: 0.67rem;
+    font-weight: 700;
   }
-  .badge-buy  { background: rgba(63,185,80,0.15);  color: #3fb950; }
-  .badge-sell { background: rgba(248,81,73,0.15);  color: #f85149; }
+  .badge-sell { background: rgba(248,81,73,0.15); color: #f85149; }
   .badge-hold { background: rgba(139,148,158,0.12); color: #8b949e; }
 
   .pnl-pos { color: #3fb950; font-weight: 600; }
@@ -66,150 +213,287 @@
   .dash { color: #444d56; }
 
   .market-pill {
-    display: inline-flex; padding: 1px 6px; border-radius: 10px; font-size: 0.65rem;
-    font-weight: 700; letter-spacing: 0.06em;
+    display: inline-flex;
+    padding: 1px 6px;
+    border-radius: 10px;
+    font-size: 0.63rem;
+    font-weight: 700;
+    letter-spacing: 0.05em;
   }
   .market-kospi  { background: rgba(74,144,217,0.15); color: #4a90d9; }
   .market-nasdaq { background: rgba(163,113,247,0.15); color: #a371f7; }
 
-  .scan-bar {
-    display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
-  }
-  .scan-info { font-size: 0.72rem; color: var(--text-secondary); }
   #scan-spinner { display: none; }
   .spinner {
-    width: 14px; height: 14px; border: 2px solid var(--border);
-    border-top-color: var(--blue); border-radius: 50%;
-    animation: spin .7s linear infinite; display: inline-block; vertical-align: middle;
+    width: 14px; height: 14px;
+    border: 2px solid var(--border);
+    border-top-color: var(--blue);
+    border-radius: 50%;
+    animation: spin .7s linear infinite;
+    display: inline-block;
+    vertical-align: middle;
   }
   @keyframes spin { to { transform: rotate(360deg); } }
 
-  .empty { text-align: center; padding: 32px; color: var(--text-secondary); font-size: 0.82rem; }
+  .empty {
+    text-align: center;
+    padding: 28px;
+    color: var(--text-secondary);
+    font-size: 0.82rem;
+  }
+
+  .act-inner {
+    padding: 10px 12px 16px;
+    overflow-x: auto;
+  }
+  .act-section-title {
+    font-size: 0.72rem;
+    font-weight: 700;
+    letter-spacing: 0.07em;
+    text-transform: uppercase;
+    margin: 12px 0 6px;
+  }
+  .act-summary {
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+    padding-bottom: 10px;
+    margin-bottom: 10px;
+    border-bottom: 1px solid var(--border);
+    font-size: 0.72rem;
+    color: var(--text-secondary);
+  }
+
+  .famous-panel {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 0;
+    opacity: 0.92;
+  }
+  .famous-panel details { padding: 8px 12px 12px; }
+  .famous-panel summary {
+    cursor: pointer;
+    font-size: 0.72rem;
+    font-weight: 600;
+    color: var(--text-secondary);
+    list-style: none;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    user-select: none;
+  }
+  .famous-panel summary::-webkit-details-marker { display: none; }
+  .famous-panel summary::before { content: "▸ "; }
+  .famous-panel details[open] summary::before { content: "▾ "; }
+  .famous-meta { font-size: 0.65rem; color: var(--text-secondary); margin-left: auto; }
+  .famous-chips { display: flex; flex-wrap: wrap; gap: 5px; }
+  .fchip {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 3px 8px;
+    border-radius: 6px;
+    font-size: 0.68rem;
+    font-weight: 600;
+    border: 1px solid var(--border);
+    background: rgba(255,255,255,0.02);
+    color: var(--text-secondary);
+    cursor: default;
+  }
+  .fchip.held {
+    border-color: rgba(63,185,80,0.45);
+    background: rgba(63,185,80,0.1);
+    color: var(--text-primary);
+  }
+  .fchip .fpnl { font-size: 0.62rem; font-weight: 700; }
+  .fchip .fpnl.up { color: #3fb950; }
+  .fchip .fpnl.down { color: #f85149; }
+  .star { color: #d29922; margin-right: 2px; }
+  .famous-toggle {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 0.72rem;
+    color: var(--text-secondary);
+    cursor: pointer;
+    user-select: none;
+  }
+  .famous-toggle input { accent-color: var(--blue); }
 </style>
 </head>
-<body>
-<div class="container">
+<body class="vs-app">
+<div class="app-shell">
 
-  <!-- Header -->
-  <div class="card" style="padding:12px 14px">
-    <div class="main-header">
-      <div class="header-left">
-        <span class="strategy-tag">Value Scan</span>
-        <span class="symbol-badge">KOSPI + S&amp;P 500</span>
-        <span class="status-dot" id="dot" style="background:#444d56"></span>
-      </div>
-      <div style="display:flex;align-items:center;gap:10px">
-        <a href="/" class="back">← Home</a>
-      </div>
+  <div class="top-row">
+    <div class="header-left">
+      <span class="strategy-tag">Value Scan</span>
+      <span class="symbol-badge" id="header-market-label">NASDAQ / S&amp;P 500</span>
+      <span class="status-dot" id="dot" style="background:#444d56"></span>
     </div>
+    <a href="/" class="back">← Home</a>
   </div>
 
-  <!-- Stats -->
-  <div class="summary-row" id="stats-row">
-    <div class="stat-card"><div class="val" id="s-open">—</div><div class="lbl">Open</div></div>
-    <div class="stat-card"><div class="val" id="s-closed">—</div><div class="lbl">Closed</div></div>
-    <div class="stat-card"><div class="val" id="s-winrate">—</div><div class="lbl">Win Rate</div></div>
-    <div class="stat-card"><div class="val" id="s-avgpnl">—</div><div class="lbl">Avg P&amp;L</div></div>
-    <div class="stat-card"><div class="val" id="s-invested">—</div><div class="lbl">Invested $</div></div>
-    <div class="stat-card"><div class="val" id="s-histpnl">—</div><div class="lbl">Realized P&amp;L $</div></div>
+  <div class="market-filter" id="market-filter">
+    <button type="button" class="mfilter-btn active" data-market="nasdaq" onclick="setMarketFilter('nasdaq', this)">
+      NASDAQ / S&amp;P
+      <span class="sub" id="mf-nasdaq-sub">—</span>
+    </button>
+    <button type="button" class="mfilter-btn" data-market="kospi" onclick="setMarketFilter('kospi', this)">
+      KOSPI
+      <span class="sub" id="mf-kospi-sub">—</span>
+    </button>
   </div>
 
-  <!-- Scan control -->
-  <div class="card" style="padding:10px 14px">
-    <div class="scan-bar">
-      <span class="ctrl-label">Scan</span>
-      <button class="primary" onclick="triggerScan('all')">▶ Run All</button>
-      <button onclick="triggerScan('kospi')">KOSPI</button>
-      <button onclick="triggerScan('nasdaq')">NASDAQ</button>
-      <span id="scan-spinner"><span class="spinner"></span></span>
-      <span class="scan-info" id="scan-info">—</span>
+  <section class="portfolio-grid" id="portfolio-grid">
+    <div class="pf-card">
+      <div class="pf-val" id="pf-deployed">—</div>
+      <div class="pf-lbl">Deployed Capital</div>
+      <div class="pf-sub" id="pf-deployed-sub">open positions</div>
     </div>
+    <div class="pf-card">
+      <div class="pf-val" id="pf-equity">—</div>
+      <div class="pf-lbl">Portfolio Value</div>
+      <div class="pf-sub">mark-to-market</div>
+    </div>
+    <div class="pf-card">
+      <div class="pf-val" id="pf-unreal">—</div>
+      <div class="pf-lbl">Unrealized P&amp;L</div>
+      <div class="pf-sub" id="pf-unreal-pct">—</div>
+    </div>
+    <div class="pf-card">
+      <div class="pf-val" id="pf-realized">—</div>
+      <div class="pf-lbl">Realized P&amp;L</div>
+      <div class="pf-sub" id="pf-closed-sub">— closed</div>
+    </div>
+    <div class="pf-card">
+      <div class="pf-val" id="pf-total">—</div>
+      <div class="pf-lbl">Total P&amp;L</div>
+      <div class="pf-sub">realized + unrealized</div>
+    </div>
+    <div class="pf-card">
+      <div class="pf-val" id="pf-open-stats">—</div>
+      <div class="pf-lbl">Open Book</div>
+      <div class="pf-sub" id="pf-winrate">win rate (closed): —</div>
+    </div>
+  </section>
+
+  <div class="ctrl-row">
+    <span class="ctrl-label">Scan</span>
+    <button class="primary" onclick="triggerScan('nasdaq')">▶ Scan NASDAQ</button>
+    <button onclick="triggerScan('kospi')">Scan KOSPI</button>
+    <span id="scan-spinner"><span class="spinner"></span></span>
+    <span class="scan-info" id="scan-info">—</span>
   </div>
 
-  <!-- Tabs -->
-  <div class="card">
+  <main class="main-panel">
     <div class="tab-bar">
-      <button class="tab-btn active" onclick="switchTab('positions', this)">Open Positions</button>
-      <button class="tab-btn" onclick="switchTab('activity', this)" id="tab-btn-activity">Activity</button>
-      <button class="tab-btn" onclick="switchTab('history', this)">History</button>
+      <button type="button" class="tab-btn active" onclick="switchTab('positions', this)">Open Positions</button>
+      <button type="button" class="tab-btn" onclick="switchTab('activity', this)">Activity</button>
+      <button type="button" class="tab-btn" onclick="switchTab('history', this)">History</button>
     </div>
 
-    <!-- Positions -->
     <div class="tab-pane active" id="tab-positions">
-      <table id="pos-table">
-        <thead>
-          <tr>
-            <th>Market</th><th>Symbol</th><th class="name-col">Name</th><th>Sector</th>
-            <th class="r">Lots</th><th class="r">Invested</th>
-            <th class="r">Avg Entry</th><th class="r">Current</th>
-            <th class="r">P&amp;L %</th><th class="r">P&amp;L $</th>
-            <th class="r">PER</th><th class="r">Median</th>
-            <th>Since</th>
-          </tr>
-        </thead>
-        <tbody id="pos-tbody"><tr><td colspan="13" class="empty">Loading...</td></tr></tbody>
-      </table>
+      <div class="table-scroll">
+        <table>
+          <thead>
+            <tr>
+              <th>Symbol</th><th>Name</th><th>Sector</th>
+              <th class="r">Lots</th><th class="r">Invested</th>
+              <th class="r">Avg Entry</th><th class="r">Current</th>
+              <th class="r">P&amp;L %</th><th class="r">P&amp;L $</th>
+              <th class="r">PER</th><th class="r">Median</th>
+              <th>Since</th>
+            </tr>
+          </thead>
+          <tbody id="pos-tbody"><tr><td colspan="12" class="empty">Loading...</td></tr></tbody>
+        </table>
+      </div>
     </div>
 
-    <!-- Activity -->
     <div class="tab-pane" id="tab-activity">
-      <div id="act-summary" style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:14px;padding:10px 4px;border-bottom:1px solid var(--border)">
-        <span class="scan-info" id="act-date">—</span>
-        <span class="scan-info" style="color:var(--border)">|</span>
-        <span class="scan-info">Scanned: <b id="act-scanned">—</b></span>
-        <span class="scan-info" style="color:var(--border)">|</span>
-        <span class="scan-info" style="color:#3fb950">BUY signals: <b id="act-buy">—</b></span>
-        <span class="scan-info" style="color:var(--border)">|</span>
-        <span class="scan-info" style="color:#f85149">SELL signals: <b id="act-sell">—</b></span>
-      </div>
-
-      <div style="margin-bottom:6px;font-size:0.72rem;font-weight:700;color:#3fb950;letter-spacing:0.07em;text-transform:uppercase">
-        New Entries <span id="act-entries-count" style="color:var(--text-secondary);font-weight:400"></span>
-      </div>
-      <table style="margin-bottom:18px">
-        <thead><tr>
-          <th>Market</th><th>Symbol</th><th>Name</th><th>Sector</th>
-          <th class="r">Entry Price</th><th class="r">PER</th><th class="r">Sector Med</th><th class="r">Fwd EPS</th>
-        </tr></thead>
-        <tbody id="act-entries-tbody"><tr><td colspan="8" class="empty">No data yet — run a scan first</td></tr></tbody>
-      </table>
-
-      <div style="margin-bottom:6px;font-size:0.72rem;font-weight:700;color:#f85149;letter-spacing:0.07em;text-transform:uppercase">
-        Exits <span id="act-exits-count" style="color:var(--text-secondary);font-weight:400"></span>
-      </div>
-      <table>
-        <thead><tr>
-          <th>Market</th><th>Symbol</th><th>Name</th>
-          <th class="r">Lots</th><th class="r">Exit Price</th>
-          <th class="r">P&amp;L %</th><th class="r">P&amp;L $</th>
-          <th>Reason</th><th>Held</th>
-        </tr></thead>
-        <tbody id="act-exits-tbody"><tr><td colspan="9" class="empty">No exits</td></tr></tbody>
-      </table>
-    </div>
-
-    <!-- History -->
-    <div class="tab-pane" id="tab-history">
-      <table id="hist-table">
-        <thead>
-          <tr>
-            <th>Market</th><th>Symbol</th><th class="name-col">Name</th>
-            <th class="r">Lots</th><th class="r">Invested</th>
-            <th class="r">Avg Entry</th><th class="r">Exit</th>
+      <div class="act-inner">
+        <div class="act-summary">
+          <span id="act-date">—</span>
+          <span style="color:var(--border)">|</span>
+          <span>Scanned: <b id="act-scanned">—</b></span>
+          <span style="color:var(--border)">|</span>
+          <span style="color:#3fb950">BUY: <b id="act-buy">—</b></span>
+          <span style="color:var(--border)">|</span>
+          <span style="color:#f85149">SELL: <b id="act-sell">—</b></span>
+        </div>
+        <div class="act-section-title" style="color:#3fb950">
+          New Entries <span id="act-entries-count" style="color:var(--text-secondary);font-weight:400"></span>
+        </div>
+        <table>
+          <thead><tr>
+            <th>Symbol</th><th>Name</th><th>Sector</th>
+            <th class="r">Entry</th><th class="r">PER</th><th class="r">Med</th><th class="r">Fwd EPS</th>
+          </tr></thead>
+          <tbody id="act-entries-tbody"><tr><td colspan="7" class="empty">Run a scan first</td></tr></tbody>
+        </table>
+        <div class="act-section-title" style="color:#f85149">
+          Exits <span id="act-exits-count" style="color:var(--text-secondary);font-weight:400"></span>
+        </div>
+        <table>
+          <thead><tr>
+            <th>Symbol</th><th>Name</th>
+            <th class="r">Lots</th><th class="r">Exit</th>
             <th class="r">P&amp;L %</th><th class="r">P&amp;L $</th>
-            <th class="r">Days</th><th>Reason</th><th>Exit Date</th>
-          </tr>
-        </thead>
-        <tbody id="hist-tbody"><tr><td colspan="12" class="empty">Loading...</td></tr></tbody>
-      </table>
+            <th>Reason</th><th>Held</th>
+          </tr></thead>
+          <tbody id="act-exits-tbody"><tr><td colspan="8" class="empty">No exits</td></tr></tbody>
+        </table>
+      </div>
     </div>
-  </div>
+
+    <div class="tab-pane" id="tab-history">
+      <div class="table-scroll">
+        <table>
+          <thead>
+            <tr>
+              <th>Symbol</th><th>Name</th>
+              <th class="r">Lots</th><th class="r">Invested</th>
+              <th class="r">Avg Entry</th><th class="r">Exit</th>
+              <th class="r">P&amp;L %</th><th class="r">P&amp;L $</th>
+              <th class="r">Days</th><th>Reason</th><th>Exit Date</th>
+            </tr>
+          </thead>
+          <tbody id="hist-tbody"><tr><td colspan="11" class="empty">Loading...</td></tr></tbody>
+        </table>
+      </div>
+    </div>
+  </main>
+
+  <section class="famous-panel" id="famous-panel">
+    <details>
+      <summary>
+        Famous watchlist
+        <span class="famous-meta" id="famous-sum">—</span>
+      </summary>
+      <label class="famous-toggle" style="display:block;margin:8px 0 6px">
+        <input type="checkbox" id="famous-only" onchange="onFamousOnlyChange()">
+        Highlight famous names in table only
+      </label>
+      <div class="famous-chips" id="famous-chips"></div>
+    </details>
+  </section>
 
 </div>
 
 <script>
 const BASE = "/quant/value_scan";
 let pollTimer = null;
+let marketFilter = "nasdaq";
+let allPositions = [];
+let allHistory = [];
+let lastStats = null;
+let famousData = null;
+let famousOnly = false;
+let lastBookStats = null;
+
+const PF_BOOK = ["pf-deployed", "pf-realized"];
+const PF_LIVE = ["pf-equity", "pf-unreal", "pf-total", "pf-open-stats"];
 
 async function safeFetch(url) {
   const r = await fetch(url);
@@ -225,6 +509,83 @@ function switchTab(name, btn) {
   document.querySelectorAll(".tab-btn").forEach(b => b.classList.remove("active"));
   document.getElementById(`tab-${name}`).classList.add("active");
   btn.classList.add("active");
+}
+
+function marketLabel() {
+  return marketFilter === "kospi" ? "KOSPI 200" : "NASDAQ / S&P 500";
+}
+
+function setMarketFilter(market, btn) {
+  marketFilter = market;
+  document.querySelectorAll(".mfilter-btn").forEach(b => b.classList.remove("active"));
+  btn.classList.add("active");
+  document.getElementById("header-market-label").textContent = marketLabel();
+  renderPositions();
+  renderHistory();
+  renderFamous();
+  refreshPortfolioUi();
+  updateMarketSubs();
+}
+
+function onFamousOnlyChange() {
+  famousOnly = document.getElementById("famous-only").checked;
+  renderPositions();
+}
+
+function matchesMarket(item) {
+  return item.market === marketFilter;
+}
+
+function matchesRowFilters(item) {
+  if (!matchesMarket(item)) return false;
+  if (famousOnly && !item.is_famous) return false;
+  return true;
+}
+
+function renderFamousChip(item) {
+  const held = item.held;
+  const cls = held ? "fchip held" : "fchip";
+  const sym = item.position_symbol || item.code || item.symbol || "";
+  const label = sym && sym !== item.label ? `${item.label} (${sym})` : item.label;
+  let pnl = "";
+  if (held && item.pnl_pct != null) {
+    const up = item.pnl_pct >= 0;
+    pnl = `<span class="fpnl ${up ? "up" : "down"}">${up ? "+" : ""}${Number(item.pnl_pct).toFixed(1)}%</span>`;
+  }
+  return `<span class="${cls}" title="${held ? "In portfolio" : "Not held"}">${label}${pnl}</span>`;
+}
+
+function renderFamous() {
+  const el = document.getElementById("famous-chips");
+  if (!famousData || !el) return;
+  const items = famousData[marketFilter] || [];
+  const sum = famousData.summary?.[marketFilter] || {};
+  document.getElementById("famous-sum").textContent =
+    `${sum.held ?? 0}/${sum.total ?? 0} held`;
+  el.innerHTML = items.length
+    ? items.map(renderFamousChip).join("")
+    : `<span class="famous-meta">No watchlist entries</span>`;
+}
+
+async function loadFamous() {
+  try {
+    famousData = await safeFetch(`${BASE}/famous`);
+    renderFamous();
+  } catch (e) {
+    document.getElementById("famous-sum").textContent = "load failed";
+  }
+}
+
+function fmtUsd(v, signed = false) {
+  if (v == null || Number.isNaN(v)) return "—";
+  const n = Number(v);
+  const sign = signed && n !== 0 ? (n > 0 ? "+" : "−") : "";
+  return `${sign}$${Math.abs(n).toFixed(4)}`;
+}
+
+function valClass(v) {
+  if (v == null) return "";
+  return v > 0 ? " green" : v < 0 ? " red" : "";
 }
 
 function fmt(v, dec = 1) {
@@ -246,67 +607,202 @@ function pnlHtml(v) {
   return `<span class="${cls}">${sign}${Number(v).toFixed(2)}%</span>`;
 }
 
+function pnlUsdHtml(v) {
+  if (v == null) return '<span class="dash">—</span>';
+  const cls = v >= 0 ? "pnl-pos" : "pnl-neg";
+  const sign = v >= 0 ? "+" : "−";
+  return `<span class="${cls}">${sign}$${Math.abs(v).toFixed(4)}</span>`;
+}
+
 function marketPill(m) {
   return m === "kospi"
     ? `<span class="market-pill market-kospi">KOSPI</span>`
     : `<span class="market-pill market-nasdaq">NASDAQ</span>`;
 }
 
-async function loadStats() {
-  const d = await safeFetch(`${BASE}/stats`);
+function setPfLoading(ids, loading) {
+  ids.forEach(id => {
+    const card = document.getElementById(id)?.closest(".pf-card");
+    if (card) {
+      card.classList.toggle("loading", loading);
+      card.classList.remove("err");
+    }
+  });
+}
+
+function setPfError(ids, msg) {
+  ids.forEach(id => {
+    const el = document.getElementById(id);
+    const card = el?.closest(".pf-card");
+    if (el) { el.textContent = msg; el.className = "pf-val"; }
+    if (card) { card.classList.remove("loading"); card.classList.add("err"); }
+  });
+}
+
+function sliceForFilter(stats) {
+  const m = stats.by_market?.[marketFilter];
+  return m || {
+    open_count: 0,
+    invested_usd: 0,
+    unrealized_pnl_usd: 0,
+    unrealized_pnl_pct: null,
+    portfolio_value_usd: 0,
+    open_winners: 0,
+    open_losers: 0,
+    open_flat: 0,
+  };
+}
+
+function updateMarketSubs() {
+  if (!lastBookStats?.by_market) return;
+  for (const m of ["kospi", "nasdaq"]) {
+    const bm = lastBookStats.by_market[m] || {};
+    const el = document.getElementById(`mf-${m}-sub`);
+    if (!el) continue;
+    const pos = allPositions.filter(p => p.market === m);
+    const unreal = pos.reduce((a, p) => a + (Number(p.pnl_usd) || 0), 0);
+    el.textContent = `${bm.open_count ?? pos.length} pos · ${fmtUsd(unreal, true)}`;
+  }
+}
+
+function formatScanLine(market, meta, win) {
+  if (!meta?.last_scan_at_local) {
+    const need = win?.needs_scan_today ? " · due" : "";
+    return `${market.toUpperCase()}: not today${need}`;
+  }
+  return `${market.toUpperCase()}: ${meta.last_trading_date} ${meta.last_scan_at_local.split(" ")[1] || ""}`;
+}
+
+function applyScanMeta(d) {
+  if (!d) return;
   const dot = document.getElementById("dot");
-
-  document.getElementById("s-open").textContent    = d.open_count  ?? "—";
-  document.getElementById("s-closed").textContent  = d.closed_count ?? "—";
-
-  const wr = document.getElementById("s-winrate");
-  wr.textContent = d.win_rate != null ? `${d.win_rate}%` : "—";
-  wr.className = "val" + (d.win_rate >= 50 ? " green" : d.win_rate != null ? " red" : "");
-
-  const ap = document.getElementById("s-avgpnl");
-  ap.textContent = d.avg_pnl_pct != null ? `${d.avg_pnl_pct > 0 ? "+" : ""}${d.avg_pnl_pct}%` : "—";
-  ap.className = "val" + (d.avg_pnl_pct > 0 ? " green" : d.avg_pnl_pct != null ? " red" : "");
-
-  const si = document.getElementById("s-invested");
-  si.textContent = d.total_invested_usd != null ? `$${d.total_invested_usd.toFixed(2)}` : "—";
-
-  const hp = document.getElementById("s-histpnl");
-  if (d.hist_pnl_usd != null) {
-    const sign = d.hist_pnl_usd >= 0 ? "+" : "";
-    hp.textContent = `${sign}$${d.hist_pnl_usd.toFixed(4)}`;
-    hp.className = "val" + (d.hist_pnl_usd >= 0 ? " green" : " red");
-  } else {
-    hp.textContent = "—";
-    hp.className = "val";
+  dot.style.background = d.running ? "#d29922" : "#3fb950";
+  const info = document.getElementById("scan-info");
+  const markets = d.markets || {};
+  const wins = d.windows || {};
+  const k = formatScanLine("kospi", markets.kospi, wins.kospi);
+  const n = formatScanLine("nasdaq", markets.nasdaq, wins.nasdaq);
+  const srv = d.server_kst ? ` · now KST ${d.server_kst.split(" ")[1]}` : "";
+  info.textContent = `${k} | ${n}${srv}`;
+  if (wins[marketFilter]?.needs_scan_today && wins[marketFilter]?.past_window) {
+    info.textContent += " · scan due";
   }
-
-  if (d.last_scan_at) {
-    const dt = new Date(d.last_scan_at);
-    document.getElementById("scan-info").textContent = `Last scan: ${dt.toLocaleString()}`;
-  }
-  dot.style.background = d.scan_running ? "#d29922" : "#3fb950";
 }
 
-function pnlUsdHtml(v) {
-  if (v == null) return '<span class="dash">—</span>';
-  const cls  = v >= 0 ? "pnl-pos" : "pnl-neg";
-  const sign = v >= 0 ? "+" : "";
-  return `<span class="${cls}">${sign}$${Math.abs(v).toFixed(4)}</span>`;
+function applyBookStats(d) {
+  if (d?.error) return;
+  lastBookStats = d;
+  lastStats = d;
+  const s = sliceForFilter(d);
+  const scope = marketFilter === "kospi" ? "KOSPI" : "NASDAQ";
+
+  const dep = document.getElementById("pf-deployed");
+  dep.textContent = s.invested_usd != null ? `$${Number(s.invested_usd).toFixed(2)}` : "—";
+  dep.className = "pf-val";
+
+  const hist = allHistory
+    .filter(h => h.market === marketFilter)
+    .reduce((a, h) => a + (Number(h.pnl_usd) || 0), 0);
+  const closedN = allHistory.filter(h => h.market === marketFilter).length;
+
+  document.getElementById("pf-deployed-sub").textContent =
+    `${s.open_count ?? 0} open · ${scope}`;
+
+  const rl = document.getElementById("pf-realized");
+  rl.textContent = fmtUsd(hist, true);
+  rl.className = "pf-val" + valClass(hist);
+  document.getElementById("pf-closed-sub").textContent = `${closedN} closed trades`;
+
+  document.getElementById("pf-winrate").textContent =
+    `closed win rate: ${d.win_rate != null ? d.win_rate + "%" : "—"} · $${d.unit_usd ?? 1}/lot`;
 }
 
-async function loadPositions() {
-  const d  = await safeFetch(`${BASE}/positions`);
+function liveSliceFromPositions() {
+  const rows = allPositions.filter(matchesMarket);
+  const invested = rows.reduce((a, p) => a + (Number(p.invested_usd) || 0), 0);
+  const unreal = rows.reduce((a, p) => a + (Number(p.pnl_usd) || 0), 0);
+  let winners = 0, losers = 0, flat = 0;
+  rows.forEach(p => {
+    const u = Number(p.pnl_usd) || 0;
+    if (u > 0) winners++;
+    else if (u < 0) losers++;
+    else flat++;
+  });
+  return {
+    open_count: rows.length,
+    invested_usd: invested,
+    unrealized_pnl_usd: unreal,
+    unrealized_pnl_pct: invested ? (unreal / invested * 100) : null,
+    portfolio_value_usd: invested + unreal,
+    open_winners: winners,
+    open_losers: losers,
+    open_flat: flat,
+  };
+}
+
+function applyLiveFromPositions() {
+  const s = liveSliceFromPositions();
+  const hist = allHistory
+    .filter(h => h.market === marketFilter)
+    .reduce((a, h) => a + (Number(h.pnl_usd) || 0), 0);
+
+  const eq = document.getElementById("pf-equity");
+  eq.textContent = `$${Number(s.portfolio_value_usd).toFixed(4)}`;
+  eq.className = "pf-val";
+
+  const ur = document.getElementById("pf-unreal");
+  ur.textContent = fmtUsd(s.unrealized_pnl_usd, true);
+  ur.className = "pf-val" + valClass(s.unrealized_pnl_usd);
+  document.getElementById("pf-unreal-pct").textContent =
+    s.unrealized_pnl_pct != null
+      ? `${s.unrealized_pnl_pct >= 0 ? "+" : ""}${Number(s.unrealized_pnl_pct).toFixed(2)}% on book`
+      : "—";
+
+  const totalPnl = (s.unrealized_pnl_usd || 0) + (hist || 0);
+  const tp = document.getElementById("pf-total");
+  tp.textContent = fmtUsd(totalPnl, true);
+  tp.className = "pf-val" + valClass(totalPnl);
+
+  const ob = document.getElementById("pf-open-stats");
+  ob.textContent = `${s.open_winners}W / ${s.open_losers}L / ${s.open_flat}F`;
+  ob.className = "pf-val";
+
+  updateMarketSubs();
+}
+
+function refreshPortfolioUi() {
+  if (lastBookStats) applyBookStats(lastBookStats);
+  applyLiveFromPositions();
+}
+
+async function loadBookStats() {
+  setPfLoading(PF_BOOK, true);
+  try {
+    const d = await safeFetch(`${BASE}/stats?fast=1`);
+    if (d.error) throw new Error(d.error);
+    applyBookStats(d);
+  } catch (e) {
+    setPfError(PF_BOOK, "load failed");
+    console.error("book stats", e);
+  } finally {
+    setPfLoading(PF_BOOK, false);
+  }
+}
+
+function renderPositions() {
   const tb = document.getElementById("pos-tbody");
-  if (!d.positions.length) {
-    tb.innerHTML = `<tr><td colspan="13" class="empty">No open positions</td></tr>`;
+  const rows = allPositions.filter(matchesRowFilters);
+  if (!rows.length) {
+    const hint = famousOnly ? " (famous watchlist)" : "";
+    tb.innerHTML = `<tr><td colspan="12" class="empty">No open positions (${marketFilter.toUpperCase()})${hint}</td></tr>`;
     return;
   }
-  tb.innerHTML = d.positions.map(p => {
+  tb.innerHTML = rows.map(p => {
     const perCls = p.per < (p.sector_median || 999) ? "per-low" : "per-high";
+    const star = p.is_famous ? '<span class="star" title="Famous watchlist">★</span>' : "";
     return `<tr>
-      <td>${marketPill(p.market)}</td>
       <td><b>${p.symbol}</b></td>
-      <td class="name muted">${p.name}</td>
+      <td class="name muted">${star}${p.name}</td>
       <td class="muted">${p.sector || "—"}</td>
       <td class="r muted">${p.lot_count ?? "—"}</td>
       <td class="r muted">$${(p.invested_usd ?? 0).toFixed(2)}</td>
@@ -321,23 +817,38 @@ async function loadPositions() {
   }).join("");
 }
 
-async function loadHistory() {
-  const d  = await safeFetch(`${BASE}/history`);
+async function loadPositions() {
+  setPfLoading(PF_LIVE, true);
+  try {
+    const d = await safeFetch(`${BASE}/positions`);
+    if (d.error) throw new Error(d.error);
+    allPositions = d.positions || [];
+    renderPositions();
+    applyLiveFromPositions();
+  } catch (e) {
+    setPfError(PF_LIVE, "quotes failed");
+    console.error("positions", e);
+  } finally {
+    setPfLoading(PF_LIVE, false);
+  }
+}
+
+function renderHistory() {
   const tb = document.getElementById("hist-tbody");
-  if (!d.history.length) {
-    tb.innerHTML = `<tr><td colspan="12" class="empty">No closed trades yet</td></tr>`;
+  const rows = allHistory.filter(matchesMarket);
+  if (!rows.length) {
+    tb.innerHTML = `<tr><td colspan="11" class="empty">No closed trades yet</td></tr>`;
     return;
   }
-  tb.innerHTML = d.history.map(h => {
-    const reason    = h.exit_reason || "—";
+  tb.innerHTML = rows.map(h => {
+    const reason = h.exit_reason || "—";
     const reasonCls = reason === "SELL" ? "badge badge-sell" : "badge badge-hold";
-    const lots      = h.lots ?? [];
+    const lots = h.lots ?? [];
     const validPrices = lots.filter(l => l.price).map(l => l.price);
-    const avgEntry  = validPrices.length
+    const avgEntry = validPrices.length
       ? validPrices.reduce((a, b) => a + b, 0) / validPrices.length
       : null;
     return `<tr>
-      <td>${marketPill(h.market)}</td>
       <td><b>${h.symbol}</b></td>
       <td class="name muted">${h.name}</td>
       <td class="r muted">${lots.length || "—"}</td>
@@ -353,20 +864,31 @@ async function loadHistory() {
   }).join("");
 }
 
+async function loadHistory() {
+  const d = await safeFetch(`${BASE}/history?limit=500`);
+  allHistory = d.history || [];
+  renderHistory();
+  if (lastBookStats) applyBookStats(lastBookStats);
+}
+
+function filterActivityRows(rows) {
+  return (rows || []).filter(matchesMarket);
+}
+
 async function loadActivity() {
   let d;
   try { d = await safeFetch(`${BASE}/activity`); } catch { return; }
   if (!d || !d.date) return;
 
-  document.getElementById("act-date").textContent     = `Scan date: ${d.date}`;
-  document.getElementById("act-scanned").textContent  = d.scanned ?? "—";
-  document.getElementById("act-buy").textContent      = d.buy ?? "—";
-  document.getElementById("act-sell").textContent     = d.sell ?? "—";
+  document.getElementById("act-date").textContent = `Scan date: ${d.date}`;
+  document.getElementById("act-scanned").textContent = d.scanned ?? "—";
+  document.getElementById("act-buy").textContent = d.buy ?? "—";
+  document.getElementById("act-sell").textContent = d.sell ?? "—";
 
-  const entries = d.new_entries || [];
-  const exits   = d.new_exits   || [];
+  const entries = filterActivityRows(d.new_entries);
+  const exits   = filterActivityRows(d.new_exits);
   document.getElementById("act-entries-count").textContent = entries.length ? `(${entries.length})` : "";
-  document.getElementById("act-exits-count").textContent   = exits.length   ? `(${exits.length})`   : "";
+  document.getElementById("act-exits-count").textContent = exits.length ? `(${exits.length})` : "";
 
   const etb = document.getElementById("act-entries-tbody");
   etb.innerHTML = entries.length ? entries.map(e => {
@@ -374,7 +896,6 @@ async function loadActivity() {
     const prices = lots.filter(l => l.price).map(l => l.price);
     const avgP = prices.length ? prices.reduce((a,b)=>a+b,0)/prices.length : null;
     return `<tr>
-      <td>${marketPill(e.market)}</td>
       <td><b>${e.symbol}</b></td>
       <td class="name muted">${e.name}</td>
       <td class="muted">${e.sector || "—"}</td>
@@ -383,7 +904,7 @@ async function loadActivity() {
       <td class="r muted">${fmt(e.sector_median)}</td>
       <td class="r">${fmt(e.fwd_eps, 2)}</td>
     </tr>`;
-  }).join("") : `<tr><td colspan="8" class="empty">No new entries</td></tr>`;
+  }).join("") : `<tr><td colspan="7" class="empty">No new entries</td></tr>`;
 
   const xtb = document.getElementById("act-exits-tbody");
   xtb.innerHTML = exits.length ? exits.map(x => {
@@ -391,7 +912,6 @@ async function loadActivity() {
     const reason = x.exit_reason || "—";
     const reasonCls = reason === "SELL" ? "badge badge-sell" : "badge badge-hold";
     return `<tr>
-      <td>${marketPill(x.market)}</td>
       <td><b>${x.symbol}</b></td>
       <td class="name muted">${x.name}</td>
       <td class="r muted">${lots.length || "—"}</td>
@@ -401,12 +921,12 @@ async function loadActivity() {
       <td><span class="${reasonCls}">${reason}</span></td>
       <td class="muted">${x.hold_days ?? "—"}d</td>
     </tr>`;
-  }).join("") : `<tr><td colspan="9" class="empty">No exits</td></tr>`;
+  }).join("") : `<tr><td colspan="8" class="empty">No exits</td></tr>`;
 }
 
 async function triggerScan(market) {
   const spinner = document.getElementById("scan-spinner");
-  const info    = document.getElementById("scan-info");
+  const info = document.getElementById("scan-info");
   spinner.style.display = "inline";
   info.textContent = "Scanning…";
   document.getElementById("dot").style.background = "#d29922";
@@ -434,20 +954,32 @@ function pollScanStatus() {
     if (!d.running) {
       clearInterval(pollTimer);
       document.getElementById("scan-spinner").style.display = "none";
-      document.getElementById("dot").style.background = "#3fb950";
-      await Promise.all([loadStats(), loadPositions(), loadHistory(), loadActivity()]);
+      await Promise.all([loadBookStats(), loadPositions(), loadHistory(), loadActivity(), loadFamous(), refreshScanStatus()]);
     }
   }, 3000);
 }
 
+async function refreshScanStatus() {
+  try {
+    const s = await safeFetch(`${BASE}/scan/status`);
+    applyScanMeta(s);
+    return s;
+  } catch (e) {
+    console.error("scan status", e);
+    return null;
+  }
+}
+
 async function init() {
-  await Promise.all([loadStats(), loadPositions(), loadHistory(), loadActivity()]);
-  // 스캔 중이면 자동으로 polling 시작
-  const s = await safeFetch(`${BASE}/scan/status`);
-  if (s.running) {
+  await loadHistory();
+  await loadBookStats();
+  await Promise.all([loadPositions(), loadActivity(), loadFamous()]);
+  const s = await refreshScanStatus();
+  if (s?.running) {
     document.getElementById("scan-spinner").style.display = "inline";
     pollScanStatus();
   }
+  setInterval(refreshScanStatus, 60000);
 }
 
 init();

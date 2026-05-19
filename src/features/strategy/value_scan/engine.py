@@ -18,11 +18,13 @@ from pathlib import Path
 from statistics import median
 from typing import Any, Optional
 
-DATA_DIR            = Path(__file__).resolve().parents[5] / "data" / "value_forward"
-POSITIONS_FILE      = DATA_DIR / "positions.json"
-HISTORY_FILE        = DATA_DIR / "history.json"
-SCANS_DIR           = DATA_DIR / "scans"
-LAST_ACTIVITY_FILE  = DATA_DIR / "last_activity.json"
+from features.strategy.value_scan.paths import (
+    DATA_DIR,
+    HISTORY_FILE,
+    LAST_ACTIVITY_FILE,
+    POSITIONS_FILE,
+    SCANS_DIR,
+)
 
 UNIT_USD = 1.0  # $1 per BUY signal
 
@@ -303,25 +305,35 @@ def _pos_key(market: str, symbol: str) -> str:
 
 
 def load_positions() -> dict[str, dict]:
-    if POSITIONS_FILE.exists():
-        return json.loads(POSITIONS_FILE.read_text())
-    return {}
+    from features.strategy.value_scan.repository import (
+        ensure_migrated_from_json_if_needed,
+        load_positions_from_db,
+    )
+
+    ensure_migrated_from_json_if_needed()
+    return load_positions_from_db()
 
 
 def load_history() -> list[dict]:
-    if HISTORY_FILE.exists():
-        return json.loads(HISTORY_FILE.read_text())
-    return []
+    from features.strategy.value_scan.repository import (
+        ensure_migrated_from_json_if_needed,
+        load_history_from_db,
+    )
+
+    ensure_migrated_from_json_if_needed()
+    return load_history_from_db()
 
 
 def _save_positions(pos: dict) -> None:
-    DATA_DIR.mkdir(parents=True, exist_ok=True)
-    POSITIONS_FILE.write_text(json.dumps(pos, ensure_ascii=False, indent=2))
+    from features.strategy.value_scan.repository import save_positions_to_db
+
+    save_positions_to_db(pos)
 
 
 def _save_history(hist: list) -> None:
-    DATA_DIR.mkdir(parents=True, exist_ok=True)
-    HISTORY_FILE.write_text(json.dumps(hist, ensure_ascii=False, indent=2))
+    from features.strategy.value_scan.repository import save_history_to_db
+
+    save_history_to_db(hist)
 
 
 def _nan_to_none(v: Any) -> Any:
@@ -350,9 +362,22 @@ def _calc_pnl(lots: list[dict], exit_price: float) -> tuple[Optional[float], Opt
     return round(avg_pnl_pct, 2), round(pnl_usd, 4)
 
 
-def update_positions(all_rows: list[dict], today: str) -> dict:
+def update_positions(
+    all_rows: list[dict],
+    today: str,
+    markets: Optional[list[str]] = None,
+) -> dict:
+    """포지션 갱신.
+
+    - ``markets``: 이번에 실제로 스캔한 시장만 전달 (KOSPI 스캔 시 NASDAQ 포지션은 건드리지 않음).
+    - 청산: rating == SELL 인 경우만. 스캔 결과에 없거나 HOLD/BUY 면 오픈 유지.
+    """
     positions = load_positions()
     history   = load_history()
+
+    if markets is None:
+        markets = sorted({r["market"] for r in all_rows if r.get("market")})
+    markets_set = set(markets)
 
     rating_map = {_pos_key(r["market"], r["symbol"]): r for r in all_rows}
     sell_keys  = {
@@ -363,28 +388,31 @@ def update_positions(all_rows: list[dict], today: str) -> dict:
     new_entries: list[dict] = []
     new_exits:   list[dict] = []
 
-    # ── SELL 또는 상장폐지 → 청산 ────────────────────────────────────────────
+    # ── SELL → 청산 (이번에 스캔한 시장의 포지션만) ───────────────────────────
     for key, pos in list(positions.items()):
+        if pos.get("market") not in markets_set:
+            continue
+        if key not in sell_keys:
+            continue
         cur = rating_map.get(key)
-        if (cur is None) or (key in sell_keys):
-            exit_price = _fetch_price(pos["market"], pos["symbol"])
-            lots       = pos.get("lots", [])
-            avg_pnl_pct, pnl_usd = _calc_pnl(lots, exit_price)
-            record = {
-                **pos,
-                "exit_date":   today,
-                "exit_price":  None if math.isnan(exit_price) else exit_price,
-                "exit_reason": cur["rating"] if cur else "DELISTED",
-                "pnl_pct":     avg_pnl_pct,
-                "pnl_usd":     pnl_usd,
-                "hold_days":   (
-                    datetime.strptime(today, "%Y-%m-%d")
-                    - datetime.strptime(pos["first_entry_date"], "%Y-%m-%d")
-                ).days,
-            }
-            history.append(record)
-            del positions[key]
-            new_exits.append(record)
+        exit_price = _fetch_price(pos["market"], pos["symbol"])
+        lots       = pos.get("lots", [])
+        avg_pnl_pct, pnl_usd = _calc_pnl(lots, exit_price)
+        record = {
+            **pos,
+            "exit_date":   today,
+            "exit_price":  None if math.isnan(exit_price) else exit_price,
+            "exit_reason": (cur or {}).get("rating") or "SELL",
+            "pnl_pct":     avg_pnl_pct,
+            "pnl_usd":     pnl_usd,
+            "hold_days":   (
+                datetime.strptime(today, "%Y-%m-%d")
+                - datetime.strptime(pos["first_entry_date"], "%Y-%m-%d")
+            ).days,
+        }
+        history.append(record)
+        del positions[key]
+        new_exits.append(record)
 
     # ── BUY → $1 lot 추가 (신규 or 기존 포지션) ─────────────────────────────
     for r in all_rows:
@@ -445,25 +473,47 @@ def run_daily(markets: list[str] = None, max_workers: int = 10) -> dict:
         today     = datetime.now(UTC).strftime("%Y-%m-%d")
         all_rows: list[dict] = []
 
+        from features.strategy.value_scan.scan_schedule import record_market_scan
+
+        per_market_stats: dict[str, dict] = {}
+
         for m in markets:
             rows = run_scan(m, max_workers)
             save_snapshot(today, m, rows)
             all_rows.extend(rows)
+            m_buy = sum(1 for r in rows if r["rating"] == "BUY")
+            m_sell = sum(1 for r in rows if r["rating"] == "SELL")
+            per_market_stats[m] = {"scanned": len(rows), "buy": m_buy, "sell": m_sell}
 
-        result        = update_positions(all_rows, today)
+        result        = update_positions(all_rows, today, markets=markets)
         _last_scan_at = datetime.now(UTC).isoformat()
 
         buy_n  = sum(1 for r in all_rows if r["rating"] == "BUY")
         sell_n = sum(1 for r in all_rows if r["rating"] == "SELL")
 
+        for m in markets:
+            st = per_market_stats.get(m, {})
+            m_entries = sum(1 for e in result["new_entries"] if e.get("market") == m)
+            m_exits = sum(1 for e in result["new_exits"] if e.get("market") == m)
+            record_market_scan(
+                m,
+                scanned=st.get("scanned", 0),
+                buy=st.get("buy", 0),
+                sell=st.get("sell", 0),
+                new_entries=m_entries,
+                new_exits=m_exits,
+            )
+
         activity = {
             "date":        today,
             "saved_at":    _last_scan_at,
+            "markets":     markets,
             "scanned":     len(all_rows),
             "buy":         buy_n,
             "sell":        sell_n,
             "new_entries": result["new_entries"],
             "new_exits":   result["new_exits"],
+            "per_market":  per_market_stats,
         }
         DATA_DIR.mkdir(parents=True, exist_ok=True)
         LAST_ACTIVITY_FILE.write_text(json.dumps(activity, ensure_ascii=False, indent=2))
@@ -487,8 +537,16 @@ def get_last_activity() -> dict:
     return {}
 
 
+def is_scan_running() -> bool:
+    return _scan_running
+
+
 async def get_scan_status(**kwargs) -> dict:
-    return {"running": _scan_running, "last_scan_at": _last_scan_at}
+    from features.strategy.value_scan.scan_schedule import build_schedule_status
+
+    payload = build_schedule_status(running=_scan_running)
+    payload["last_scan_at"] = _last_scan_at
+    return payload
 
 
 def _enrich_position(pos: dict) -> dict:
@@ -500,6 +558,8 @@ def _enrich_position(pos: dict) -> dict:
     valid_prices = [l["price"] for l in lots if l.get("price") and l["price"] > 0]
     avg_entry    = sum(valid_prices) / len(valid_prices) if valid_prices else None
 
+    from features.strategy.value_scan.famous import position_is_famous
+
     return {
         **pos,
         "lot_count":       len(lots),
@@ -507,6 +567,7 @@ def _enrich_position(pos: dict) -> dict:
         "current_price":   None if math.isnan(cur) else cur,
         "pnl_pct":         avg_pnl_pct,
         "pnl_usd":         pnl_usd,
+        "is_famous":       position_is_famous(pos),
     }
 
 
@@ -523,23 +584,122 @@ def get_positions_with_pnl(max_workers: int = 20) -> list[dict]:
     return result
 
 
-def get_summary_stats() -> dict:
+def _fnum(v: Any, default: float = 0.0) -> float:
+    if v is None:
+        return default
+    try:
+        f = float(v)
+        return default if math.isnan(f) else f
+    except (TypeError, ValueError):
+        return default
+
+
+def _portfolio_slice(positions: list[dict]) -> dict:
+    invested = sum(_fnum(p.get("invested_usd")) for p in positions)
+    unreal   = sum(_fnum(p.get("pnl_usd")) for p in positions)
+    winners  = sum(1 for p in positions if _fnum(p.get("pnl_usd")) > 0)
+    losers   = sum(1 for p in positions if _fnum(p.get("pnl_usd")) < 0)
+    flat     = len(positions) - winners - losers
+    return {
+        "open_count":          len(positions),
+        "invested_usd":        round(invested, 2),
+        "unrealized_pnl_usd":  round(unreal, 4),
+        "unrealized_pnl_pct":  round(unreal / invested * 100, 2) if invested else None,
+        "portfolio_value_usd": round(invested + unreal, 4),
+        "open_winners":        winners,
+        "open_losers":         losers,
+        "open_flat":           flat,
+    }
+
+
+def _closed_stats(history: list[dict]) -> dict[str, Any]:
+    closed = [h for h in history if h.get("pnl_pct") is not None]
+    wins   = [h for h in closed if _fnum(h.get("pnl_pct")) > 0]
+    avg_pnl = (
+        sum(_fnum(h.get("pnl_pct")) for h in closed) / len(closed)
+        if closed else None
+    )
+    return {
+        "closed_count": len(closed),
+        "win_rate": round(len(wins) / len(closed) * 100, 1) if closed else None,
+        "avg_pnl_pct": round(avg_pnl, 2) if avg_pnl is not None else None,
+        "hist_pnl_usd": round(sum(_fnum(h.get("pnl_usd")) for h in history), 4),
+        "hist_invested_usd": round(sum(_fnum(h.get("invested_usd")) for h in history), 2),
+    }
+
+
+def _book_open_slice(positions: dict[str, dict], market: Optional[str] = None) -> dict:
+    rows = [
+        p for p in positions.values()
+        if market is None or p.get("market") == market
+    ]
+    invested = sum(_fnum(p.get("invested_usd")) for p in rows)
+    return {
+        "open_count": len(rows),
+        "invested_usd": round(invested, 2),
+        "unrealized_pnl_usd": None,
+        "unrealized_pnl_pct": None,
+        "portfolio_value_usd": round(invested, 2) if invested else None,
+        "open_winners": None,
+        "open_losers": None,
+        "open_flat": None,
+    }
+
+
+def get_book_stats() -> dict:
+    """DB만 사용 — live 시세 없이 배치·청산 요약 (빠름)."""
     positions = load_positions()
     history   = load_history()
-    closed    = [h for h in history if h.get("pnl_pct") is not None]
-    wins      = [h for h in closed if (h["pnl_pct"] or 0) > 0]
-    avg_pnl   = sum(h["pnl_pct"] for h in closed) / len(closed) if closed else None
-
-    total_invested = sum(p.get("invested_usd", 0) for p in positions.values())
-    hist_pnl_usd   = sum(h.get("pnl_usd") or 0 for h in history)
+    closed    = _closed_stats(history)
+    portfolio = _book_open_slice(positions)
+    by_market = {m: _book_open_slice(positions, m) for m in ("kospi", "nasdaq")}
 
     return {
-        "open_count":        len(positions),
-        "closed_count":      len(closed),
-        "win_rate":          round(len(wins) / len(closed) * 100, 1) if closed else None,
-        "avg_pnl_pct":       round(avg_pnl, 2) if avg_pnl is not None else None,
-        "total_invested_usd": round(total_invested, 2),
-        "hist_pnl_usd":      round(hist_pnl_usd, 4),
-        "last_scan_at":      _last_scan_at,
-        "scan_running":      _scan_running,
+        **closed,
+        **portfolio,
+        "total_invested_usd": portfolio["invested_usd"],
+        "total_pnl_usd": closed["hist_pnl_usd"],
+        "by_market": by_market,
+        "unit_usd": UNIT_USD,
+        "last_scan_at": _last_scan_at,
+        "scan_running": _scan_running,
+        "live_pnl": False,
+    }
+
+
+def get_summary_stats() -> dict:
+    """오픈 포지션 mark-to-market 포함 (yfinance 조회 — 느림)."""
+    positions = load_positions()
+    history   = load_history()
+    closed    = _closed_stats(history)
+
+    open_enriched = get_positions_with_pnl() if positions else []
+    portfolio     = _portfolio_slice(open_enriched)
+    by_market     = {
+        m: _portfolio_slice([p for p in open_enriched if p.get("market") == m])
+        for m in ("kospi", "nasdaq")
+    }
+
+    hist_pnl = closed["hist_pnl_usd"]
+
+    return {
+        "open_count":         portfolio["open_count"],
+        "closed_count":       closed["closed_count"],
+        "win_rate":           closed["win_rate"],
+        "avg_pnl_pct":        closed["avg_pnl_pct"],
+        "total_invested_usd": portfolio["invested_usd"],
+        "hist_pnl_usd":       hist_pnl,
+        "hist_invested_usd":  closed["hist_invested_usd"],
+        "unrealized_pnl_usd": portfolio["unrealized_pnl_usd"],
+        "unrealized_pnl_pct": portfolio["unrealized_pnl_pct"],
+        "portfolio_value_usd": portfolio["portfolio_value_usd"],
+        "total_pnl_usd":      round(hist_pnl + portfolio["unrealized_pnl_usd"], 4),
+        "open_winners":       portfolio["open_winners"],
+        "open_losers":        portfolio["open_losers"],
+        "open_flat":          portfolio["open_flat"],
+        "by_market":          by_market,
+        "unit_usd":           UNIT_USD,
+        "last_scan_at":       _last_scan_at,
+        "scan_running":       _scan_running,
+        "live_pnl":           True,
     }

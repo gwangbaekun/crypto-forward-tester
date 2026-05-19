@@ -20,12 +20,13 @@ logger = logging.getLogger(__name__)
 
 
 def include_strategy_routers(app: FastAPI) -> None:
-    """enabled 전략 패키지에서 router 를 자동 import해 app에 등록."""
+    """strategies_master.yaml 전략 패키지에서 router 를 자동 import해 app에 등록.
+
+    `enabled` 는 strategy_loop(tick) 전용 — 대시보드/API 라우터는 disabled 여도 등록.
+    """
     master = get_master_config()
     for strategy_key, cfg in master.items():
         if not isinstance(cfg, dict):
-            continue
-        if not cfg.get("enabled", False):
             continue
         base = cfg.get("base_strategy") or strategy_key
         try:

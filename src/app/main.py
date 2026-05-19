@@ -87,49 +87,50 @@ async def startup_ctrader() -> None:
         print(f"[cTrader] startup error: {exc}")
 
 
-_KST = ZoneInfo("Asia/Seoul")
-_ET  = ZoneInfo("America/New_York")
-
-# KOSPI closes 15:30 KST → scan at 15:35 KST (weekdays only)
-# NASDAQ closes 16:00 ET  → scan at 16:05 ET  (weekdays only)
-_SCHEDULES = [
-    {"market": "kospi",  "tz": _KST, "hour": 15, "minute": 35},
-    {"market": "nasdaq", "tz": _ET,  "hour": 16, "minute":  5},
-]
+_VALUE_SCAN_POLL_SEC = 600  # 10분마다 catch-up 확인 (하루 1회 보장)
 
 
-def _seconds_until(hour: int, minute: int, tz: ZoneInfo) -> float:
-    now = datetime.now(tz)
-    target = now.replace(hour=hour, minute=minute, second=0, microsecond=0)
-    if target <= now:
-        from datetime import timedelta
-        target += timedelta(days=1)
-    return (target - now).total_seconds()
+async def _run_market_scan_if_due(market: str) -> bool:
+    from features.strategy.value_scan.engine import get_scan_status, run_daily
+    from features.strategy.value_scan.scan_schedule import should_run_catchup
+
+    if not should_run_catchup(market):
+        return False
+    status = await get_scan_status()
+    if status.get("running"):
+        return False
+    print(f"[ValueScan] catch-up scan starting: {market.upper()}")
+    loop = asyncio.get_event_loop()
+    await loop.run_in_executor(None, lambda: run_daily(markets=[market]))
+    print(f"[ValueScan] catch-up scan done: {market.upper()}")
+    return True
 
 
 async def _value_scan_scheduler() -> None:
-    from features.strategy.value_scan.engine import run_daily, get_scan_status
-    while True:
-        # sleep until the nearest upcoming schedule
-        waits = [
-            (_seconds_until(s["hour"], s["minute"], s["tz"]), s)
-            for s in _SCHEDULES
-        ]
-        waits.sort(key=lambda x: x[0])
-        secs, sched = waits[0]
-        print(f"[ValueScan] next auto-scan: {sched['market'].upper()} in {secs/3600:.1f}h")
-        await asyncio.sleep(secs)
+    """장 마감 시각 이후, 시장별 거래일 기준 하루 1회 스캔."""
+    from features.strategy.value_scan.scan_schedule import build_schedule_status
 
-        now_tz = datetime.now(sched["tz"])
-        if now_tz.weekday() >= 5:  # skip weekends
-            continue
-        status = await get_scan_status()
-        if status["running"]:
-            continue
-        print(f"[ValueScan] auto-scan starting: {sched['market'].upper()}")
-        loop = asyncio.get_event_loop()
-        await loop.run_in_executor(None, lambda: run_daily(markets=[sched["market"]]))
-        print(f"[ValueScan] auto-scan done: {sched['market'].upper()}")
+    await asyncio.sleep(15)
+    for market in ("kospi", "nasdaq"):
+        try:
+            await _run_market_scan_if_due(market)
+        except Exception as exc:
+            print(f"[ValueScan] startup catch-up {market} failed: {exc}")
+
+    while True:
+        try:
+            st = build_schedule_status(running=False)
+            pending = [m for m, due in st.get("catchup_pending", {}).items() if due]
+            if pending:
+                print(f"[ValueScan] catch-up pending: {', '.join(pending)}")
+            for market in ("kospi", "nasdaq"):
+                try:
+                    await _run_market_scan_if_due(market)
+                except Exception as exc:
+                    print(f"[ValueScan] catch-up {market} error: {exc}")
+        except Exception as exc:
+            print(f"[ValueScan] scheduler tick error: {exc}")
+        await asyncio.sleep(_VALUE_SCAN_POLL_SEC)
 
 
 @asynccontextmanager

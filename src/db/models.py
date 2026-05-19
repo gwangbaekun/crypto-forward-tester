@@ -2,8 +2,18 @@
 from datetime import datetime
 from typing import Optional
 
-from sqlalchemy import DateTime, Float, Integer, String, Text, inspect, text
-from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
+from sqlalchemy import (
+    DateTime,
+    Float,
+    ForeignKey,
+    Integer,
+    String,
+    Text,
+    UniqueConstraint,
+    inspect,
+    text,
+)
+from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
 
 class Base(DeclarativeBase):
@@ -82,6 +92,120 @@ class ForwardTrade(Base):
     duration_min: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
     close_note: Mapped[Optional[str]] = mapped_column(String(256), nullable=True)
     strategy: Mapped[Optional[str]] = mapped_column(String(32), nullable=True, index=True)
+
+
+class ValueScanMarketMeta(Base):
+    """시장별 마지막 일간 스캔 (하루 1회 catch-up 판단용)."""
+
+    __tablename__ = "value_scan_market_meta"
+
+    market: Mapped[str] = mapped_column(String(16), primary_key=True)
+    last_scan_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    last_trading_date: Mapped[Optional[str]] = mapped_column(String(10), nullable=True, index=True)
+    last_scanned: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    last_buy: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    last_sell: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    last_new_entries: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    last_new_exits: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+
+
+class ValueScanPosition(Base):
+    """Value Scan 오픈 포지션 (KOSPI / NASDAQ)."""
+
+    __tablename__ = "value_scan_positions"
+    __table_args__ = (UniqueConstraint("market", "symbol", name="uq_value_scan_pos_market_symbol"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    market: Mapped[str] = mapped_column(String(16), nullable=False, index=True)
+    symbol: Mapped[str] = mapped_column(String(32), nullable=False, index=True)
+    name: Mapped[str] = mapped_column(String(256), nullable=False, default="")
+    sector: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
+    first_entry_date: Mapped[str] = mapped_column(String(10), nullable=False)
+    invested_usd: Mapped[float] = mapped_column(Float, nullable=False, default=1.0)
+    per: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    sector_median: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    eps: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    fwd_eps: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    pbr: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, nullable=False, default=datetime.utcnow, onupdate=datetime.utcnow
+    )
+
+    lots: Mapped[list["ValueScanLot"]] = relationship(
+        back_populates="position",
+        cascade="all, delete-orphan",
+        order_by="ValueScanLot.lot_date",
+    )
+
+
+class ValueScanLot(Base):
+    """포지션 내 $1 lot (추가 매수 단위)."""
+
+    __tablename__ = "value_scan_lots"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    position_id: Mapped[int] = mapped_column(
+        Integer,
+        ForeignKey("value_scan_positions.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    lot_date: Mapped[str] = mapped_column(String(10), nullable=False)
+    price: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    unit_usd: Mapped[float] = mapped_column(Float, nullable=False, default=1.0)
+
+    position: Mapped["ValueScanPosition"] = relationship(back_populates="lots")
+
+
+class ValueScanClosedTrade(Base):
+    """청산된 Value Scan 거래."""
+
+    __tablename__ = "value_scan_closed_trades"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    market: Mapped[str] = mapped_column(String(16), nullable=False, index=True)
+    symbol: Mapped[str] = mapped_column(String(32), nullable=False, index=True)
+    name: Mapped[str] = mapped_column(String(256), nullable=False, default="")
+    sector: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
+    first_entry_date: Mapped[str] = mapped_column(String(10), nullable=False)
+    exit_date: Mapped[str] = mapped_column(String(10), nullable=False, index=True)
+    exit_price: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    exit_reason: Mapped[Optional[str]] = mapped_column(String(32), nullable=True)
+    invested_usd: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    pnl_pct: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    pnl_usd: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    hold_days: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    per: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    sector_median: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    eps: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    fwd_eps: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    pbr: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    closed_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.utcnow)
+
+    lots: Mapped[list["ValueScanClosedLot"]] = relationship(
+        back_populates="trade",
+        cascade="all, delete-orphan",
+        order_by="ValueScanClosedLot.lot_date",
+    )
+
+
+class ValueScanClosedLot(Base):
+    """청산 시점 lot 스냅샷."""
+
+    __tablename__ = "value_scan_closed_lots"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    trade_id: Mapped[int] = mapped_column(
+        Integer,
+        ForeignKey("value_scan_closed_trades.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    lot_date: Mapped[str] = mapped_column(String(10), nullable=False)
+    price: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    unit_usd: Mapped[float] = mapped_column(Float, nullable=True, default=1.0)
+
+    trade: Mapped["ValueScanClosedTrade"] = relationship(back_populates="lots")
 
 
 class CTraderToken(Base):
