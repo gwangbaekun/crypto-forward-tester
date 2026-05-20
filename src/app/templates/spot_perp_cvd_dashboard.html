@@ -193,7 +193,14 @@
             .catch(function(e) { console.warn('[chart] fetch error', e); });
     }
 
-    // ── 에러 처리 ─────────────────────────────────────────────────────────────
+    // ── 상태 표시 ─────────────────────────────────────────────────────────────
+    function _setWaiting() {
+        // pre-entry 윈도우 밖 — 정상 대기 상태, 에러 아님
+        var badge = document.getElementById('sig-badge');
+        if (badge && badge.textContent === 'Idle') return; // 이미 대기 중
+        if (badge) { badge.textContent = 'Waiting…'; badge.className = 'signal-badge none'; }
+    }
+
     function _crash(msg) {
         var banner = document.getElementById('error-banner');
         var msgEl  = document.getElementById('error-msg');
@@ -310,33 +317,24 @@
 
         fetch('/quant/spot_perp_cvd/realtime_state?symbol=' + SYMBOL + '&timeframes=1h', { cache: 'no-store' })
             .then(function(r) {
-                if (!r.ok) {
-                    _crash('realtime_state HTTP ' + r.status + ' — 서버 응답 없음');
-                }
+                if (!r.ok) _crash('realtime_state HTTP ' + r.status);
                 return r.json();
             })
             .then(function(d) {
+                // 빈 응답 = pre-entry 윈도우 밖 (정상) → 가격은 market-stream이 담당
                 if (!d || typeof d !== 'object' || Object.keys(d).length === 0) {
-                    _crash('realtime_state 빈 응답 — pre-entry 윈도우 밖이거나 서버 초기화 중');
+                    _setWaiting();
+                    return;
                 }
+                // current_price 없으면 진짜 데이터 오류
                 if (!d.current_price) {
-                    _crash('current_price 없음 — Binance 데이터 미수신: ' + JSON.stringify(d));
+                    _crash('current_price 없음 — Binance 미수신: ' + JSON.stringify(d));
                 }
-
-                document.getElementById('price').textContent =
-                    '$' + Number(d.current_price).toLocaleString(undefined, {minimumFractionDigits: 1});
                 document.getElementById('symbol-label').textContent = SYMBOL;
-
                 renderSignal(d.signal || {});
-
-                // 포지션 라인 갱신은 ForwardTestDashboard 콜백에서
             })
             .catch(function(e) {
-                // _crash가 throw해서 여기 안 오는 경우도 있지만,
-                // fetch 자체 실패(네트워크)는 여기서 잡힘
-                if (e && e.message && e.message.indexOf('[spot_perp_cvd]') === 0) {
-                    throw e; // 이미 _crash에서 처리됨
-                }
+                if (e && e.message && e.message.indexOf('[spot_perp_cvd]') === 0) throw e;
                 _crash('fetch 실패: ' + (e && e.message ? e.message : String(e)));
             });
 

@@ -147,7 +147,7 @@ spot_perp_cvd:
   emoji: "⚡"
   telegram_alerts: true
   discord_alerts: true
-  binance_live: false
+  binance_live: true
   binance_leverage: 3
   ctrader_live: true
   ctrader_account_id: 47198415  # FTMO live
