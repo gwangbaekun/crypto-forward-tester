@@ -47,8 +47,8 @@ cvd_explosion:
     fn: get_state
 
 eth_cvd_explosion:
-  enabled: true
-  monitoring: true
+  enabled: false
+  monitoring: false
   symbol: "ETHUSDT"
   tick_interval: 10
   exit_tick_interval: 1.0
@@ -59,9 +59,9 @@ eth_cvd_explosion:
   strategy_tag: eth_cvd_explosion
   label: "ETH CVD Explosion"
   emoji: "🔷"
-  telegram_alerts: true
-  discord_alerts: true
-  binance_live: true
+  telegram_alerts: false
+  discord_alerts: false
+  binance_live: false
   binance_leverage: 3
   ctrader_live: false
   ctrader_account_id: 47198415  # FTMO live
@@ -132,4 +132,27 @@ oi_cvd_surge:
   binance_leverage: 3
   tick:
     module: features.strategy.oi_cvd_surge.realtime_feed
+    fn: get_state
+
+spot_perp_cvd:
+  enabled: true
+  monitoring: true
+  symbol: "ETHUSDT"
+  tick_interval: 10
+  exit_tick_interval: 1.0
+  timeframes: ["1h"]
+  entry_tf: "1h"
+  strategy_tag: spot_perp_cvd
+  label: "Spot-Perp CVD Divergence"
+  emoji: "⚡"
+  telegram_alerts: true
+  discord_alerts: true
+  binance_live: false
+  binance_leverage: 3
+  ctrader_live: true
+  ctrader_account_id: 47198415  # FTMO live
+  ctrader_env: live
+  ctrader_symbol_id: 323        # ETHUSD on FTMO live
+  tick:
+    module: features.strategy.spot_perp_cvd.forward_test_runner
     fn: get_state

@@ -1,0 +1,392 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Spot-Perp CVD — Forward Test</title>
+    <meta name="monitoring-start" content="{% if monitoring_start_by_default is defined %}{{ monitoring_start_by_default|tojson }}{% else %}true{% endif %}">
+    <link rel="stylesheet" href="/static/css/dashboard_common.css">
+    <script src="/static/js/forward_test_dashboard.js?v=4"></script>
+    <script src="https://unpkg.com/lightweight-charts@4.2.2/dist/lightweight-charts.standalone.production.js"></script>
+</head>
+<body>
+<div class="container">
+
+    <div class="card" style="padding:12px 14px;">
+        <div class="main-header">
+            <div class="header-left">
+                <span class="strategy-tag">Spot-Perp CVD</span>
+                <span class="symbol-badge" id="symbol-label">ETHUSDT</span>
+                <span class="status-dot" id="dot"></span>
+            </div>
+            <div style="display:flex;align-items:center;gap:10px;">
+                <span class="price-display" id="price">—</span>
+                <a href="/" class="back">← Home</a>
+            </div>
+        </div>
+    </div>
+
+    <div class="card" style="padding:10px 14px">
+        <div class="ctrl">
+            <span class="ctrl-label">Monitor</span>
+            <button id="btn-toggle" class="primary" onclick="toggleMonitor()">Start</button>
+            <button onclick="loadOnce()">Refresh</button>
+        </div>
+    </div>
+
+    <!-- 에러 배너 (데이터 없을 때 표시) -->
+    <div id="error-banner" style="display:none;background:#4a1515;border:1px solid #c0392b;border-radius:8px;padding:14px 18px;margin-bottom:12px;">
+        <div style="color:#e74c3c;font-weight:bold;font-size:1rem;margin-bottom:6px;">⛔ DATA ERROR — APP CRASHED</div>
+        <div id="error-msg" style="color:#ff6b6b;font-size:0.85rem;font-family:monospace;"></div>
+        <button onclick="window.location.reload()" style="margin-top:10px;background:#c0392b;border:none;color:#fff;padding:6px 14px;border-radius:5px;cursor:pointer;">Reload</button>
+    </div>
+
+    <!-- 가격 차트 -->
+    <div class="card" id="chart-card">
+        <div class="card-title" style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
+            <span id="chart-title-text">Price chart (1h)</span>
+            <button id="chart-toggle-btn" onclick="toggleChart()" style="font-size:0.72rem;padding:3px 9px;">Collapse</button>
+        </div>
+        <div id="chart-wrap">
+            <div id="price-chart" style="height:280px;border-radius:6px;overflow:hidden;"></div>
+        </div>
+    </div>
+
+    <!-- 신호 -->
+    <div class="card">
+        <div class="card-title">Signal — Spot-Perp CVD Divergence</div>
+        <div class="signal-row">
+            <span class="signal-badge none" id="sig-badge">Idle</span>
+        </div>
+        <div class="metrics-grid" style="margin-top:14px">
+            <div class="metric"><span class="metric-key">Spot CVD%</span><span class="metric-val" id="m-spot-cvd">—</span></div>
+            <div class="metric"><span class="metric-key">Perp CVD%</span><span class="metric-val" id="m-perp-cvd">—</span></div>
+            <div class="metric"><span class="metric-key">Lookback</span><span class="metric-val" id="m-lookback">—</span></div>
+            <div class="metric"><span class="metric-key">SL</span><span class="metric-val" id="m-sl">—</span></div>
+        </div>
+        <div style="margin-top:10px;font-size:0.72rem;color:var(--text-secondary);">
+            Entry TF: <span id="m-entry-tf">—</span> &nbsp;|&nbsp;
+            Thresholds: spot ±<span id="m-spot-thr">—</span>% / perp ±<span id="m-perp-thr">—</span>%
+        </div>
+    </div>
+
+    <!-- 진입 이유 -->
+    <div class="card">
+        <div class="card-title">Signal reasons</div>
+        <ul class="reasons-list" id="reasons-list"><li>—</li></ul>
+    </div>
+
+    <!-- cTrader -->
+    <div class="card" id="ctrader-card">
+        <div class="step-label">cTrader position</div>
+        <div class="card-header">
+            <span id="ctrader-mode-label" style="font-size:0.75rem;color:var(--text-secondary);">Fetching…</span>
+            <button type="button" onclick="refreshCtraderStatus()" style="font-size:0.72rem;padding:3px 8px;">Refresh</button>
+        </div>
+        <div id="ctrader-status" style="font-size:0.8rem;margin:8px 0;color:var(--text-secondary);">Fetching…</div>
+    </div>
+
+    <!-- Forward Test -->
+    <div class="card">
+        <div class="step-label">Forward Test</div>
+        <div class="card-header">
+            <span>🤖 Forward test P&amp;L</span>
+            <div style="display:flex;gap:6px;align-items:center;">
+                <button onclick="location.href='/quant/spot_perp_cvd/forward_test/trades?symbol=' + encodeURIComponent(SYMBOL)"
+                        style="font-size:0.72rem;padding:3px 8px;">All trades</button>
+                <button onclick="location.href='/quant/spot_perp_cvd/signal/logs/view?symbol=' + encodeURIComponent(SYMBOL)"
+                        style="font-size:0.72rem;padding:3px 8px;">Signal log</button>
+            </div>
+        </div>
+        <div id="forward-stats" style="min-height:60px;color:var(--text-secondary);">Loading…</div>
+        <div id="forward-trades-box" style="margin-top:14px; padding-top:14px; border-top:1px solid var(--border-color);">
+            <div style="font-size:0.8rem;font-weight:bold;margin-bottom:8px;color:var(--text-primary);">📋 Recent trades</div>
+            <div id="forward-trades-list" style="font-size:0.75rem;color:var(--text-secondary);">Loading…</div>
+            <div id="forward-trades-pagination" style="margin-top:8px;display:flex;gap:6px;align-items:center;flex-wrap:wrap;"></div>
+        </div>
+    </div>
+
+</div>
+
+<script>
+(function() {
+    var _params = new URLSearchParams(window.location.search);
+    var SYMBOL = _params.get('symbol') || 'ETHUSDT';
+    window.SYMBOL = SYMBOL;
+    var timer = null;
+    var ctraderTimer = null;
+    var priceTimer = null;
+    var running = false;
+    var CTRADER_POLL_SEC = 30.0;
+    var PRICE_POLL_SEC   = 5.0;
+
+    // ── 차트 ──────────────────────────────────────────────────────────────────
+    var _chart = null, _candleSeries = null;
+    var _positionPriceLines = [];
+    var _chartOpen = true;
+
+    function toggleChart() {
+        _chartOpen = !_chartOpen;
+        document.getElementById('chart-wrap').style.display = _chartOpen ? '' : 'none';
+        document.getElementById('chart-toggle-btn').textContent = _chartOpen ? 'Collapse' : 'Expand';
+    }
+    window.toggleChart = toggleChart;
+
+    function _initChart() {
+        if (_chart) return;
+        var LC = window.LightweightCharts;
+        if (!LC) return;
+        _chart = LC.createChart(document.getElementById('price-chart'), {
+            layout: { background: { color: '#161b22' }, textColor: '#8b949e' },
+            grid:   { vertLines: { color: '#21262d' }, horzLines: { color: '#21262d' } },
+            crosshair: { mode: 1 },
+            rightPriceScale: { borderColor: '#30363d', scaleMargins: { top: 0.1, bottom: 0.1 } },
+            timeScale: { borderColor: '#30363d', timeVisible: true, secondsVisible: false },
+            height: 280,
+        });
+        _candleSeries = _chart.addCandlestickSeries({
+            upColor: '#26a69a', downColor: '#ef5350',
+            borderUpColor: '#26a69a', borderDownColor: '#ef5350',
+            wickUpColor: '#26a69a', wickDownColor: '#ef5350',
+        });
+    }
+
+    function _clearPositionLines() {
+        if (!_candleSeries) return;
+        _positionPriceLines.forEach(function(pl) {
+            try { _candleSeries.removePriceLine(pl); } catch(e) {}
+        });
+        _positionPriceLines = [];
+    }
+
+    function _drawPositionLines(pos) {
+        _clearPositionLines();
+        if (!_candleSeries || !pos) return;
+        if (pos.entry_price) {
+            _positionPriceLines.push(_candleSeries.createPriceLine({
+                price: Number(pos.entry_price), color: '#f0883e',
+                lineWidth: 1, lineStyle: 1, axisLabelVisible: true, title: 'Entry',
+            }));
+        }
+        if (pos.sl) {
+            _positionPriceLines.push(_candleSeries.createPriceLine({
+                price: Number(pos.sl), color: '#e74c3c',
+                lineWidth: 2, lineStyle: 0, axisLabelVisible: true, title: 'SL',
+            }));
+        }
+    }
+
+    function _loadChart() {
+        if (!_chartOpen) return;
+        _initChart();
+        if (!_candleSeries) return;
+        // 서버 캐싱 엔드포인트 경유 — Binance 직접 호출 없음
+        fetch('/quant/spot_perp_cvd/klines?symbol=' + SYMBOL + '&interval=1h&limit=150', { cache: 'no-store' })
+            .then(function(r) { return r.json(); })
+            .then(function(d) {
+                if (!d.ok) { console.warn('[chart] klines error:', d.error); return; }
+                var candles = d.candles || [];
+                if (!candles.length) return;
+                _candleSeries.setData(candles);
+                _chart.timeScale().fitContent();
+            })
+            .catch(function(e) { console.warn('[chart] fetch error', e); });
+    }
+
+    // ── 에러 처리 ─────────────────────────────────────────────────────────────
+    function _crash(msg) {
+        var banner = document.getElementById('error-banner');
+        var msgEl  = document.getElementById('error-msg');
+        if (banner) banner.style.display = '';
+        if (msgEl)  msgEl.textContent = msg;
+        // 모든 타이머 정지
+        if (priceTimer)   { clearInterval(priceTimer);   priceTimer   = null; }
+        if (timer)        { clearInterval(timer);        timer        = null; }
+        if (ctraderTimer) { clearInterval(ctraderTimer); ctraderTimer = null; }
+        running = false;
+        var btn = document.getElementById('btn-toggle');
+        if (btn) { btn.textContent = 'Start'; btn.className = 'primary'; }
+        document.getElementById('dot').className = 'dot';
+        throw new Error('[spot_perp_cvd] ' + msg);
+    }
+
+    // ── 가격 폴 (서버 WS 캐시 경유 — Binance 직접 호출 없음) ─────────────────
+    function _pollPrice() {
+        fetch('/api/market-stream?symbol=' + SYMBOL, { cache: 'no-store' })
+            .then(function(r) { return r.json(); })
+            .then(function(d) {
+                var lower = SYMBOL.toLowerCase();
+                var row = (((d || {}).marks || {}).symbols || {})[lower];
+                if (row && row.price != null) {
+                    document.getElementById('price').textContent =
+                        '$' + Number(row.price).toLocaleString(undefined, { minimumFractionDigits: 1 });
+                }
+            })
+            .catch(function() {});
+    }
+
+    // ── cTrader ───────────────────────────────────────────────────────────────
+    function refreshCtraderStatus() {
+        var statusEl = document.getElementById('ctrader-status');
+        var labelEl  = document.getElementById('ctrader-mode-label');
+        if (!statusEl || !labelEl) return;
+
+        fetch('/auth/ctrader/positions', { cache: 'no-store' })
+            .then(function(r) { return r.json(); })
+            .then(function(data) {
+                if (data && data.error && (!data.positions || !data.positions.length)) {
+                    labelEl.textContent = 'No executor';
+                    labelEl.style.color = 'var(--text-secondary)';
+                    statusEl.textContent = '⚠️ ' + data.error;
+                    return;
+                }
+                var positions = data.positions || [];
+                labelEl.textContent = data.account_count > 0
+                    ? '🔴 LIVE (' + data.account_count + ' account)'
+                    : '—';
+                labelEl.style.color = 'var(--accent-red)';
+                if (!positions.length) {
+                    statusEl.textContent = 'No open positions';
+                    return;
+                }
+                statusEl.innerHTML = positions.map(function(pos) {
+                    var side = pos.side || '?';
+                    var sideColor = side === 'BUY' ? 'var(--accent-green)' : 'var(--accent-red)';
+                    var vol = pos.volume != null ? (pos.volume / 100).toFixed(2) + ' lots' : '?';
+                    var price = pos.price ? '$' + Number(pos.price).toLocaleString(undefined,{minimumFractionDigits:1}) : '?';
+                    var sl = pos.stopLoss ? '$' + Number(pos.stopLoss).toLocaleString(undefined,{minimumFractionDigits:1}) : '—';
+                    var openDt = pos.openTimestamp ? new Date(pos.openTimestamp).toLocaleString() : '?';
+                    return '<div style="padding:4px 0;border-bottom:1px solid var(--border-color)">' +
+                        '📌 <strong style="color:' + sideColor + ';">' + side + '</strong>' +
+                        ' &nbsp;|&nbsp; posId: <code>' + pos.positionId + '</code>' +
+                        ' &nbsp;|&nbsp; ' + vol +
+                        ' &nbsp;|&nbsp; Entry: ' + price +
+                        '<br>SL: ' + sl +
+                        ' &nbsp;|&nbsp; Opened: ' + openDt +
+                        '</div>';
+                }).join('');
+            })
+            .catch(function(e) {
+                labelEl.textContent = 'Error';
+                labelEl.style.color = 'var(--accent-red)';
+                statusEl.textContent = '❌ ' + (e && e.message ? e.message : String(e));
+            });
+    }
+    window.refreshCtraderStatus = refreshCtraderStatus;
+
+    // ── 신호 렌더 ─────────────────────────────────────────────────────────────
+    function renderSignal(sig) {
+        var signal = sig.signal || 'none';
+        var badge = document.getElementById('sig-badge');
+        badge.textContent = signal === 'long' ? '📈 LONG' : signal === 'short' ? '📉 SHORT' : 'Idle';
+        badge.className = 'signal-badge ' + signal;
+
+        var fmtCvd = function(v) {
+            if (v == null) return '—';
+            var n = Number(v);
+            var color = n > 0 ? 'var(--accent-green)' : n < 0 ? 'var(--accent-red)' : 'var(--text)';
+            return '<span style="color:' + color + ';">' + (n >= 0 ? '+' : '') + n.toFixed(3) + '%</span>';
+        };
+        document.getElementById('m-spot-cvd').innerHTML = fmtCvd(sig.spot_cvd_pct);
+        document.getElementById('m-perp-cvd').innerHTML = fmtCvd(sig.perp_cvd_pct);
+        document.getElementById('m-lookback').textContent = sig.lookback != null ? sig.lookback + ' bars' : '—';
+        document.getElementById('m-sl').textContent = sig.sl != null
+            ? '$' + Number(sig.sl).toLocaleString(undefined, {minimumFractionDigits: 1}) : '—';
+        document.getElementById('m-entry-tf').textContent = sig.entry_tf || '—';
+        document.getElementById('m-spot-thr').textContent = sig.spot_threshold != null ? sig.spot_threshold : '—';
+        document.getElementById('m-perp-thr').textContent = sig.perp_threshold != null ? sig.perp_threshold : '—';
+
+        var reasons = sig.reasons || [];
+        var ul = document.getElementById('reasons-list');
+        ul.innerHTML = reasons.length
+            ? reasons.map(function(r) { return '<li>' + r + '</li>'; }).join('')
+            : '<li>—</li>';
+    }
+
+    // ── 메인 폴 ───────────────────────────────────────────────────────────────
+    function loadOnce() {
+        refreshCtraderStatus();
+        _loadChart();
+
+        fetch('/quant/spot_perp_cvd/realtime_state?symbol=' + SYMBOL + '&timeframes=1h', { cache: 'no-store' })
+            .then(function(r) {
+                if (!r.ok) {
+                    _crash('realtime_state HTTP ' + r.status + ' — 서버 응답 없음');
+                }
+                return r.json();
+            })
+            .then(function(d) {
+                if (!d || typeof d !== 'object' || Object.keys(d).length === 0) {
+                    _crash('realtime_state 빈 응답 — pre-entry 윈도우 밖이거나 서버 초기화 중');
+                }
+                if (!d.current_price) {
+                    _crash('current_price 없음 — Binance 데이터 미수신: ' + JSON.stringify(d));
+                }
+
+                document.getElementById('price').textContent =
+                    '$' + Number(d.current_price).toLocaleString(undefined, {minimumFractionDigits: 1});
+                document.getElementById('symbol-label').textContent = SYMBOL;
+
+                renderSignal(d.signal || {});
+
+                // 포지션 라인 갱신은 ForwardTestDashboard 콜백에서
+            })
+            .catch(function(e) {
+                // _crash가 throw해서 여기 안 오는 경우도 있지만,
+                // fetch 자체 실패(네트워크)는 여기서 잡힘
+                if (e && e.message && e.message.indexOf('[spot_perp_cvd]') === 0) {
+                    throw e; // 이미 _crash에서 처리됨
+                }
+                _crash('fetch 실패: ' + (e && e.message ? e.message : String(e)));
+            });
+
+        if (window.ForwardTestDashboard && !window.__FWD_INITED) {
+            window.__FWD_INITED = true;
+            window.ForwardTestDashboard.init({
+                basePath: '/quant/spot_perp_cvd',
+                symbolFn: function() { return SYMBOL; },
+                strategyTag: null,
+                statsElId: 'forward-stats',
+                tradesListElId: 'forward-trades-list',
+                tradesPagerElId: 'forward-trades-pagination',
+                pollMs: 30000,
+                onRendered: function(d) {
+                    _drawPositionLines((d && d.current_position) || null);
+                },
+            });
+        }
+    }
+    window.loadOnce = loadOnce;
+
+    function toggleMonitor() {
+        running = !running;
+        var btn = document.getElementById('btn-toggle');
+        if (running) {
+            btn.textContent = 'Stop'; btn.className = 'active';
+            document.getElementById('dot').className = 'dot live';
+            _pollPrice();
+            priceTimer = setInterval(_pollPrice, PRICE_POLL_SEC * 1000);
+            loadOnce();
+            timer = setInterval(loadOnce, 30000);
+            refreshCtraderStatus();
+            ctraderTimer = setInterval(refreshCtraderStatus, CTRADER_POLL_SEC * 1000);
+        } else {
+            btn.textContent = 'Start'; btn.className = 'primary';
+            document.getElementById('dot').className = 'dot';
+            clearInterval(priceTimer);  priceTimer  = null;
+            clearInterval(timer);       timer       = null;
+            clearInterval(ctraderTimer);ctraderTimer = null;
+        }
+    }
+    window.toggleMonitor = toggleMonitor;
+
+    var monitoringStart = document.querySelector('meta[name="monitoring-start"]').getAttribute('content') !== 'false';
+    if (monitoringStart) {
+        toggleMonitor();
+    } else {
+        loadOnce();
+    }
+})();
+</script>
+</body>
+</html>
