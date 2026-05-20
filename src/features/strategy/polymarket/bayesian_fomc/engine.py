@@ -43,11 +43,11 @@ async def _init_model() -> bool:
 
     key = _fred_key()
     if not key:
-        print("[BF] FRED_API_KEY 없음 — Bayesian FOMC 비활성. 나머지 전략은 정상 동작.")
+        log.warning("[BF] FRED_API_KEY 없음 — Bayesian FOMC 비활성")
         return False
 
     try:
-        print("[BF] FRED 데이터 로딩 중…")
+        log.debug("[BF] FRED 데이터 로딩 중…")
         from features.strategy.polymarket._data.economic import fetch_series
         import pandas as pd
 
@@ -89,14 +89,14 @@ async def _init_model() -> bool:
 
         import pandas as pd
         fomc_df = pd.DataFrame(rows).sort_values("meeting_date").reset_index(drop=True)
-        print(f"[BF] FOMC 히스토리: {len(fomc_df)} 결정 로드 완료")
+        log.debug("[BF] FOMC 히스토리: %d 결정 로드 완료", len(fomc_df))
 
         _model = FOMCModel(min_samples=10, C=2.0)
         _model.load(fomc_df)
         return True
 
     except Exception as e:
-        print(f"[BF] 모델 초기화 실패: {e}")
+        log.warning("[BF] 모델 초기화 실패: %s", e)
         return False
 
 
@@ -159,15 +159,19 @@ async def _scan_once() -> None:
 
     features = _current_features()
     if features is None:
-        print("[BF] FRED 특성값 없음, 스킵")
+        log.debug("[BF] FRED 특성값 없음, 스킵")
         return
 
     model_prob = _model.predict(date.today(), features)
     if model_prob is None:
-        print("[BF] 학습 데이터 부족, 스킵")
+        log.debug("[BF] 학습 데이터 부족, 스킵")
         return
 
-    print(f"[BF] P(hike)={model_prob:.3f} | features={{{', '.join(f'{k}:{round(v,2)}' for k,v in features.items())}}}")
+    log.debug(
+        "[BF] P(hike)=%.3f | features={%s}",
+        model_prob,
+        ", ".join(f"{k}:{round(v, 2)}" for k, v in features.items()),
+    )
 
     keywords = _cfg.get("keywords", ["Fed"])
     min_vol  = _cfg.get("min_volume_usd", 5000)
@@ -182,7 +186,11 @@ async def _scan_once() -> None:
         if sig is None:
             continue
 
-        print(f"[BF] SIGNAL {sig.side:<3} | model={sig.model_prob:.3f} mkt={sig.market_prob:.3f} div={sig.divergence:+.3f} | {sig.question[:50]} | ${sig.volume_usd:.0f} vol")
+        log.debug(
+            "[BF] SIGNAL %s | model=%.3f mkt=%.3f div=%+.3f | %s | $%.0f vol",
+            sig.side, sig.model_prob, sig.market_prob, sig.divergence,
+            sig.question[:50], sig.volume_usd,
+        )
         _save_signal(sig)
 
 
@@ -191,7 +199,7 @@ async def run() -> None:
     _cfg = _load_cfg()
 
     if not _cfg.get("enabled", True):
-        print("[BF] disabled — skipping")
+        log.debug("[BF] disabled — skipping")
         return
 
     ok = await _init_model()
@@ -203,5 +211,5 @@ async def run() -> None:
         try:
             await _scan_once()
         except Exception as e:
-            print(f"[BF] scan error: {e}")
+            log.warning("[BF] scan error: %s", e)
         await asyncio.sleep(interval)

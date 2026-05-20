@@ -49,7 +49,7 @@ async def _refresh_and_scan(ws_client: ws.CLOBWSClient) -> None:
         _markets = {m["condition_id"]: m for m in fetched if m.get("condition_id")}
         for m in fetched:
             ws_client.add_tokens(m.get("yes_token_id"), m.get("no_token_id"))
-        print(f"[PH] markets refreshed: {len(_markets)} active")
+        log.debug("[PH] markets refreshed: %d active", len(_markets))
     except Exception as e:
         log.warning("[PH] market refresh failed: %s", e)
         return
@@ -82,7 +82,10 @@ def _check_market(cid: str, market: dict) -> None:
         return
     _last_signal_ts[cid] = time.time()
 
-    print(f"[PH] PAIR COST={sig.pair_cost:.4f} PROFIT=+{sig.profit_pct:.2f}% | {sig.question[:50]} | ${sig.volume_usd:.0f} vol")
+    log.debug(
+        "[PH] PAIR COST=%.4f PROFIT=+%.2f%% | %s | $%.0f vol",
+        sig.pair_cost, sig.profit_pct, sig.question[:50], sig.volume_usd,
+    )
     _save_signal(sig)
 
 
@@ -130,7 +133,7 @@ async def run(ws_client: ws.CLOBWSClient) -> None:
     _cfg = _load_cfg()
 
     if not _cfg.get("enabled", True):
-        log.info("[PH] disabled — skipping")
+        log.debug("[PH] disabled — skipping")
         return
 
     ws.register_callback(on_price_update)

@@ -19,6 +19,7 @@ from features.strategy.polymarket._data.ws_client import CLOBWSClient
 from features.strategy.polymarket.late_convergence import engine as lc_engine
 from features.strategy.polymarket.pair_hedge       import engine as ph_engine
 from features.strategy.polymarket.bayesian_fomc    import engine as bf_engine
+from features.strategy.polymarket.log_config import configure_polymarket_logging
 
 log = logging.getLogger("polymarket.runner")
 
@@ -35,7 +36,7 @@ async def _resolve_signals() -> None:
         try:
             await _run_resolver()
         except Exception as e:
-            print(f"[Resolver] error: {e}")
+            log.warning("[Resolver] loop error: %s", e)
 
 
 async def _run_resolver() -> None:
@@ -55,7 +56,7 @@ async def _run_resolver() -> None:
         if not rows:
             return
 
-        print(f"[Resolver] checking {len(rows)} unresolved signals")
+        log.debug("[Resolver] checking %d unresolved signals", len(rows))
 
         for sig in rows:
             try:
@@ -121,7 +122,8 @@ def _apply_resolution(sig, outcome: str) -> None:
 
 
 async def run_polymarket() -> None:
-    print("[Polymarket] 전략 러너 시작 (LC + PH + BF + Resolver)")
+    configure_polymarket_logging()
+    log.debug("runner started (LC + PH + BF + Resolver)")
 
     ws_client = CLOBWSClient()
 

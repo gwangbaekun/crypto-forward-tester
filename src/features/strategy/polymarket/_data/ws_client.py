@@ -127,12 +127,12 @@ class CLOBWSClient:
 
     async def _connect(self) -> None:
         tokens = list(self._token_ids)
-        log.info("WS connecting — %d tokens", len(tokens))
+        log.debug("WS connecting — %d tokens", len(tokens))
 
         async with aiohttp.ClientSession() as session:
             async with session.ws_connect(WS_URL, heartbeat=30) as ws:
                 await ws.send_json({"assets_ids": tokens, "type": "market"})
-                log.info("WS subscribed")
+                log.debug("WS subscribed")
 
                 async for msg in ws:
                     if msg.type == aiohttp.WSMsgType.TEXT:
