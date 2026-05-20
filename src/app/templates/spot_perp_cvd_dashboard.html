@@ -76,6 +76,16 @@
         <ul class="reasons-list" id="reasons-list"><li>—</li></ul>
     </div>
 
+    <!-- Binance -->
+    <div class="card">
+        <div class="step-label">Binance position</div>
+        <div class="card-header">
+            <span id="binance-mode-label" style="font-size:0.75rem;color:var(--text-secondary);">Fetching…</span>
+            <button type="button" onclick="refreshBinanceStatus()" style="font-size:0.72rem;padding:3px 8px;">Refresh</button>
+        </div>
+        <div id="binance-status" style="font-size:0.8rem;margin:8px 0;color:var(--text-secondary);">Fetching…</div>
+    </div>
+
     <!-- cTrader -->
     <div class="card" id="ctrader-card">
         <div class="step-label">cTrader position</div>
@@ -114,9 +124,11 @@
     var SYMBOL = _params.get('symbol') || 'ETHUSDT';
     window.SYMBOL = SYMBOL;
     var timer = null;
+    var binanceTimer = null;
     var ctraderTimer = null;
     var priceTimer = null;
     var running = false;
+    var BINANCE_POLL_SEC = 30.0;
     var CTRADER_POLL_SEC = 30.0;
     var PRICE_POLL_SEC   = 5.0;
 
@@ -209,6 +221,7 @@
         // 모든 타이머 정지
         if (priceTimer)   { clearInterval(priceTimer);   priceTimer   = null; }
         if (timer)        { clearInterval(timer);        timer        = null; }
+        if (binanceTimer) { clearInterval(binanceTimer); binanceTimer = null; }
         if (ctraderTimer) { clearInterval(ctraderTimer); ctraderTimer = null; }
         running = false;
         var btn = document.getElementById('btn-toggle');
@@ -231,6 +244,65 @@
             })
             .catch(function() {});
     }
+
+    function _fmtPrice(v) {
+        if (v == null) return '—';
+        return '$' + Number(v).toLocaleString(undefined, { minimumFractionDigits: 1, maximumFractionDigits: 2 });
+    }
+
+    // ── Binance ───────────────────────────────────────────────────────────────
+    function refreshBinanceStatus() {
+        var statusEl = document.getElementById('binance-status');
+        var labelEl  = document.getElementById('binance-mode-label');
+        if (!statusEl || !labelEl) return Promise.resolve();
+
+        return fetch('/quant/spot_perp_cvd/execute/status?symbol=' + SYMBOL, { cache: 'no-store' })
+            .then(function(r) { return r.json(); })
+            .then(function(data) {
+                if (data && data.error) {
+                    labelEl.textContent = 'Executor disabled';
+                    labelEl.style.color = 'var(--accent-red)';
+                    statusEl.textContent = '❌ ' + data.error;
+                    return;
+                }
+                if (data && data.enabled === false) {
+                    labelEl.textContent = 'Disabled';
+                    labelEl.style.color = 'var(--text-secondary)';
+                    statusEl.textContent = data.message || 'binance_live 비활성화';
+                    return;
+                }
+                var isTestnet = !!(data && data.testnet);
+                labelEl.textContent = isTestnet ? '🟡 TESTNET' : '🔴 LIVE';
+                labelEl.style.color = isTestnet ? '#f39c12' : '#e74c3c';
+
+                var pos = data && data.binance_position;
+                if (pos) {
+                    var amt = parseFloat(pos.positionAmt || 0);
+                    var side = amt > 0 ? 'LONG' : 'SHORT';
+                    var size = Math.abs(amt);
+                    var entry = parseFloat(pos.entryPrice || 0);
+                    var mark = parseFloat(data.exchange_price || 0);
+                    var upnl = parseFloat(pos.unRealizedProfit || 0);
+                    statusEl.innerHTML =
+                        '💰 Balance: ' + Number(data.balance_usdt || 0).toFixed(2) + ' USDT' +
+                        ' &nbsp;|&nbsp; 📊 Mark: ' + _fmtPrice(mark) +
+                        '<br>📌 Position: <strong style="color:' + (side === 'LONG' ? 'var(--accent-green)' : 'var(--accent-red)') + ';">' + side + '</strong> ' +
+                        size + ' (entry ' + _fmtPrice(entry) + ')' +
+                        ' &nbsp;|&nbsp; UPNL: <strong style="color:' + (upnl >= 0 ? 'var(--accent-green)' : 'var(--accent-red)') + ';">' + (upnl >= 0 ? '+' : '') + upnl.toFixed(4) + '</strong>';
+                } else {
+                    statusEl.innerHTML =
+                        '💰 Balance: ' + Number(data.balance_usdt || 0).toFixed(2) + ' USDT' +
+                        ' &nbsp;|&nbsp; 📊 Mark: ' + _fmtPrice(data.exchange_price || 0) +
+                        '<br>No open position on Binance';
+                }
+            })
+            .catch(function(e) {
+                labelEl.textContent = 'Connection error';
+                labelEl.style.color = 'var(--accent-red)';
+                statusEl.textContent = '❌ Connection failed: ' + (e && e.message ? e.message : e);
+            });
+    }
+    window.refreshBinanceStatus = refreshBinanceStatus;
 
     // ── cTrader ───────────────────────────────────────────────────────────────
     function refreshCtraderStatus() {
@@ -312,6 +384,7 @@
 
     // ── 메인 폴 ───────────────────────────────────────────────────────────────
     function loadOnce() {
+        refreshBinanceStatus();
         refreshCtraderStatus();
         _loadChart();
 
@@ -366,6 +439,9 @@
             priceTimer = setInterval(_pollPrice, PRICE_POLL_SEC * 1000);
             loadOnce();
             timer = setInterval(loadOnce, 30000);
+            refreshBinanceStatus();
+            if (binanceTimer) clearInterval(binanceTimer);
+            binanceTimer = setInterval(refreshBinanceStatus, BINANCE_POLL_SEC * 1000);
             refreshCtraderStatus();
             ctraderTimer = setInterval(refreshCtraderStatus, CTRADER_POLL_SEC * 1000);
         } else {
@@ -373,6 +449,7 @@
             document.getElementById('dot').className = 'dot';
             clearInterval(priceTimer);  priceTimer  = null;
             clearInterval(timer);       timer       = null;
+            clearInterval(binanceTimer);binanceTimer = null;
             clearInterval(ctraderTimer);ctraderTimer = null;
         }
     }

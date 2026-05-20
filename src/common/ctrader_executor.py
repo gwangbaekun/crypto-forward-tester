@@ -143,9 +143,13 @@ class CTraderExecutor:
         self._ready_event                              = threading.Event()
         self._authed                                   = False
         self._lock                                     = threading.Lock()
+        self._send_lock                                = threading.Lock()  # 동시 전송 직렬화
         self._pending: Optional[concurrent.futures.Future] = None
         self._open_position_id: Optional[int]          = None
         self._refresh_attempted                         = False
+        self._position_cache: Optional[Dict]           = None
+        self._position_cache_ts: float                 = 0.0
+        self._position_fetch_lock: Optional[asyncio.Lock] = None  # lazy init (event loop 필요)
 
         self._reactor = _ensure_reactor()
         # reactor가 이미 실행 중이면 thread-safe하게 setup 예약
@@ -389,26 +393,28 @@ class CTraderExecutor:
             print("[cTrader] 연결 대기 타임아웃")
             return None
 
-        loop = concurrent.futures.Future()
-        with self._lock:
-            self._pending = loop
-
-        def _send_from_thread():
-            try:
-                d = self._client.send(req)
-                if d is not None and hasattr(d, "addErrback"):
-                    d.addErrback(lambda f: None)
-            except Exception as exc:
-                print(f"[cTrader] send 예외 (account={self._account_id}): {exc}")
-        self._reactor.callFromThread(_send_from_thread)
-
-        try:
-            return loop.result(timeout=timeout)
-        except concurrent.futures.TimeoutError:
-            print("[cTrader] 응답 타임아웃")
+        # 동시에 여러 요청이 _pending 슬롯을 덮어쓰지 않도록 직렬화
+        with self._send_lock:
+            loop = concurrent.futures.Future()
             with self._lock:
-                self._pending = None
-            return None
+                self._pending = loop
+
+            def _send_from_thread():
+                try:
+                    d = self._client.send(req)
+                    if d is not None and hasattr(d, "addErrback"):
+                        d.addErrback(lambda f: None)
+                except Exception as exc:
+                    print(f"[cTrader] send 예외 (account={self._account_id}): {exc}")
+            self._reactor.callFromThread(_send_from_thread)
+
+            try:
+                return loop.result(timeout=timeout)
+            except concurrent.futures.TimeoutError:
+                print("[cTrader] 응답 타임아웃")
+                with self._lock:
+                    self._pending = None
+                return None
 
     # ── asyncio 공개 API ─────────────────────────────────────────────────────
 
@@ -442,6 +448,7 @@ class CTraderExecutor:
 
         result = await self._run_in_executor(_send)
         if result:
+            self._position_cache = None  # 진입 후 포지션 캐시 무효화
             print(f"[cTrader] ✅ 진입 — side={side} lots={self._lot_size} fill={result.get('avgPrice', 0):.4f}")
         return result
 
@@ -463,6 +470,7 @@ class CTraderExecutor:
         result = await self._run_in_executor(_send)
         if result:
             self._open_position_id = None
+            self._position_cache = None  # 청산 후 포지션 캐시 무효화
             print(f"[cTrader] ✅ 청산 — fill={result.get('avgPrice', 0):.4f}")
         return result
 
@@ -507,20 +515,44 @@ class CTraderExecutor:
         if result:
             if self._open_position_id == position_id:
                 self._open_position_id = None
+            self._position_cache = None  # 강제 청산 후 포지션 캐시 무효화
             print(f"[cTrader] ✅ 강제 청산 — positionId={position_id} fill={result.get('avgPrice', 0):.4f}")
         return result
 
-    async def get_position(self, symbol: str) -> Optional[Dict]:
+    async def get_position(self, symbol: str, cache_ttl: float = 8.0) -> Optional[Dict]:
+        """오픈 포지션 조회. cache_ttl 초 이내 재요청은 캐시를 반환해 cTrader 부하를 방지.
+
+        - 캐시 stale 상태에서 동시 요청이 몰려도 실제 ReconcileReq 는 1개만 전송.
+        """
+        import time as _t
         if not self._ready():
             return None
 
-        def _send():
-            from ctrader_open_api.messages.OpenApiMessages_pb2 import ProtoOAReconcileReq
-            req = ProtoOAReconcileReq()
-            req.ctidTraderAccountId = self._account_id
-            return self._send_and_wait(req)
+        now = _t.time()
+        if self._position_cache is not None and now - self._position_cache_ts < cache_ttl:
+            return self._position_cache
 
-        return await self._run_in_executor(_send)
+        # asyncio.Lock lazy init (event loop 기동 후 생성)
+        if self._position_fetch_lock is None:
+            self._position_fetch_lock = asyncio.Lock()
+
+        async with self._position_fetch_lock:
+            # Lock 대기 중 다른 코루틴이 이미 채워뒀으면 캐시 반환
+            now = _t.time()
+            if self._position_cache is not None and now - self._position_cache_ts < cache_ttl:
+                return self._position_cache
+
+            def _send():
+                from ctrader_open_api.messages.OpenApiMessages_pb2 import ProtoOAReconcileReq
+                req = ProtoOAReconcileReq()
+                req.ctidTraderAccountId = self._account_id
+                return self._send_and_wait(req)
+
+            result = await self._run_in_executor(_send)
+            if result is not None:
+                self._position_cache = result
+                self._position_cache_ts = _t.time()
+            return result
 
     async def cancel_tp_sl(self, symbol: str) -> None:
         pass
