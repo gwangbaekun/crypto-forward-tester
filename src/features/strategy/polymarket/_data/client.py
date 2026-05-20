@@ -1,0 +1,221 @@
+"""Polymarket async data client — Gamma API + CLOB API.
+
+async 버전. httpx.AsyncClient 사용.
+"""
+from __future__ import annotations
+
+import json
+from datetime import UTC, datetime
+from typing import Any
+
+import httpx
+
+GAMMA_BASE = "https://gamma-api.polymarket.com"
+CLOB_BASE  = "https://clob.polymarket.com"
+TIMEOUT    = 15.0
+
+
+def _parse_ts(iso: str | None) -> int | None:
+    if not iso:
+        return None
+    iso = iso.rstrip("Z").split(".")[0]
+    return int(datetime.fromisoformat(iso).replace(tzinfo=UTC).timestamp())
+
+
+def _safe_float(v: Any) -> float | None:
+    try:
+        return float(v) if v is not None else None
+    except (TypeError, ValueError):
+        return None
+
+
+def _normalize(m: dict, ev: dict | None = None) -> dict[str, Any]:
+    """Raw Gamma market → 표준 dict."""
+    clob = json.loads(m.get("clobTokenIds") or "[]") if isinstance(m.get("clobTokenIds"), str) else (m.get("clobTokenIds") or [])
+    prices_raw = m.get("outcomePrices")
+    prices = json.loads(prices_raw) if isinstance(prices_raw, str) else (prices_raw or [])
+
+    y = _safe_float(prices[0]) if prices else None
+    n = _safe_float(prices[1]) if len(prices) > 1 else None
+
+    resolved_yes: bool | None = None
+    if y is not None and n is not None:
+        if y > 0.98 and n < 0.02:
+            resolved_yes = True
+        elif y < 0.02 and n > 0.98:
+            resolved_yes = False
+
+    last_price = _safe_float(m.get("lastTradePrice")) or y
+
+    end_ts = _parse_ts(m.get("endDate") or m.get("endDateIso"))
+    if end_ts is None and ev:
+        end_ts = _parse_ts(ev.get("endDate"))
+
+    vol = float(m.get("volumeNum") or m.get("volume") or 0.0)
+    if vol == 0.0 and ev:
+        vol = float(ev.get("volumeNum") or ev.get("volume") or 0.0)
+
+    slug = (ev.get("slug") if ev else None) or m.get("slug")
+
+    return {
+        "condition_id":  m.get("conditionId"),
+        "question":      m.get("question", "") or "",
+        "slug":          slug,
+        "start_ts":      _parse_ts(m.get("startDate") or m.get("startDateIso")),
+        "end_ts":        end_ts,
+        "volume_usd":    vol,
+        "yes_token_id":  clob[0] if clob else None,
+        "no_token_id":   clob[1] if len(clob) > 1 else None,
+        "yes_price":     y,
+        "no_price":      n,
+        "last_yes_price": last_price,
+        "resolved_yes":  resolved_yes,
+        "is_closed":     bool(m.get("closed") or (ev.get("closed") if ev else False)),
+        "best_bid":      _safe_float(m.get("bestBid")),
+        "best_ask":      _safe_float(m.get("bestAsk")),
+    }
+
+
+async def fetch_markets(
+    keyword: str,
+    include_closed: bool = False,
+    limit: int = 100,
+    offset: int = 0,
+) -> list[dict[str, Any]]:
+    """이벤트 endpoint 경유 keyword 검색. active 마켓만 기본."""
+    params: dict[str, Any] = {
+        "limit": limit,
+        "offset": offset,
+        "order": "volume",
+        "ascending": "false",
+    }
+    async with httpx.AsyncClient(timeout=TIMEOUT) as cli:
+        r = await cli.get(f"{GAMMA_BASE}/events", params=params)
+        r.raise_for_status()
+        events = r.json()
+
+    if not isinstance(events, list):
+        events = events.get("data", [])
+
+    kw = keyword.lower()
+    results: list[dict[str, Any]] = []
+
+    for ev in events:
+        title = (ev.get("title") or "").lower()
+        title_match = kw in title
+        is_ev_closed = bool(ev.get("closed"))
+
+        for m in ev.get("markets", []):
+            q = (m.get("question") or "").lower()
+            if not title_match and kw not in q:
+                continue
+            if not include_closed and is_ev_closed:
+                continue
+            results.append(_normalize(m, ev))
+
+    return results
+
+
+async def fetch_all_active(keywords: list[str], min_volume: float = 0) -> list[dict[str, Any]]:
+    """여러 keyword 를 합쳐서 active 마켓 목록 반환. 중복 condition_id 제거."""
+    seen: set[str] = set()
+    out: list[dict[str, Any]] = []
+    for kw in keywords:
+        for m in await fetch_markets(kw, include_closed=False, limit=200):
+            cid = m["condition_id"] or m["question"]
+            if cid in seen:
+                continue
+            seen.add(cid)
+            if m["volume_usd"] >= min_volume:
+                out.append(m)
+    return out
+
+
+async def fetch_prices(token_id: str, interval: str = "1h") -> list[dict[str, Any]]:
+    """CLOB 가격 히스토리 (active 마켓만 유효). Returns [{"ts": int, "price": float}]."""
+    async with httpx.AsyncClient(timeout=TIMEOUT) as cli:
+        r = await cli.get(f"{CLOB_BASE}/prices-history", params={
+            "market": token_id, "interval": interval
+        })
+        if r.status_code != 200:
+            return []
+        data = r.json()
+    history = data.get("history", []) if isinstance(data, dict) else []
+    return [{"ts": int(p["t"]), "price": float(p["p"])} for p in history if "t" in p and "p" in p]
+
+
+async def fetch_current_price(token_id: str) -> float | None:
+    """토큰 현재가. 없으면 None."""
+    hist = await fetch_prices(token_id, interval="1h")
+    if not hist:
+        return None
+    return max(hist, key=lambda p: p["ts"])["price"]
+
+
+async def fetch_by_expiry(
+    max_hours: float = 72.0,
+    min_volume: float = 0.0,
+    page_limit: int = 200,
+    max_pages: int = 30,
+) -> list[dict[str, Any]]:
+    """종료 임박순 전체 마켓 스캔.
+
+    active 이벤트를 endDate ascending 으로 페이징하며
+    end_ts ∈ (now, now + max_hours) 인 마켓만 반환.
+    min_volume 필터 적용. 결과는 hours_to_end 오름차순.
+    """
+    now = int(datetime.now(UTC).timestamp())
+    cutoff = now + int(max_hours * 3600)
+
+    seen: set[str] = set()
+    out: list[dict[str, Any]] = []
+
+    async with httpx.AsyncClient(timeout=TIMEOUT) as cli:
+        for page in range(max_pages):
+            params: dict[str, Any] = {
+                "limit": page_limit,
+                "offset": page * page_limit,
+                "order": "endDate",
+                "ascending": "true",
+                "closed": "false",
+                "active": "true",
+            }
+            r = await cli.get(f"{GAMMA_BASE}/events", params=params)
+            r.raise_for_status()
+            events = r.json()
+            if not isinstance(events, list):
+                events = events.get("data", [])
+            if not events:
+                break
+
+            all_past_cutoff = True
+            for ev in events:
+                ev_end = _parse_ts(ev.get("endDate"))
+                # 이벤트 종료 시각이 cutoff 이전인 것만 처리
+                if ev_end is not None and ev_end > cutoff:
+                    continue
+                all_past_cutoff = False
+                if bool(ev.get("closed")):
+                    continue
+
+                for m in ev.get("markets", []):
+                    norm = _normalize(m, ev)
+                    cid = norm["condition_id"] or norm["question"]
+                    if not cid or cid in seen:
+                        continue
+                    if norm["is_closed"]:
+                        continue
+                    end = norm["end_ts"]
+                    if end is None or end <= now or end > cutoff:
+                        continue
+                    if norm["volume_usd"] < min_volume:
+                        continue
+                    seen.add(cid)
+                    hours_left = (end - now) / 3600
+                    norm["hours_to_end"] = round(hours_left, 2)
+                    out.append(norm)
+
+            if all_past_cutoff:
+                break
+
+    return sorted(out, key=lambda m: m["end_ts"] or 0)

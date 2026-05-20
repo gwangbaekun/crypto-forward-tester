@@ -26,6 +26,7 @@ from features.ctrader.router import router as ctrader_auth_router
 from features.home.router import router as home_router
 from features.strategy.router_registry import include_strategy_routers
 from features.strategy.router import router as strategy_router
+from features.strategy.polymarket.router import router as polymarket_router
 
 
 async def startup_binance_price_ws() -> None:
@@ -144,6 +145,14 @@ async def lifespan(_app: FastAPI):
     except Exception as exc:
         print(f"[StrategyLoop] startup skipped: {exc}")
         strategy_task = None
+
+    try:
+        from features.strategy.polymarket.runner import run_polymarket
+        polymarket_task = asyncio.create_task(run_polymarket())
+    except Exception as exc:
+        print(f"[Polymarket] startup skipped: {exc}")
+        polymarket_task = None
+
     scan_task = asyncio.create_task(_value_scan_scheduler())
     yield
     scan_task.cancel()
@@ -151,6 +160,12 @@ async def lifespan(_app: FastAPI):
         await scan_task
     except asyncio.CancelledError:
         pass
+    if polymarket_task:
+        polymarket_task.cancel()
+        try:
+            await polymarket_task
+        except asyncio.CancelledError:
+            pass
     if strategy_task:
         strategy_task.cancel()
         try:
@@ -170,6 +185,7 @@ async def health() -> dict:
 app.include_router(home_router)
 app.include_router(ctrader_auth_router)
 app.include_router(strategy_router)
+app.include_router(polymarket_router)
 include_strategy_routers(app)  # strategies_master.yaml 기반 자동 등록
 
 _project_root = Path(__file__).resolve().parents[2]

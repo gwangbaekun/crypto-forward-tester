@@ -149,7 +149,7 @@ spot_perp_cvd:
   discord_alerts: true
   binance_live: true
   binance_leverage: 3
-  ctrader_live: true
+  ctrader_live: false
   ctrader_account_id: 47198415  # FTMO live
   ctrader_env: live
   ctrader_symbol_id: 323        # ETHUSD on FTMO live

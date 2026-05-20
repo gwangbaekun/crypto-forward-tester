@@ -23,6 +23,7 @@ class Base(DeclarativeBase):
 def create_tables(engine) -> None:
     Base.metadata.create_all(engine)
     _ensure_forward_trades_columns(engine)
+    _ensure_polymarket_signals_columns(engine)
 
 
 def _ensure_forward_trades_columns(engine) -> None:
@@ -206,6 +207,54 @@ class ValueScanClosedLot(Base):
     unit_usd: Mapped[float] = mapped_column(Float, nullable=True, default=1.0)
 
     trade: Mapped["ValueScanClosedTrade"] = relationship(back_populates="lots")
+
+
+def _ensure_polymarket_signals_columns(engine) -> None:
+    """polymarket_signals 신규 컬럼 backfill (기존 DB 호환)."""
+    insp = inspect(engine)
+    if "polymarket_signals" not in insp.get_table_names():
+        return
+    existing = {c["name"] for c in insp.get_columns("polymarket_signals")}
+    required = {
+        "event_end_ts":   "ALTER TABLE polymarket_signals ADD COLUMN event_end_ts INTEGER",
+        "is_resolved":    "ALTER TABLE polymarket_signals ADD COLUMN is_resolved INTEGER DEFAULT 0",
+        "actual_outcome": "ALTER TABLE polymarket_signals ADD COLUMN actual_outcome VARCHAR(8)",
+        "actual_pnl":     "ALTER TABLE polymarket_signals ADD COLUMN actual_pnl FLOAT",
+        "resolved_at":    "ALTER TABLE polymarket_signals ADD COLUMN resolved_at TIMESTAMP",
+    }
+    missing = [sql for col, sql in required.items() if col not in existing]
+    if not missing:
+        return
+    with engine.begin() as conn:
+        for sql in missing:
+            conn.execute(text(sql))
+
+
+class PolymarketSignal(Base):
+    """Polymarket 전략 시그널 로그."""
+
+    __tablename__ = "polymarket_signals"
+
+    id:             Mapped[int]            = mapped_column(Integer, primary_key=True, autoincrement=True)
+    strategy:       Mapped[str]            = mapped_column(String(32),  nullable=False, index=True)
+    condition_id:   Mapped[Optional[str]]  = mapped_column(String(128), nullable=True,  index=True)
+    question:       Mapped[Optional[str]]  = mapped_column(String(512), nullable=True)
+    signal_type:    Mapped[Optional[str]]  = mapped_column(String(32),  nullable=True)
+    yes_price:      Mapped[Optional[float]] = mapped_column(Float,       nullable=True)
+    no_price:       Mapped[Optional[float]] = mapped_column(Float,       nullable=True)
+    pair_cost:      Mapped[Optional[float]] = mapped_column(Float,       nullable=True)
+    divergence:     Mapped[Optional[float]] = mapped_column(Float,       nullable=True)
+    side:           Mapped[Optional[str]]  = mapped_column(String(8),   nullable=True)
+    volume_usd:     Mapped[Optional[float]] = mapped_column(Float,       nullable=True)
+    hours_to_end:   Mapped[Optional[float]] = mapped_column(Float,       nullable=True)
+    yes_token_id:   Mapped[Optional[str]]  = mapped_column(String(128), nullable=True)
+    no_token_id:    Mapped[Optional[str]]  = mapped_column(String(128), nullable=True)
+    event_end_ts:   Mapped[Optional[int]]  = mapped_column(Integer,      nullable=True)
+    is_resolved:    Mapped[int]            = mapped_column(Integer,      nullable=False, default=0)
+    actual_outcome: Mapped[Optional[str]]  = mapped_column(String(8),   nullable=True)
+    actual_pnl:     Mapped[Optional[float]] = mapped_column(Float,       nullable=True)
+    resolved_at:    Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    created_at:     Mapped[datetime]       = mapped_column(DateTime,     nullable=False, default=datetime.utcnow)
 
 
 class CTraderToken(Base):

@@ -1,0 +1,17 @@
+enabled: true
+
+poll_interval_sec: 3600     # 1시간마다 REST 스캔 (이벤트 기반 전략이라 빠를 필요 없음)
+fred_start_year: 2010
+threshold: 0.08             # |model - market| 최소 괴리
+min_volume_usd: 5000
+
+# FRED API key: 환경변수 FRED_API_KEY 로 주입
+# 무료 발급: https://fred.stlouisfed.org/docs/api/api_key.html
+
+keywords:
+  - Fed
+  - FOMC
+  - interest rate
+  - rate cut
+  - rate hike
+  - federal funds

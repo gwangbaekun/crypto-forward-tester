@@ -1,0 +1,7 @@
+enabled: true
+
+poll_interval_sec: 120      # REST 스캔 주기 (2분)
+max_scan_hours: 72          # 종료까지 최대 72시간 이내 전체 스캔
+max_pair_cost: 0.97         # YES_ask + NO_ask 이 이하면 시그널
+min_profit: 0.005           # 최소 0.5% 실수익
+min_volume_usd: 5000        # 유동성 최소 기준

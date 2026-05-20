@@ -1,0 +1,419 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Polymarket — Forward Test</title>
+<link rel="stylesheet" href="/static/css/dashboard_common.css">
+<style>
+  body { padding: 10px 12px 40px; }
+
+  .shell { max-width: 1320px; margin: 0 auto; display: flex; flex-direction: column; gap: 10px; }
+
+  /* ── top bar ── */
+  .topbar {
+    display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 8px;
+    padding: 10px 14px;
+    background: var(--card); border: 1px solid var(--border); border-radius: 8px;
+  }
+  .topbar-title { font-size: 1rem; font-weight: 700; color: var(--text); }
+  .topbar-sub   { font-size: 0.75rem; color: var(--muted); }
+  .last-updated { font-size: 0.72rem; color: var(--muted); }
+
+  /* ── stat pills ── */
+  .stats-row {
+    display: flex; gap: 8px; flex-wrap: wrap;
+  }
+  .stat-pill {
+    flex: 1; min-width: 120px;
+    background: var(--card); border: 1px solid var(--border); border-radius: 8px;
+    padding: 10px 14px;
+    display: flex; flex-direction: column; gap: 2px;
+  }
+  .stat-label { font-size: 0.68rem; color: var(--muted); text-transform: uppercase; letter-spacing: .04em; }
+  .stat-value { font-size: 1.15rem; font-weight: 700; color: var(--text); }
+  .stat-value.green { color: var(--green); }
+  .stat-value.red   { color: var(--red); }
+  .stat-value.blue  { color: var(--blue); }
+
+  /* ── tabs ── */
+  .tabs {
+    display: flex; gap: 4px;
+    background: var(--card); border: 1px solid var(--border); border-radius: 8px;
+    padding: 4px;
+  }
+  .tab-btn {
+    flex: 1; padding: 7px 10px; font-size: 0.76rem; font-weight: 600;
+    border: none; border-radius: 6px; background: transparent; color: var(--muted);
+    cursor: pointer; transition: background .12s, color .12s;
+  }
+  .tab-btn.active { background: rgba(88,166,255,0.15); color: var(--blue); }
+  .tab-btn .count { font-size: 0.65rem; opacity: .7; }
+
+  /* ── filter bar ── */
+  .filter-bar {
+    display: flex; gap: 8px; flex-wrap: wrap; align-items: center;
+    background: var(--card); border: 1px solid var(--border); border-radius: 8px;
+    padding: 8px 12px;
+  }
+  .filter-bar select, .filter-bar button {
+    background: var(--bg); border: 1px solid var(--border); color: var(--text);
+    padding: 5px 9px; border-radius: 6px; font-size: 0.76rem; cursor: pointer;
+  }
+  .filter-bar button:hover { border-color: var(--blue); color: var(--blue); }
+
+  /* ── table ── */
+  .table-wrap { overflow-x: auto; background: var(--card); border: 1px solid var(--border); border-radius: 8px; }
+  .sig-table { width: 100%; border-collapse: collapse; font-size: 0.76rem; }
+  .sig-table th {
+    text-align: left; padding: 8px 10px;
+    border-bottom: 1px solid var(--border); color: var(--muted);
+    font-weight: 600; white-space: nowrap; position: sticky; top: 0;
+    background: var(--card); z-index: 1;
+  }
+  .sig-table td { padding: 7px 10px; border-bottom: 1px solid rgba(48,54,61,.5); vertical-align: middle; }
+  .sig-table tr:last-child td { border-bottom: none; }
+  .sig-table tr:hover td { background: rgba(255,255,255,0.025); }
+
+  /* badges */
+  .badge { display: inline-block; padding: 2px 7px; border-radius: 4px; font-size: 0.68rem; font-weight: 700; }
+  .badge-lc   { background: rgba(88,166,255,.15); color: var(--blue); }
+  .badge-ph   { background: rgba(163,113,247,.15); color: var(--purple); }
+  .badge-bf   { background: rgba(57,211,243,.15); color: var(--cyan); }
+  .badge-yes  { background: rgba(35,134,54,.2); color: #4caf50; }
+  .badge-no   { background: rgba(218,54,51,.2); color: #ef5350; }
+  .badge-both { background: rgba(210,153,34,.2); color: var(--orange); }
+
+  .pnl-pos { color: #4caf50; font-weight: 600; }
+  .pnl-neg { color: #ef5350; font-weight: 600; }
+  .pnl-pending { color: var(--muted); font-size: 0.68rem; }
+
+  .resolved-yes { color: #4caf50; font-size: 0.7rem; font-weight:600; }
+  .resolved-no  { color: #ef5350; font-size: 0.7rem; font-weight:600; }
+  .resolved-pending { color: var(--muted); font-size: 0.68rem; }
+
+  .q-text { max-width: 280px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: var(--text); }
+  .q-link { color: var(--blue); text-decoration: none; }
+  .q-link:hover { text-decoration: underline; }
+
+  .empty-row { text-align: center; padding: 30px 0; color: var(--muted); font-size: 0.82rem; }
+
+  /* strategy label in stat by-strategy */
+  .by-strategy-grid { display: flex; gap: 8px; flex-wrap: wrap; }
+  .by-strategy-card {
+    flex: 1; min-width: 160px;
+    background: var(--card); border: 1px solid var(--border); border-radius: 8px;
+    padding: 10px 14px; display: flex; flex-direction: column; gap: 4px;
+  }
+  .by-strategy-card .s-name { font-size: 0.7rem; font-weight: 700; color: var(--muted); text-transform: uppercase; }
+  .by-strategy-card .s-row  { display: flex; justify-content: space-between; font-size: 0.75rem; color: var(--text); }
+  .by-strategy-card .s-val  { color: var(--text); font-weight: 600; }
+</style>
+</head>
+<body>
+<div class="shell">
+
+  <!-- top bar -->
+  <div class="topbar">
+    <div>
+      <div class="topbar-title">🎲 Polymarket Monitor</div>
+      <div class="topbar-sub">Late Convergence · Pair Hedge · Bayesian FOMC</div>
+    </div>
+    <div class="last-updated" id="last-updated">—</div>
+  </div>
+
+  <!-- global stats -->
+  <div class="stats-row" id="stats-row">
+    <div class="stat-pill"><div class="stat-label">Total Signals</div><div class="stat-value blue" id="s-total">—</div></div>
+    <div class="stat-pill"><div class="stat-label">Resolved</div><div class="stat-value" id="s-resolved">—</div></div>
+    <div class="stat-pill"><div class="stat-label">Pending</div><div class="stat-value" id="s-unresolved">—</div></div>
+    <div class="stat-pill"><div class="stat-label">Win Rate</div><div class="stat-value" id="s-winrate">—</div></div>
+    <div class="stat-pill"><div class="stat-label">Avg PnL</div><div class="stat-value" id="s-avgpnl">—</div></div>
+  </div>
+
+  <!-- by-strategy breakdown -->
+  <div class="by-strategy-grid" id="by-strategy-grid"></div>
+
+  <!-- tabs -->
+  <div class="tabs">
+    <button class="tab-btn active" data-view="signals" data-strat="all">Signals <span class="count" id="cnt-all"></span></button>
+    <button class="tab-btn" data-view="signals" data-strat="late_convergence">LC <span class="count" id="cnt-lc"></span></button>
+    <button class="tab-btn" data-view="signals" data-strat="pair_hedge">PH <span class="count" id="cnt-ph"></span></button>
+    <button class="tab-btn" data-view="signals" data-strat="bayesian_fomc">BF <span class="count" id="cnt-bf"></span></button>
+    <button class="tab-btn" data-view="markets" data-strat="">Live Markets <span class="count" id="cnt-mkt"></span></button>
+  </div>
+
+  <!-- filter bar -->
+  <div class="filter-bar" id="filter-bar">
+    <select id="sel-resolved">
+      <option value="all">All Status</option>
+      <option value="no">Pending</option>
+      <option value="yes">Resolved</option>
+    </select>
+    <select id="sel-limit">
+      <option value="50">50 rows</option>
+      <option value="100" selected>100 rows</option>
+      <option value="200">200 rows</option>
+    </select>
+    <button onclick="loadSignals()">Refresh</button>
+    <span id="row-count" style="font-size:0.72rem;color:var(--muted);margin-left:4px;"></span>
+  </div>
+
+  <!-- signals table -->
+  <div id="view-signals">
+  <div class="table-wrap">
+    <table class="sig-table">
+      <thead>
+        <tr>
+          <th>Time (UTC)</th>
+          <th>Strategy</th>
+          <th>Question</th>
+          <th>Side</th>
+          <th>Entry</th>
+          <th>ROI</th>
+          <th>Vol USD</th>
+          <th>Hrs Left</th>
+          <th>Outcome</th>
+          <th>PnL</th>
+        </tr>
+      </thead>
+      <tbody id="sig-tbody">
+        <tr><td colspan="10" class="empty-row">Loading…</td></tr>
+      </tbody>
+    </table>
+  </div>
+  </div>
+
+  <!-- markets table -->
+  <div id="view-markets" style="display:none;">
+  <div class="table-wrap">
+    <table class="sig-table">
+      <thead>
+        <tr>
+          <th>Hrs Left</th>
+          <th>Question</th>
+          <th>YES</th>
+          <th>NO</th>
+          <th>Sum</th>
+          <th>Vol USD</th>
+          <th>Link</th>
+        </tr>
+      </thead>
+      <tbody id="mkt-tbody">
+        <tr><td colspan="7" class="empty-row">Loading…</td></tr>
+      </tbody>
+    </table>
+  </div>
+  </div>
+
+</div>
+<script>
+let currentStrat = 'all';
+let currentView  = 'signals';
+
+// ── tabs ──
+document.querySelectorAll('.tab-btn').forEach(btn => {
+  btn.addEventListener('click', () => {
+    document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    currentView  = btn.dataset.view;
+    currentStrat = btn.dataset.strat || 'all';
+    document.getElementById('view-signals').style.display = currentView === 'signals' ? '' : 'none';
+    document.getElementById('view-markets').style.display = currentView === 'markets' ? '' : 'none';
+    document.getElementById('filter-bar').style.display   = currentView === 'signals' ? '' : 'none';
+    if (currentView === 'markets') loadMarkets();
+    else loadSignals();
+  });
+});
+
+// ── stats ──
+async function loadStats() {
+  try {
+    const r = await fetch('/quant/polymarket/stats');
+    const d = await r.json();
+    document.getElementById('s-total').textContent     = d.total ?? '—';
+    document.getElementById('s-resolved').textContent  = d.resolved ?? '—';
+    document.getElementById('s-unresolved').textContent = d.unresolved ?? '—';
+    const wr = d.win_rate != null ? (d.win_rate * 100).toFixed(1) + '%' : '—';
+    const el = document.getElementById('s-winrate');
+    el.textContent = wr;
+    if (d.win_rate != null) el.className = 'stat-value ' + (d.win_rate >= 0.5 ? 'green' : 'red');
+
+    const ap = d.avg_pnl != null ? (d.avg_pnl >= 0 ? '+' : '') + (d.avg_pnl * 100).toFixed(1) + '%' : '—';
+    const apEl = document.getElementById('s-avgpnl');
+    apEl.textContent = ap;
+    if (d.avg_pnl != null) apEl.className = 'stat-value ' + (d.avg_pnl >= 0 ? 'green' : 'red');
+
+    // by-strategy cards
+    const grid = document.getElementById('by-strategy-grid');
+    grid.innerHTML = '';
+    const labels = { late_convergence: 'LC', pair_hedge: 'PH', bayesian_fomc: 'BF' };
+    for (const [strat, info] of Object.entries(d.by_strategy || {})) {
+      const label = labels[strat] || strat;
+      const wr2 = info.win_rate != null ? (info.win_rate * 100).toFixed(0) + '%' : '—';
+      const ap2 = info.avg_pnl != null ? (info.avg_pnl >= 0 ? '+' : '') + (info.avg_pnl * 100).toFixed(1) + '%' : '—';
+      grid.innerHTML += `
+        <div class="by-strategy-card">
+          <div class="s-name">${label} — ${strat.replace(/_/g,' ')}</div>
+          <div class="s-row"><span>Signals</span><span class="s-val">${info.total}</span></div>
+          <div class="s-row"><span>Resolved</span><span class="s-val">${info.resolved}</span></div>
+          <div class="s-row"><span>Win Rate</span><span class="s-val">${wr2}</span></div>
+          <div class="s-row"><span>Avg PnL</span><span class="s-val">${ap2}</span></div>
+        </div>`;
+    }
+
+    // tab counts
+    const by = d.by_strategy || {};
+    document.getElementById('cnt-all').textContent = d.total ? `(${d.total})` : '';
+    document.getElementById('cnt-lc').textContent  = by.late_convergence ? `(${by.late_convergence.total})` : '';
+    document.getElementById('cnt-ph').textContent  = by.pair_hedge ? `(${by.pair_hedge.total})` : '';
+    document.getElementById('cnt-bf').textContent  = by.bayesian_fomc ? `(${by.bayesian_fomc.total})` : '';
+  } catch(e) { console.error('stats error', e); }
+}
+
+// ── signals table ──
+async function loadSignals() {
+  const resolved = document.getElementById('sel-resolved').value;
+  const limit    = document.getElementById('sel-limit').value;
+  const url = `/quant/polymarket/signals?strategy=${currentStrat}&resolved=${resolved}&limit=${limit}`;
+  try {
+    const r = await fetch(url);
+    const d = await r.json();
+    const tbody = document.getElementById('sig-tbody');
+    const rows  = d.signals || [];
+    document.getElementById('row-count').textContent = rows.length + ' rows';
+    document.getElementById('last-updated').textContent = 'Updated ' + new Date().toUTCString();
+
+    if (!rows.length) {
+      tbody.innerHTML = '<tr><td colspan="10" class="empty-row">No signals yet — engine starts on server restart.</td></tr>';
+      return;
+    }
+
+    const stratBadge = { late_convergence: 'badge-lc', pair_hedge: 'badge-ph', bayesian_fomc: 'badge-bf' };
+    const sideBadge  = { YES: 'badge-yes', NO: 'badge-no', BOTH: 'badge-both' };
+
+    tbody.innerHTML = rows.map(s => {
+      const ts = s.created_at ? s.created_at.replace('T',' ').slice(0,16) : '—';
+      const sClass = stratBadge[s.strategy] || '';
+      const sLabel = { late_convergence: 'LC', pair_hedge: 'PH', bayesian_fomc: 'BF' }[s.strategy] || s.strategy;
+
+      const side = s.side || '—';
+      const sideClass = sideBadge[side] || '';
+
+      const entry = (() => {
+        if (s.pair_cost != null) return '$' + s.pair_cost.toFixed(4);
+        if (s.side === 'YES' && s.yes_price != null) return s.yes_price.toFixed(3);
+        if (s.side === 'NO'  && s.no_price  != null) return s.no_price.toFixed(3);
+        if (s.yes_price != null) return s.yes_price.toFixed(3);
+        return '—';
+      })();
+
+      const div = s.divergence != null
+        ? (s.divergence >= 0 ? '+' : '') + (s.divergence * 100).toFixed(1) + '%'
+        : '—';
+
+      const vol = s.volume_usd != null
+        ? '$' + (s.volume_usd >= 1e6
+          ? (s.volume_usd/1e6).toFixed(1)+'M'
+          : s.volume_usd >= 1e3
+            ? (s.volume_usd/1e3).toFixed(0)+'k'
+            : s.volume_usd.toFixed(0))
+        : '—';
+
+      const hrs = s.hours_to_end != null ? s.hours_to_end.toFixed(1)+'h' : '—';
+
+      const outcome = (() => {
+        if (!s.is_resolved) return `<span class="resolved-pending">pending</span>`;
+        if (s.actual_outcome === 'YES') return `<span class="resolved-yes">✓ YES</span>`;
+        if (s.actual_outcome === 'NO')  return `<span class="resolved-no">✗ NO</span>`;
+        return `<span class="resolved-pending">${s.actual_outcome || '?'}</span>`;
+      })();
+
+      const pnl = (() => {
+        if (s.actual_pnl == null) return `<span class="pnl-pending">—</span>`;
+        const pct = (s.actual_pnl * 100).toFixed(1);
+        return s.actual_pnl >= 0
+          ? `<span class="pnl-pos">+${pct}%</span>`
+          : `<span class="pnl-neg">${pct}%</span>`;
+      })();
+
+      const slug = s.condition_id ? '' : '';
+      const qText = (s.question || '').slice(0, 60) + ((s.question||'').length > 60 ? '…' : '');
+
+      return `<tr>
+        <td style="white-space:nowrap;color:var(--muted);font-size:0.7rem;">${ts}</td>
+        <td><span class="badge ${sClass}">${sLabel}</span></td>
+        <td><div class="q-text" title="${(s.question||'').replace(/"/g,"'")}">${qText}</div></td>
+        <td><span class="badge ${sideClass}">${side}</span></td>
+        <td style="font-family:monospace;">${entry}</td>
+        <td style="font-family:monospace;">${div}</td>
+        <td style="color:var(--muted);">${vol}</td>
+        <td style="color:var(--muted);">${hrs}</td>
+        <td>${outcome}</td>
+        <td>${pnl}</td>
+      </tr>`;
+    }).join('');
+  } catch(e) {
+    document.getElementById('sig-tbody').innerHTML =
+      `<tr><td colspan="10" class="empty-row" style="color:var(--red);">Error: ${e.message}</td></tr>`;
+  }
+}
+
+// ── markets table ──
+async function loadMarkets() {
+  const tbody = document.getElementById('mkt-tbody');
+  try {
+    const r = await fetch('/quant/polymarket/markets');
+    const d = await r.json();
+    const rows = d.markets || [];
+    document.getElementById('cnt-mkt').textContent = rows.length ? `(${rows.length})` : '';
+    document.getElementById('last-updated').textContent = 'Updated ' + new Date().toUTCString();
+
+    if (!rows.length) {
+      tbody.innerHTML = '<tr><td colspan="7" class="empty-row">엔진 시작 후 5분 내 표시됩니다.</td></tr>';
+      return;
+    }
+
+    tbody.innerHTML = rows.map(m => {
+      const hrs  = m.hours_to_end != null ? m.hours_to_end.toFixed(1) + 'h' : '—';
+      const yes  = m.yes_price != null ? m.yes_price.toFixed(3) : '—';
+      const no   = m.no_price  != null ? m.no_price.toFixed(3)  : '—';
+      const yv   = m.yes_price ?? 0;
+      const nv   = m.no_price  ?? 0;
+      const sum  = (yv + nv).toFixed(3);
+      const sumCls = (yv + nv) < 0.98 ? 'pnl-pos' : '';
+      const vol  = m.volume_usd != null
+        ? '$' + (m.volume_usd >= 1e6 ? (m.volume_usd/1e6).toFixed(1)+'M'
+               : m.volume_usd >= 1e3 ? (m.volume_usd/1e3).toFixed(0)+'k'
+               : m.volume_usd.toFixed(0))
+        : '—';
+      const q    = (m.question || '').slice(0, 70);
+      const link = m.slug
+        ? `<a class="q-link" href="https://polymarket.com/event/${m.slug}" target="_blank">↗</a>`
+        : '—';
+      return `<tr>
+        <td style="white-space:nowrap;font-family:monospace;">${hrs}</td>
+        <td><div class="q-text" title="${(m.question||'').replace(/"/g,"'")}">${q}</div></td>
+        <td style="font-family:monospace;">${yes}</td>
+        <td style="font-family:monospace;">${no}</td>
+        <td style="font-family:monospace;" class="${sumCls}">${sum}</td>
+        <td style="color:var(--muted);">${vol}</td>
+        <td>${link}</td>
+      </tr>`;
+    }).join('');
+  } catch(e) {
+    tbody.innerHTML = `<tr><td colspan="7" class="empty-row" style="color:var(--red);">Error: ${e.message}</td></tr>`;
+  }
+}
+
+// ── init & auto-refresh ──
+loadStats();
+loadSignals();
+setInterval(() => {
+  loadStats();
+  if (currentView === 'markets') loadMarkets();
+  else loadSignals();
+}, 30000);
+</script>
+</body>
+</html>
