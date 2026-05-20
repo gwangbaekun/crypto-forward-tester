@@ -4,3 +4,5 @@ __pycache__/
 data/
 **/.DS_Store
 logs/signal_logs/**/*.jsonl
+
+portfolio/
