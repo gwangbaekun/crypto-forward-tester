@@ -498,6 +498,33 @@ function drawChart(curve, initial) {
       ctx.fillText(p.date.slice(5), xOf(i), H - pad.bottom + 14);
     }
   });
+
+  // MDD — 차트 우측 상단 작은 글씨
+  let peak = -Infinity, mdd = 0, mddStart = 0, mddEnd = 0, curPeak = 0;
+  curve.forEach((p, i) => {
+    if (p.capital > peak) { peak = p.capital; curPeak = i; }
+    const dd = (peak - p.capital) / peak;
+    if (dd > mdd) { mdd = dd; mddStart = curPeak; mddEnd = i; }
+  });
+
+  if (mdd > 0) {
+    // MDD 구간 음영
+    ctx.beginPath();
+    ctx.fillStyle = 'rgba(239,83,80,0.08)';
+    ctx.moveTo(xOf(mddStart), yOf(curve[mddStart].capital));
+    for (let i = mddStart; i <= mddEnd; i++) ctx.lineTo(xOf(i), yOf(curve[i].capital));
+    ctx.lineTo(xOf(mddEnd),   H - pad.bottom);
+    ctx.lineTo(xOf(mddStart), H - pad.bottom);
+    ctx.closePath();
+    ctx.fill();
+  }
+
+  // MDD 텍스트
+  const mddPct = (mdd * 100).toFixed(1);
+  ctx.font      = 'bold 10px monospace';
+  ctx.textAlign = 'right';
+  ctx.fillStyle = mdd > 0.05 ? '#ef5350' : 'rgba(139,148,158,0.7)';
+  ctx.fillText(`MDD -${mddPct}%`, W - pad.right - 2, pad.top + 12);
 }
 
 // ── signals table ──
