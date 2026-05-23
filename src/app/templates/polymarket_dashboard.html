@@ -7,10 +7,9 @@
 <link rel="stylesheet" href="/static/css/dashboard_common.css">
 <style>
   body { padding: 10px 12px 40px; }
-
   .shell { max-width: 1320px; margin: 0 auto; display: flex; flex-direction: column; gap: 10px; }
 
-  /* ── top bar ── */
+  /* top bar */
   .topbar {
     display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 8px;
     padding: 10px 14px;
@@ -18,17 +17,39 @@
   }
   .topbar-title { font-size: 1rem; font-weight: 700; color: var(--text); }
   .topbar-sub   { font-size: 0.75rem; color: var(--muted); }
+  .topbar-right { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
   .last-updated { font-size: 0.72rem; color: var(--muted); }
 
-  /* ── stat pills ── */
-  .stats-row {
-    display: flex; gap: 8px; flex-wrap: wrap;
-  }
-  .stat-pill {
-    flex: 1; min-width: 120px;
+  /* since filter */
+  .since-bar {
+    display: flex; align-items: center; gap: 6px;
     background: var(--card); border: 1px solid var(--border); border-radius: 8px;
-    padding: 10px 14px;
-    display: flex; flex-direction: column; gap: 2px;
+    padding: 8px 12px;
+  }
+  .since-bar label { font-size: 0.74rem; color: var(--muted); white-space: nowrap; }
+  .since-bar input[type="date"] {
+    background: var(--bg); border: 1px solid var(--border); color: var(--text);
+    padding: 4px 8px; border-radius: 6px; font-size: 0.76rem;
+    color-scheme: dark;
+  }
+  .since-bar button {
+    background: var(--bg); border: 1px solid var(--border); color: var(--text);
+    padding: 4px 10px; border-radius: 6px; font-size: 0.76rem; cursor: pointer;
+  }
+  .since-bar button:hover { border-color: var(--blue); color: var(--blue); }
+  .btn-reset {
+    background: rgba(218,54,51,.1) !important;
+    border-color: rgba(218,54,51,.4) !important;
+    color: #ef5350 !important;
+  }
+  .btn-reset:hover { border-color: #ef5350 !important; }
+
+  /* stat pills */
+  .stats-row { display: flex; gap: 8px; flex-wrap: wrap; }
+  .stat-pill {
+    flex: 1; min-width: 110px;
+    background: var(--card); border: 1px solid var(--border); border-radius: 8px;
+    padding: 10px 14px; display: flex; flex-direction: column; gap: 2px;
   }
   .stat-label { font-size: 0.68rem; color: var(--muted); text-transform: uppercase; letter-spacing: .04em; }
   .stat-value { font-size: 1.15rem; font-weight: 700; color: var(--text); }
@@ -36,11 +57,36 @@
   .stat-value.red   { color: var(--red); }
   .stat-value.blue  { color: var(--blue); }
 
-  /* ── tabs ── */
+  /* PnL chart card */
+  .pnl-chart-card {
+    background: var(--card); border: 1px solid var(--border); border-radius: 8px;
+    padding: 14px 16px;
+  }
+  .pnl-chart-header {
+    display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;
+  }
+  .pnl-chart-title { font-size: 0.8rem; font-weight: 700; color: var(--text); }
+  .pnl-chart-summary { font-size: 0.75rem; color: var(--muted); }
+  .pnl-chart-summary .val { font-weight: 700; }
+  .pnl-chart-summary .pos { color: var(--green); }
+  .pnl-chart-summary .neg { color: var(--red); }
+  #pnl-canvas { width: 100%; height: 160px; display: block; }
+
+  /* by-strategy */
+  .by-strategy-grid { display: flex; gap: 8px; flex-wrap: wrap; }
+  .by-strategy-card {
+    flex: 1; min-width: 160px;
+    background: var(--card); border: 1px solid var(--border); border-radius: 8px;
+    padding: 10px 14px; display: flex; flex-direction: column; gap: 4px;
+  }
+  .by-strategy-card .s-name { font-size: 0.7rem; font-weight: 700; color: var(--muted); text-transform: uppercase; }
+  .by-strategy-card .s-row  { display: flex; justify-content: space-between; font-size: 0.75rem; color: var(--text); }
+  .by-strategy-card .s-val  { font-weight: 600; }
+
+  /* tabs */
   .tabs {
     display: flex; gap: 4px;
-    background: var(--card); border: 1px solid var(--border); border-radius: 8px;
-    padding: 4px;
+    background: var(--card); border: 1px solid var(--border); border-radius: 8px; padding: 4px;
   }
   .tab-btn {
     flex: 1; padding: 7px 10px; font-size: 0.76rem; font-weight: 600;
@@ -50,11 +96,10 @@
   .tab-btn.active { background: rgba(88,166,255,0.15); color: var(--blue); }
   .tab-btn .count { font-size: 0.65rem; opacity: .7; }
 
-  /* ── filter bar ── */
+  /* filter bar */
   .filter-bar {
     display: flex; gap: 8px; flex-wrap: wrap; align-items: center;
-    background: var(--card); border: 1px solid var(--border); border-radius: 8px;
-    padding: 8px 12px;
+    background: var(--card); border: 1px solid var(--border); border-radius: 8px; padding: 8px 12px;
   }
   .filter-bar select, .filter-bar button {
     background: var(--bg); border: 1px solid var(--border); color: var(--text);
@@ -62,20 +107,18 @@
   }
   .filter-bar button:hover { border-color: var(--blue); color: var(--blue); }
 
-  /* ── table ── */
+  /* table */
   .table-wrap { overflow-x: auto; background: var(--card); border: 1px solid var(--border); border-radius: 8px; }
   .sig-table { width: 100%; border-collapse: collapse; font-size: 0.76rem; }
   .sig-table th {
-    text-align: left; padding: 8px 10px;
-    border-bottom: 1px solid var(--border); color: var(--muted);
-    font-weight: 600; white-space: nowrap; position: sticky; top: 0;
-    background: var(--card); z-index: 1;
+    text-align: left; padding: 8px 10px; border-bottom: 1px solid var(--border);
+    color: var(--muted); font-weight: 600; white-space: nowrap;
+    position: sticky; top: 0; background: var(--card); z-index: 1;
   }
   .sig-table td { padding: 7px 10px; border-bottom: 1px solid rgba(48,54,61,.5); vertical-align: middle; }
   .sig-table tr:last-child td { border-bottom: none; }
   .sig-table tr:hover td { background: rgba(255,255,255,0.025); }
 
-  /* badges */
   .badge { display: inline-block; padding: 2px 7px; border-radius: 4px; font-size: 0.68rem; font-weight: 700; }
   .badge-lc   { background: rgba(88,166,255,.15); color: var(--blue); }
   .badge-ph   { background: rgba(163,113,247,.15); color: var(--purple); }
@@ -87,27 +130,35 @@
   .pnl-pos { color: #4caf50; font-weight: 600; }
   .pnl-neg { color: #ef5350; font-weight: 600; }
   .pnl-pending { color: var(--muted); font-size: 0.68rem; }
-
-  .resolved-yes { color: #4caf50; font-size: 0.7rem; font-weight:600; }
-  .resolved-no  { color: #ef5350; font-size: 0.7rem; font-weight:600; }
+  .resolved-yes { color: #4caf50; font-size: 0.7rem; font-weight: 600; }
+  .resolved-no  { color: #ef5350; font-size: 0.7rem; font-weight: 600; }
   .resolved-pending { color: var(--muted); font-size: 0.68rem; }
-
   .q-text { max-width: 280px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: var(--text); }
   .q-link { color: var(--blue); text-decoration: none; }
   .q-link:hover { text-decoration: underline; }
-
   .empty-row { text-align: center; padding: 30px 0; color: var(--muted); font-size: 0.82rem; }
 
-  /* strategy label in stat by-strategy */
-  .by-strategy-grid { display: flex; gap: 8px; flex-wrap: wrap; }
-  .by-strategy-card {
-    flex: 1; min-width: 160px;
-    background: var(--card); border: 1px solid var(--border); border-radius: 8px;
-    padding: 10px 14px; display: flex; flex-direction: column; gap: 4px;
+  /* reset modal */
+  .modal-overlay {
+    display: none; position: fixed; inset: 0;
+    background: rgba(0,0,0,.6); z-index: 100;
+    align-items: center; justify-content: center;
   }
-  .by-strategy-card .s-name { font-size: 0.7rem; font-weight: 700; color: var(--muted); text-transform: uppercase; }
-  .by-strategy-card .s-row  { display: flex; justify-content: space-between; font-size: 0.75rem; color: var(--text); }
-  .by-strategy-card .s-val  { color: var(--text); font-weight: 600; }
+  .modal-overlay.open { display: flex; }
+  .modal-box {
+    background: var(--card); border: 1px solid var(--border); border-radius: 10px;
+    padding: 24px 28px; max-width: 360px; width: 90%;
+    display: flex; flex-direction: column; gap: 14px;
+  }
+  .modal-title { font-size: 0.9rem; font-weight: 700; color: #ef5350; }
+  .modal-desc  { font-size: 0.78rem; color: var(--muted); line-height: 1.5; }
+  .modal-actions { display: flex; gap: 8px; justify-content: flex-end; }
+  .modal-actions button {
+    padding: 7px 16px; border-radius: 6px; font-size: 0.78rem; font-weight: 600; cursor: pointer;
+    border: 1px solid var(--border);
+  }
+  .btn-cancel { background: var(--bg); color: var(--text); }
+  .btn-confirm-reset { background: rgba(218,54,51,.15); color: #ef5350; border-color: #ef5350; }
 </style>
 </head>
 <body>
@@ -119,7 +170,19 @@
       <div class="topbar-title">🎲 Polymarket Monitor</div>
       <div class="topbar-sub">Late Convergence · Pair Hedge · Bayesian FOMC</div>
     </div>
-    <div class="last-updated" id="last-updated">—</div>
+    <div class="topbar-right">
+      <div class="last-updated" id="last-updated">—</div>
+    </div>
+  </div>
+
+  <!-- since filter + reset -->
+  <div class="since-bar">
+    <label>Since</label>
+    <input type="date" id="since-input" />
+    <button onclick="applyFilter()">Apply</button>
+    <button onclick="clearFilter()">All time</button>
+    <span style="flex:1;"></span>
+    <button class="btn-reset" onclick="openResetModal()">Reset Data</button>
   </div>
 
   <!-- global stats -->
@@ -129,6 +192,16 @@
     <div class="stat-pill"><div class="stat-label">Pending</div><div class="stat-value" id="s-unresolved">—</div></div>
     <div class="stat-pill"><div class="stat-label">Win Rate</div><div class="stat-value" id="s-winrate">—</div></div>
     <div class="stat-pill"><div class="stat-label">Avg PnL</div><div class="stat-value" id="s-avgpnl">—</div></div>
+    <div class="stat-pill"><div class="stat-label">Capital ($100)</div><div class="stat-value" id="s-capital">—</div></div>
+  </div>
+
+  <!-- PnL curve chart -->
+  <div class="pnl-chart-card">
+    <div class="pnl-chart-header">
+      <div class="pnl-chart-title">Cumulative PnL — $100 균등 재투자 시뮬</div>
+      <div class="pnl-chart-summary" id="pnl-summary">—</div>
+    </div>
+    <canvas id="pnl-canvas"></canvas>
   </div>
 
   <!-- by-strategy breakdown -->
@@ -208,10 +281,41 @@
   </div>
 
 </div>
+
+<!-- reset confirm modal -->
+<div class="modal-overlay" id="reset-modal">
+  <div class="modal-box">
+    <div class="modal-title">⚠ Reset All Data</div>
+    <div class="modal-desc">
+      polymarket_signals 테이블 전체를 삭제합니다.<br>
+      되돌릴 수 없습니다. 정말 진행할까요?
+    </div>
+    <div class="modal-actions">
+      <button class="btn-cancel" onclick="closeResetModal()">Cancel</button>
+      <button class="btn-confirm-reset" onclick="doReset()">Delete All</button>
+    </div>
+  </div>
+</div>
+
 <script>
 let currentStrat   = 'all';
 let currentView    = 'signals';
 let currentOutcome = 'all';
+let sinceValue     = '';   // 'YYYY-MM-DD' or ''
+
+// ── since filter ──
+function applyFilter() {
+  sinceValue = document.getElementById('since-input').value || '';
+  loadAll();
+}
+function clearFilter() {
+  sinceValue = '';
+  document.getElementById('since-input').value = '';
+  loadAll();
+}
+function sinceParam() {
+  return sinceValue ? `&since=${sinceValue}` : '';
+}
 
 // ── tabs ──
 document.querySelectorAll('.tab-btn').forEach(btn => {
@@ -232,20 +336,20 @@ document.querySelectorAll('.tab-btn').forEach(btn => {
 // ── stats ──
 async function loadStats() {
   try {
-    const r = await fetch('/quant/polymarket/stats');
+    const r = await fetch(`/quant/polymarket/stats?${sinceParam()}`);
     const d = await r.json();
-    document.getElementById('s-total').textContent     = d.total ?? '—';
-    document.getElementById('s-resolved').textContent  = d.resolved ?? '—';
-    document.getElementById('s-unresolved').textContent = d.unresolved ?? '—';
-    const wr = d.win_rate != null ? (d.win_rate * 100).toFixed(1) + '%' : '—';
-    const el = document.getElementById('s-winrate');
-    el.textContent = wr;
-    if (d.win_rate != null) el.className = 'stat-value ' + (d.win_rate >= 0.5 ? 'green' : 'red');
 
-    const ap = d.avg_pnl != null ? (d.avg_pnl >= 0 ? '+' : '') + (d.avg_pnl * 100).toFixed(1) + '%' : '—';
+    document.getElementById('s-total').textContent      = d.total ?? '—';
+    document.getElementById('s-resolved').textContent   = d.resolved ?? '—';
+    document.getElementById('s-unresolved').textContent = d.unresolved ?? '—';
+
+    const wrEl = document.getElementById('s-winrate');
+    wrEl.textContent = d.win_rate != null ? (d.win_rate * 100).toFixed(1) + '%' : '—';
+    wrEl.className   = 'stat-value ' + (d.win_rate != null ? (d.win_rate >= 0.5 ? 'green' : 'red') : '');
+
     const apEl = document.getElementById('s-avgpnl');
-    apEl.textContent = ap;
-    if (d.avg_pnl != null) apEl.className = 'stat-value ' + (d.avg_pnl >= 0 ? 'green' : 'red');
+    apEl.textContent = d.avg_pnl != null ? (d.avg_pnl >= 0 ? '+' : '') + (d.avg_pnl * 100).toFixed(1) + '%' : '—';
+    apEl.className   = 'stat-value ' + (d.avg_pnl != null ? (d.avg_pnl >= 0 ? 'green' : 'red') : '');
 
     // by-strategy cards
     const grid = document.getElementById('by-strategy-grid');
@@ -265,21 +369,142 @@ async function loadStats() {
         </div>`;
     }
 
-    // tab counts
     const by = d.by_strategy || {};
-    document.getElementById('cnt-all').textContent  = d.total   ? `(${d.total})`   : '';
+    document.getElementById('cnt-all').textContent  = d.total ? `(${d.total})` : '';
     document.getElementById('cnt-lc').textContent   = by.late_convergence ? `(${by.late_convergence.total})` : '';
     document.getElementById('cnt-ph').textContent   = by.pair_hedge ? `(${by.pair_hedge.total})` : '';
     document.getElementById('cnt-bf').textContent   = by.bayesian_fomc ? `(${by.bayesian_fomc.total})` : '';
-    document.getElementById('cnt-loss').textContent = d.losses  ? `(${d.losses})`  : '';
+    document.getElementById('cnt-loss').textContent = d.losses ? `(${d.losses})` : '';
   } catch(e) { console.error('stats error', e); }
+}
+
+// ── cumulative PnL chart ──
+async function loadPnlChart() {
+  try {
+    const r = await fetch(`/quant/polymarket/cumulative-pnl?strategy=late_convergence${sinceParam()}`);
+    const d = await r.json();
+
+    const curve   = d.curve || [];
+    const initial = d.initial ?? 100;
+    const final   = d.final  ?? initial;
+    const pct     = d.total_pct ?? 0;
+
+    // capital pill
+    const capEl = document.getElementById('s-capital');
+    capEl.textContent = '$' + final.toFixed(2);
+    capEl.className   = 'stat-value ' + (final >= initial ? 'green' : 'red');
+
+    // summary text
+    const sumEl = document.getElementById('pnl-summary');
+    const sign  = pct >= 0 ? '+' : '';
+    sumEl.innerHTML = `<span class="val ${pct >= 0 ? 'pos' : 'neg'}">${sign}${pct.toFixed(1)}%</span>`
+      + ` &nbsp;$${initial.toFixed(0)} → $${final.toFixed(2)}`
+      + (sinceValue ? `&nbsp;<span style="color:var(--muted);font-size:0.7rem;">since ${sinceValue}</span>` : '');
+
+    drawChart(curve, initial);
+  } catch(e) { console.error('pnl chart error', e); }
+}
+
+function drawChart(curve, initial) {
+  const canvas = document.getElementById('pnl-canvas');
+  const dpr    = window.devicePixelRatio || 1;
+  const W      = canvas.parentElement.clientWidth - 32;
+  const H      = 160;
+  canvas.width  = W * dpr;
+  canvas.height = H * dpr;
+  canvas.style.width  = W + 'px';
+  canvas.style.height = H + 'px';
+
+  const ctx = canvas.getContext('2d');
+  ctx.scale(dpr, dpr);
+
+  if (!curve || curve.length < 2) {
+    ctx.fillStyle = 'rgba(139,148,158,0.5)';
+    ctx.font = '13px monospace';
+    ctx.textAlign = 'center';
+    ctx.fillText('데이터 없음 — 시그널 해소 후 표시됩니다', W / 2, H / 2);
+    return;
+  }
+
+  const vals  = curve.map(p => p.capital);
+  const minV  = Math.min(...vals);
+  const maxV  = Math.max(...vals);
+  const range = maxV - minV || 1;
+
+  const pad   = { top: 12, bottom: 24, left: 50, right: 12 };
+  const cW    = W - pad.left - pad.right;
+  const cH    = H - pad.top  - pad.bottom;
+
+  const xOf = i => pad.left + (i / (curve.length - 1)) * cW;
+  const yOf = v => pad.top  + (1 - (v - minV) / range) * cH;
+
+  // grid lines (3)
+  ctx.strokeStyle = 'rgba(139,148,158,0.12)';
+  ctx.lineWidth = 1;
+  [0, 0.5, 1].forEach(t => {
+    const y = pad.top + t * cH;
+    ctx.beginPath(); ctx.moveTo(pad.left, y); ctx.lineTo(W - pad.right, y); ctx.stroke();
+    const v = maxV - t * range;
+    ctx.fillStyle = 'rgba(139,148,158,0.6)';
+    ctx.font = '10px monospace';
+    ctx.textAlign = 'right';
+    ctx.fillText('$' + v.toFixed(1), pad.left - 4, y + 3);
+  });
+
+  // fill area
+  const isPos = vals[vals.length - 1] >= initial;
+  const grad  = ctx.createLinearGradient(0, pad.top, 0, H - pad.bottom);
+  grad.addColorStop(0,   isPos ? 'rgba(76,175,80,0.25)' : 'rgba(239,83,80,0.25)');
+  grad.addColorStop(1,   'rgba(0,0,0,0)');
+  ctx.beginPath();
+  ctx.moveTo(xOf(0), yOf(curve[0].capital));
+  curve.forEach((p, i) => { if (i > 0) ctx.lineTo(xOf(i), yOf(p.capital)); });
+  ctx.lineTo(xOf(curve.length - 1), H - pad.bottom);
+  ctx.lineTo(xOf(0), H - pad.bottom);
+  ctx.closePath();
+  ctx.fillStyle = grad;
+  ctx.fill();
+
+  // line
+  ctx.beginPath();
+  ctx.strokeStyle = isPos ? '#4caf50' : '#ef5350';
+  ctx.lineWidth   = 1.8;
+  ctx.lineJoin    = 'round';
+  curve.forEach((p, i) => {
+    i === 0 ? ctx.moveTo(xOf(i), yOf(p.capital)) : ctx.lineTo(xOf(i), yOf(p.capital));
+  });
+  ctx.stroke();
+
+  // baseline (initial)
+  const yBase = yOf(initial);
+  if (yBase >= pad.top && yBase <= H - pad.bottom) {
+    ctx.beginPath();
+    ctx.strokeStyle = 'rgba(139,148,158,0.35)';
+    ctx.lineWidth   = 1;
+    ctx.setLineDash([3, 4]);
+    ctx.moveTo(pad.left, yBase); ctx.lineTo(W - pad.right, yBase);
+    ctx.stroke();
+    ctx.setLineDash([]);
+  }
+
+  // x-axis labels (first, middle, last)
+  ctx.fillStyle  = 'rgba(139,148,158,0.7)';
+  ctx.font       = '10px monospace';
+  ctx.textAlign  = 'center';
+  const labelIdx = [1, Math.floor(curve.length / 2), curve.length - 1].filter(i => i > 0 && i < curve.length);
+  labelIdx.forEach(i => {
+    const p = curve[i];
+    if (p.date && p.date !== 'start') {
+      ctx.fillText(p.date.slice(5), xOf(i), H - pad.bottom + 14);
+    }
+  });
 }
 
 // ── signals table ──
 async function loadSignals() {
   const resolved = document.getElementById('sel-resolved').value;
   const limit    = document.getElementById('sel-limit').value;
-  const url = `/quant/polymarket/signals?strategy=${currentStrat}&resolved=${resolved}&limit=${limit}&outcome=${currentOutcome}`;
+  const url = `/quant/polymarket/signals?strategy=${currentStrat}&resolved=${resolved}&limit=${limit}&outcome=${currentOutcome}${sinceParam()}`;
   try {
     const r = await fetch(url);
     const d = await r.json();
@@ -289,66 +514,45 @@ async function loadSignals() {
     document.getElementById('last-updated').textContent = 'Updated ' + new Date().toUTCString();
 
     if (!rows.length) {
-      tbody.innerHTML = '<tr><td colspan="10" class="empty-row">No signals yet — engine starts on server restart.</td></tr>';
+      tbody.innerHTML = '<tr><td colspan="10" class="empty-row">No signals yet.</td></tr>';
       return;
     }
 
     const stratBadge = { late_convergence: 'badge-lc', pair_hedge: 'badge-ph', bayesian_fomc: 'badge-bf' };
     const sideBadge  = { YES: 'badge-yes', NO: 'badge-no', BOTH: 'badge-both' };
+    const stratLabel = { late_convergence: 'LC', pair_hedge: 'PH', bayesian_fomc: 'BF' };
 
     tbody.innerHTML = rows.map(s => {
       const ts = s.created_at ? s.created_at.replace('T',' ').slice(0,16) : '—';
-      const sClass = stratBadge[s.strategy] || '';
-      const sLabel = { late_convergence: 'LC', pair_hedge: 'PH', bayesian_fomc: 'BF' }[s.strategy] || s.strategy;
-
-      const side = s.side || '—';
-      const sideClass = sideBadge[side] || '';
-
       const entry = (() => {
         if (s.pair_cost != null) return '$' + s.pair_cost.toFixed(4);
         if (s.side === 'YES' && s.yes_price != null) return s.yes_price.toFixed(3);
         if (s.side === 'NO'  && s.no_price  != null) return s.no_price.toFixed(3);
-        if (s.yes_price != null) return s.yes_price.toFixed(3);
-        return '—';
+        return s.yes_price != null ? s.yes_price.toFixed(3) : '—';
       })();
-
       const div = s.divergence != null
-        ? (s.divergence >= 0 ? '+' : '') + (s.divergence * 100).toFixed(1) + '%'
-        : '—';
-
+        ? (s.divergence >= 0 ? '+' : '') + (s.divergence * 100).toFixed(1) + '%' : '—';
       const vol = s.volume_usd != null
-        ? '$' + (s.volume_usd >= 1e6
-          ? (s.volume_usd/1e6).toFixed(1)+'M'
-          : s.volume_usd >= 1e3
-            ? (s.volume_usd/1e3).toFixed(0)+'k'
-            : s.volume_usd.toFixed(0))
-        : '—';
-
+        ? '$' + (s.volume_usd >= 1e6 ? (s.volume_usd/1e6).toFixed(1)+'M'
+               : s.volume_usd >= 1e3 ? (s.volume_usd/1e3).toFixed(0)+'k'
+               : s.volume_usd.toFixed(0)) : '—';
       const hrs = s.hours_to_end != null ? s.hours_to_end.toFixed(1)+'h' : '—';
-
-      const outcome = (() => {
-        if (!s.is_resolved) return `<span class="resolved-pending">pending</span>`;
-        if (s.actual_outcome === 'YES') return `<span class="resolved-yes">✓ YES</span>`;
-        if (s.actual_outcome === 'NO')  return `<span class="resolved-no">✗ NO</span>`;
-        return `<span class="resolved-pending">${s.actual_outcome || '?'}</span>`;
-      })();
-
-      const pnl = (() => {
-        if (s.actual_pnl == null) return `<span class="pnl-pending">—</span>`;
-        const pct = (s.actual_pnl * 100).toFixed(1);
-        return s.actual_pnl >= 0
-          ? `<span class="pnl-pos">+${pct}%</span>`
-          : `<span class="pnl-neg">${pct}%</span>`;
-      })();
-
-      const slug = s.condition_id ? '' : '';
+      const outcome = !s.is_resolved
+        ? `<span class="resolved-pending">pending</span>`
+        : s.actual_outcome === 'YES' ? `<span class="resolved-yes">✓ YES</span>`
+        : s.actual_outcome === 'NO'  ? `<span class="resolved-no">✗ NO</span>`
+        : `<span class="resolved-pending">${s.actual_outcome || '?'}</span>`;
+      const pnl = s.actual_pnl == null
+        ? `<span class="pnl-pending">—</span>`
+        : s.actual_pnl >= 0
+          ? `<span class="pnl-pos">+${(s.actual_pnl*100).toFixed(1)}%</span>`
+          : `<span class="pnl-neg">${(s.actual_pnl*100).toFixed(1)}%</span>`;
       const qText = (s.question || '').slice(0, 60) + ((s.question||'').length > 60 ? '…' : '');
-
       return `<tr>
         <td style="white-space:nowrap;color:var(--muted);font-size:0.7rem;">${ts}</td>
-        <td><span class="badge ${sClass}">${sLabel}</span></td>
+        <td><span class="badge ${stratBadge[s.strategy]||''}">${stratLabel[s.strategy]||s.strategy}</span></td>
         <td><div class="q-text" title="${(s.question||'').replace(/"/g,"'")}">${qText}</div></td>
-        <td><span class="badge ${sideClass}">${side}</span></td>
+        <td><span class="badge ${sideBadge[s.side]||''}">${s.side||'—'}</span></td>
         <td style="font-family:monospace;">${entry}</td>
         <td style="font-family:monospace;">${div}</td>
         <td style="color:var(--muted);">${vol}</td>
@@ -372,35 +576,27 @@ async function loadMarkets() {
     const rows = d.markets || [];
     document.getElementById('cnt-mkt').textContent = rows.length ? `(${rows.length})` : '';
     document.getElementById('last-updated').textContent = 'Updated ' + new Date().toUTCString();
-
     if (!rows.length) {
       tbody.innerHTML = '<tr><td colspan="7" class="empty-row">엔진 시작 후 5분 내 표시됩니다.</td></tr>';
       return;
     }
-
     tbody.innerHTML = rows.map(m => {
-      const hrs  = m.hours_to_end != null ? m.hours_to_end.toFixed(1) + 'h' : '—';
-      const yes  = m.yes_price != null ? m.yes_price.toFixed(3) : '—';
-      const no   = m.no_price  != null ? m.no_price.toFixed(3)  : '—';
-      const yv   = m.yes_price ?? 0;
-      const nv   = m.no_price  ?? 0;
-      const sum  = (yv + nv).toFixed(3);
-      const sumCls = (yv + nv) < 0.98 ? 'pnl-pos' : '';
-      const vol  = m.volume_usd != null
+      const hrs = m.hours_to_end != null ? m.hours_to_end.toFixed(1)+'h' : '—';
+      const yv  = m.yes_price ?? 0;
+      const nv  = m.no_price  ?? 0;
+      const sum = (yv + nv).toFixed(3);
+      const vol = m.volume_usd != null
         ? '$' + (m.volume_usd >= 1e6 ? (m.volume_usd/1e6).toFixed(1)+'M'
                : m.volume_usd >= 1e3 ? (m.volume_usd/1e3).toFixed(0)+'k'
-               : m.volume_usd.toFixed(0))
-        : '—';
-      const q    = (m.question || '').slice(0, 70);
+               : m.volume_usd.toFixed(0)) : '—';
       const link = m.slug
-        ? `<a class="q-link" href="https://polymarket.com/event/${m.slug}" target="_blank">↗</a>`
-        : '—';
+        ? `<a class="q-link" href="https://polymarket.com/event/${m.slug}" target="_blank">↗</a>` : '—';
       return `<tr>
         <td style="white-space:nowrap;font-family:monospace;">${hrs}</td>
-        <td><div class="q-text" title="${(m.question||'').replace(/"/g,"'")}">${q}</div></td>
-        <td style="font-family:monospace;">${yes}</td>
-        <td style="font-family:monospace;">${no}</td>
-        <td style="font-family:monospace;" class="${sumCls}">${sum}</td>
+        <td><div class="q-text" title="${(m.question||'').replace(/"/g,"'")}">${(m.question||'').slice(0,70)}</div></td>
+        <td style="font-family:monospace;">${yv ? yv.toFixed(3) : '—'}</td>
+        <td style="font-family:monospace;">${nv ? nv.toFixed(3) : '—'}</td>
+        <td style="font-family:monospace;" class="${(yv+nv) < 0.98 ? 'pnl-pos' : ''}">${sum}</td>
         <td style="color:var(--muted);">${vol}</td>
         <td>${link}</td>
       </tr>`;
@@ -410,14 +606,33 @@ async function loadMarkets() {
   }
 }
 
-// ── init & auto-refresh ──
-loadStats();
-loadSignals();
-setInterval(() => {
+// ── reset modal ──
+function openResetModal()  { document.getElementById('reset-modal').classList.add('open'); }
+function closeResetModal() { document.getElementById('reset-modal').classList.remove('open'); }
+async function doReset() {
+  closeResetModal();
+  try {
+    const r = await fetch('/quant/polymarket/reset?confirm=yes', { method: 'DELETE' });
+    const d = await r.json();
+    alert(`삭제 완료: ${d.deleted ?? 0}개`);
+    loadAll();
+  } catch(e) {
+    alert('Reset 실패: ' + e.message);
+  }
+}
+
+// ── load all ──
+function loadAll() {
   loadStats();
+  loadPnlChart();
   if (currentView === 'markets') loadMarkets();
   else loadSignals();
-}, 30000);
+}
+
+// ── init ──
+loadAll();
+setInterval(loadAll, 30000);
+window.addEventListener('resize', loadPnlChart);
 </script>
 </body>
 </html>
