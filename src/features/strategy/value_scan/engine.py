@@ -216,12 +216,32 @@ def _sector_medians(rows: list[dict]) -> dict[str, float]:
     return {s: median(vals) for s, vals in by_sector.items() if vals}
 
 
+_SECTOR_BUY_CFG: dict[str, dict] = {
+    "Technology":             {"per_ratio": 0.55, "fwd_growth": 1.20},
+    "Healthcare":             {"per_ratio": 0.60, "fwd_growth": 1.12},
+    "Consumer Cyclical":      {"per_ratio": 0.60, "fwd_growth": 1.12},
+    "Consumer Discretionary": {"per_ratio": 0.60, "fwd_growth": 1.12},
+    "Industrials":            {"per_ratio": 0.62, "fwd_growth": 1.10},
+    "Communication Services": {"per_ratio": 0.62, "fwd_growth": 1.10},
+    "Energy":                 {"per_ratio": 0.58, "fwd_growth": 1.12},
+    "Basic Materials":        {"per_ratio": 0.58, "fwd_growth": 1.10},
+    "Materials":              {"per_ratio": 0.58, "fwd_growth": 1.10},
+    "Financial Services":     {"per_ratio": 0.62, "fwd_growth": 1.08},
+    "Financials":             {"per_ratio": 0.62, "fwd_growth": 1.08},
+    "Consumer Defensive":     {"per_ratio": 0.68, "fwd_growth": 1.05},
+    "Consumer Staples":       {"per_ratio": 0.68, "fwd_growth": 1.05},
+    "Utilities":              {"per_ratio": 0.72, "fwd_growth": 1.03},
+    "_default":               {"per_ratio": 0.60, "fwd_growth": 1.10},
+}
+
+
 def _rate(r: dict, sector_med: dict) -> str:
     per     = r["per"]
     eps     = r["eps"]
     fwd_eps = r["forward_eps"]
     pbr     = r["pbr"]
     med     = sector_med.get(r["sector"], math.nan)
+    cfg     = _SECTOR_BUY_CFG.get(r["sector"], _SECTOR_BUY_CFG["_default"])
 
     if math.isnan(per) or per <= 0:
         return "HOLD"
@@ -230,10 +250,10 @@ def _rate(r: dict, sector_med: dict) -> str:
     if not math.isnan(eps) and not math.isnan(fwd_eps) and eps > 0 and fwd_eps < eps * 0.75:
         return "SELL"
     if (
-        not math.isnan(med) and per < med * 0.70
+        not math.isnan(med) and per < med * cfg["per_ratio"]
         and not math.isnan(eps) and eps > 0
         and not math.isnan(pbr) and pbr > 0
-        and not math.isnan(fwd_eps) and fwd_eps >= eps * 1.05
+        and not math.isnan(fwd_eps) and fwd_eps >= eps * cfg["fwd_growth"]
     ):
         return "BUY"
     return "HOLD"
@@ -529,6 +549,8 @@ def run_daily(markets: list[str] = None, max_workers: int = 10) -> dict:
         }
     finally:
         _scan_running = False
+        from features.strategy.value_scan.cache import vs_cache
+        vs_cache.invalidate()
 
 
 def get_last_activity() -> dict:
@@ -571,7 +593,7 @@ def _enrich_position(pos: dict) -> dict:
     }
 
 
-def get_positions_with_pnl(max_workers: int = 20) -> list[dict]:
+def _get_positions_with_pnl_uncached(max_workers: int = 20) -> list[dict]:
     positions = load_positions()
     if not positions:
         return []
@@ -582,6 +604,11 @@ def get_positions_with_pnl(max_workers: int = 20) -> list[dict]:
 
     result.sort(key=lambda x: (x.get("pnl_usd") or 0), reverse=True)
     return result
+
+
+def get_positions_with_pnl(max_workers: int = 20) -> list[dict]:
+    from features.strategy.value_scan.cache import vs_cache
+    return vs_cache.get("positions", 300, lambda: _get_positions_with_pnl_uncached(max_workers))
 
 
 def _fnum(v: Any, default: float = 0.0) -> float:
@@ -703,3 +730,44 @@ def get_summary_stats() -> dict:
         "scan_running":       _scan_running,
         "live_pnl":           True,
     }
+
+
+def _get_benchmark_return_uncached(market: str) -> dict:
+    """SPY (nasdaq) or ^KS11 (kospi) total return % since earliest entry date."""
+    positions = load_positions()
+    history   = load_history()
+
+    dates: list[str] = []
+    for p in positions.values():
+        if p.get("market") == market and p.get("first_entry_date"):
+            dates.append(p["first_entry_date"])
+    for h in history:
+        if h.get("market") == market and h.get("first_entry_date"):
+            dates.append(h["first_entry_date"])
+
+    ticker = "SPY" if market == "nasdaq" else "^KS11"
+    if not dates:
+        return {"since": None, "benchmark_pct": None, "ticker": ticker}
+
+    since = min(dates)
+    try:
+        import yfinance as yf
+        from datetime import timedelta
+        end = (datetime.now(UTC) + timedelta(days=1)).strftime("%Y-%m-%d")
+        hist = yf.download(ticker, start=since, end=end, progress=False, auto_adjust=True)
+        if hist.empty or len(hist) < 2:
+            return {"since": since, "benchmark_pct": None, "ticker": ticker}
+        first = float(hist["Close"].iloc[0])
+        last  = float(hist["Close"].iloc[-1])
+        return {
+            "since":         since,
+            "benchmark_pct": round((last - first) / first * 100, 2),
+            "ticker":        ticker,
+        }
+    except Exception:
+        return {"since": since, "benchmark_pct": None, "ticker": ticker}
+
+
+def get_benchmark_return(market: str) -> dict:
+    from features.strategy.value_scan.cache import vs_cache
+    return vs_cache.get(f"benchmark_{market}", 3600, lambda: _get_benchmark_return_uncached(market))

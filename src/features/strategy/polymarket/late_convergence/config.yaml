@@ -3,6 +3,6 @@ enabled: true
 poll_interval_sec: 300      # REST 스캔 주기 (5분)
 max_scan_hours: 48          # 종료까지 최대 48시간 이내 마켓 전체 스캔
 hours_before_end: 24        # 시그널 조건: 종료 24시간 이내 (완화)
-min_convergence_price: 0.70 # YES or NO ≥ 70% 이면 시그널 (완화, 기존 0.82)
+min_convergence_price: 0.80 # YES or NO ≥ 80% 이면 시그널
 max_convergence_price: 0.97 # 이 이하 (완전 수렴 전)
 min_volume_usd: 5000

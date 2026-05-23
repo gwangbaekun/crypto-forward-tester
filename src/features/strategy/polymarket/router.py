@@ -53,6 +53,7 @@ async def signals(
     strategy: str = Query("all", description="all | late_convergence | pair_hedge | bayesian_fomc"),
     limit: int = Query(100),
     resolved: str = Query("all", description="all | yes | no"),
+    outcome: str = Query("all", description="all | win | loss"),
 ) -> JSONResponse:
     try:
         from db.session import get_session
@@ -68,6 +69,10 @@ async def signals(
                 stmt = stmt.where(PolymarketSignal.is_resolved == 1)
             elif resolved == "no":
                 stmt = stmt.where(PolymarketSignal.is_resolved == 0)
+            if outcome == "win":
+                stmt = stmt.where(PolymarketSignal.actual_pnl > 0)
+            elif outcome == "loss":
+                stmt = stmt.where(PolymarketSignal.actual_pnl < 0)
             stmt = stmt.limit(limit)
             rows = db.execute(stmt).scalars().all()
 
@@ -117,6 +122,7 @@ async def stats() -> JSONResponse:
             pnls = [r.actual_pnl for r in resolved if r.actual_pnl is not None]
             avg_pnl = sum(pnls) / len(pnls) if pnls else None
             win = sum(1 for p in pnls if p > 0)
+            loss = sum(1 for p in pnls if p < 0)
             win_rate = win / len(pnls) if pnls else None
 
             by_strategy: dict = {}
@@ -142,6 +148,8 @@ async def stats() -> JSONResponse:
                 "total":       total,
                 "resolved":    len(resolved),
                 "unresolved":  len(unresolved),
+                "wins":        win,
+                "losses":      loss,
                 "avg_pnl":     avg_pnl,
                 "win_rate":    win_rate,
                 "by_strategy": by_strategy,

@@ -203,8 +203,57 @@
     font-size: 0.67rem;
     font-weight: 700;
   }
-  .badge-sell { background: rgba(248,81,73,0.15); color: #f85149; }
+  .badge-buy  { background: rgba(63,185,80,0.15);  color: #3fb950; }
+  .badge-sell { background: rgba(248,81,73,0.15);  color: #f85149; }
   .badge-hold { background: rgba(139,148,158,0.12); color: #8b949e; }
+
+  .bench-row {
+    flex-shrink: 0;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    flex-wrap: wrap;
+    padding: 7px 12px;
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    font-size: 0.72rem;
+  }
+  .bench-label  { color: var(--text-secondary); }
+  .bench-ticker { font-weight: 600; font-size: 0.68rem; text-transform: uppercase; color: var(--text-secondary); }
+  .bench-beat   { color: #3fb950; font-weight: 700; }
+  .bench-lag    { color: #f85149; font-weight: 700; }
+
+  .scan-filter-bar {
+    display: flex;
+    gap: 8px;
+    padding: 8px 12px 4px;
+    align-items: center;
+    flex-wrap: wrap;
+  }
+  .scan-filter-btn {
+    padding: 3px 10px;
+    border-radius: 12px;
+    font-size: 0.68rem;
+    font-weight: 600;
+    border: 1px solid var(--border);
+    background: transparent;
+    color: var(--text-secondary);
+    cursor: pointer;
+  }
+  .scan-filter-btn.active { border-color: var(--blue); color: var(--blue); background: rgba(88,166,255,0.1); }
+  .scan-date { font-size: 0.68rem; color: var(--text-secondary); margin-left: auto; }
+  .scan-section-hdr td {
+    padding: 8px 8px 3px;
+    font-size: 0.63rem;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--text-secondary);
+    border-top: 1px solid var(--border);
+  }
+  tr.row-buy  { background: rgba(63,185,80,0.03); }
+  tr.row-sell { background: rgba(248,81,73,0.03); }
 
   .pnl-pos { color: #3fb950; font-weight: 600; }
   .pnl-neg { color: #f85149; font-weight: 600; }
@@ -310,6 +359,7 @@
   .fchip .fpnl.up { color: #3fb950; }
   .fchip .fpnl.down { color: #f85149; }
   .star { color: #d29922; margin-right: 2px; }
+  .row-famous { outline: 1.5px solid rgba(210,153,34,0.6); outline-offset: -1px; background: rgba(210,153,34,0.05) !important; }
   .famous-toggle {
     display: inline-flex;
     align-items: center;
@@ -378,6 +428,21 @@
     </div>
   </section>
 
+  <div class="bench-row" id="bench-row">
+    <span class="bench-label">vs Market</span>
+    <span style="display:flex;align-items:center;gap:5px">
+      <span class="bench-ticker" id="bench-ticker">SPY</span>
+      <span class="bench-pct pnl-pos" id="bench-index-pct">—</span>
+    </span>
+    <span class="bench-label">·</span>
+    <span style="display:flex;align-items:center;gap:5px">
+      <span class="bench-ticker">Portfolio</span>
+      <span class="bench-pct" id="bench-port-pct">—</span>
+    </span>
+    <span id="bench-delta"></span>
+    <span class="bench-label" id="bench-since-label"></span>
+  </div>
+
   <div class="ctrl-row">
     <span class="ctrl-label">Scan</span>
     <button class="primary" onclick="triggerScan('nasdaq')">▶ Scan NASDAQ</button>
@@ -391,6 +456,7 @@
       <button type="button" class="tab-btn active" onclick="switchTab('positions', this)">Open Positions</button>
       <button type="button" class="tab-btn" onclick="switchTab('activity', this)">Activity</button>
       <button type="button" class="tab-btn" onclick="switchTab('history', this)">History</button>
+      <button type="button" class="tab-btn" onclick="switchTab('scan', this)">Scan Results</button>
     </div>
 
     <div class="tab-pane active" id="tab-positions">
@@ -463,6 +529,30 @@
         </table>
       </div>
     </div>
+
+    <div class="tab-pane" id="tab-scan">
+      <div class="scan-filter-bar">
+        <button class="scan-filter-btn active" onclick="setScanFilter('all',this)">All</button>
+        <button class="scan-filter-btn" onclick="setScanFilter('BUY',this)">▲ BUY</button>
+        <button class="scan-filter-btn" onclick="setScanFilter('SELL',this)">▼ SELL</button>
+        <button class="scan-filter-btn" onclick="setScanFilter('HOLD',this)">HOLD</button>
+        <span class="scan-date" id="scan-results-date">—</span>
+      </div>
+      <div class="table-scroll">
+        <table>
+          <thead>
+            <tr>
+              <th>Signal</th><th>Symbol</th><th>Name</th><th>Sector</th>
+              <th class="r">PER</th><th class="r">Median</th><th class="r">Ratio</th>
+              <th class="r">EPS</th><th class="r">Fwd EPS</th><th class="r">PBR</th>
+            </tr>
+          </thead>
+          <tbody id="scan-results-tbody">
+            <tr><td colspan="10" class="empty">Scan Results 탭 클릭 시 최신 스캔 데이터 로드</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
   </main>
 
   <section class="famous-panel" id="famous-panel">
@@ -491,6 +581,9 @@ let lastStats = null;
 let famousData = null;
 let famousOnly = false;
 let lastBookStats = null;
+let scanResultsData = { kospi: null, nasdaq: null };
+let benchmarkData   = { kospi: null, nasdaq: null };
+let scanFilter = "all";
 
 const PF_BOOK = ["pf-deployed", "pf-realized"];
 const PF_LIVE = ["pf-equity", "pf-unreal", "pf-total", "pf-open-stats"];
@@ -509,6 +602,7 @@ function switchTab(name, btn) {
   document.querySelectorAll(".tab-btn").forEach(b => b.classList.remove("active"));
   document.getElementById(`tab-${name}`).classList.add("active");
   btn.classList.add("active");
+  if (name === "scan") loadScanResults();
 }
 
 function marketLabel() {
@@ -525,6 +619,8 @@ function setMarketFilter(market, btn) {
   renderFamous();
   refreshPortfolioUi();
   updateMarketSubs();
+  loadBenchmark();
+  if (document.getElementById("tab-scan").classList.contains("active")) renderScanResults();
 }
 
 function onFamousOnlyChange() {
@@ -954,7 +1050,12 @@ function pollScanStatus() {
     if (!d.running) {
       clearInterval(pollTimer);
       document.getElementById("scan-spinner").style.display = "none";
+      // 스캔 완료 → 캐시 무효화
+      scanResultsData = { kospi: null, nasdaq: null };
+      benchmarkData   = { kospi: null, nasdaq: null };
       await Promise.all([loadBookStats(), loadPositions(), loadHistory(), loadActivity(), loadFamous(), refreshScanStatus()]);
+      loadBenchmark();
+      if (document.getElementById("tab-scan").classList.contains("active")) loadScanResults();
     }
   }, 3000);
 }
@@ -970,6 +1071,123 @@ async function refreshScanStatus() {
   }
 }
 
+// ── Scan Results ─────────────────────────────────────────────────────────────
+
+function setScanFilter(rating, btn) {
+  scanFilter = rating;
+  document.querySelectorAll(".scan-filter-btn").forEach(b => b.classList.remove("active"));
+  btn.classList.add("active");
+  renderScanResults();
+}
+
+function renderScanResults() {
+  const tb = document.getElementById("scan-results-tbody");
+  const data = scanResultsData[marketFilter];
+  if (!data) {
+    tb.innerHTML = `<tr><td colspan="10" class="empty">No scan data for ${marketFilter.toUpperCase()}. Run a scan first.</td></tr>`;
+    return;
+  }
+  const rows = data.rows.filter(r => scanFilter === "all" || r.rating === scanFilter);
+  if (!rows.length) {
+    tb.innerHTML = `<tr><td colspan="10" class="empty">No ${scanFilter} signals</td></tr>`;
+    return;
+  }
+  const order = { BUY: 0, SELL: 1, HOLD: 2 };
+  rows.sort((a, b) => {
+    if (a.rating !== b.rating) return (order[a.rating] ?? 3) - (order[b.rating] ?? 3);
+    return (a.per ?? 999) - (b.per ?? 999);
+  });
+  const labels = { BUY: "── BUY", SELL: "── SELL", HOLD: "── HOLD" };
+  const fmtN = v => v == null ? '<span class="dash">—</span>' : Number(v).toFixed(1);
+  const fmtI = v => v == null ? '<span class="dash">—</span>' : Number(v).toLocaleString();
+  const isKospi = marketFilter === "kospi";
+  let html = "", lastRating = null;
+  for (const r of rows) {
+    if (r.rating !== lastRating) {
+      lastRating = r.rating;
+      html += `<tr class="scan-section-hdr"><td colspan="10">${labels[r.rating] || r.rating}</td></tr>`;
+    }
+    const med = r.sector_median;
+    const ratio = (r.per != null && med != null) ? (r.per / med).toFixed(2) : null;
+    const ratioCls = ratio != null ? (ratio < 1 ? "per-low" : "per-high") : "";
+    const badge = r.rating === "BUY"
+      ? '<span class="badge badge-buy">▲ BUY</span>'
+      : r.rating === "SELL"
+      ? '<span class="badge badge-sell">▼ SELL</span>'
+      : '<span class="badge badge-hold">HOLD</span>';
+    const famousCls = r.is_famous ? " row-famous" : "";
+    const famousStar = r.is_famous ? '<span class="star" title="Famous watchlist">★</span>' : "";
+    html += `<tr class="row-${r.rating.toLowerCase()}${famousCls}">
+      <td>${badge}</td>
+      <td><b>${r.symbol}</b></td>
+      <td class="name muted">${famousStar}${r.name}</td>
+      <td class="muted" style="max-width:140px;overflow:hidden;text-overflow:ellipsis">${r.sector || "—"}</td>
+      <td class="r ${r.rating === "BUY" ? "per-low" : ""}">${fmtN(r.per)}</td>
+      <td class="r muted">${fmtN(med)}</td>
+      <td class="r ${ratioCls}">${ratio ?? '<span class="dash">—</span>'}</td>
+      <td class="r muted">${isKospi ? fmtI(r.eps) : fmtN(r.eps)}</td>
+      <td class="r muted">${isKospi ? fmtI(r.forward_eps) : fmtN(r.forward_eps)}</td>
+      <td class="r muted">${fmtN(r.pbr)}</td>
+    </tr>`;
+  }
+  tb.innerHTML = html;
+}
+
+async function loadScanResults() {
+  const market = marketFilter;
+  if (scanResultsData[market]) { renderScanResults(); return; }
+  const tb = document.getElementById("scan-results-tbody");
+  tb.innerHTML = `<tr><td colspan="10" class="empty">Loading…</td></tr>`;
+  try {
+    const d = await safeFetch(`${BASE}/scan/results?market=${market}`);
+    scanResultsData[market] = d;
+    document.getElementById("scan-results-date").textContent = d.date ? `Scan: ${d.date}` : "—";
+    renderScanResults();
+  } catch (e) {
+    tb.innerHTML = `<tr><td colspan="10" class="empty">Load failed: ${e.message}</td></tr>`;
+  }
+}
+
+// ── Benchmark ─────────────────────────────────────────────────────────────────
+
+function applyBenchmark(d) {
+  if (!d) return;
+  document.getElementById("bench-ticker").textContent = d.ticker || "SPY";
+  const bEl = document.getElementById("bench-index-pct");
+  const bp = d.benchmark_pct;
+  bEl.textContent = bp != null ? `${bp >= 0 ? "+" : ""}${bp.toFixed(2)}%` : "—";
+  bEl.className = "bench-pct " + (bp != null ? (bp >= 0 ? "pnl-pos" : "pnl-neg") : "");
+
+  const pos = allPositions.filter(p => p.market === marketFilter);
+  const invested = pos.reduce((a, p) => a + (Number(p.invested_usd) || 0), 0);
+  const unreal   = pos.reduce((a, p) => a + (Number(p.pnl_usd) || 0), 0);
+  const pp = invested > 0 ? (unreal / invested * 100) : null;
+
+  const pEl = document.getElementById("bench-port-pct");
+  pEl.textContent = pp != null ? `${pp >= 0 ? "+" : ""}${pp.toFixed(2)}%` : "—";
+  pEl.className = "bench-pct " + (pp != null ? (pp >= 0 ? "pnl-pos" : "pnl-neg") : "");
+
+  const dEl = document.getElementById("bench-delta");
+  if (bp != null && pp != null) {
+    const delta = pp - bp;
+    dEl.textContent = `${delta >= 0 ? "+" : ""}${delta.toFixed(2)}% vs index`;
+    dEl.className = delta >= 0 ? "bench-beat" : "bench-lag";
+  } else {
+    dEl.textContent = ""; dEl.className = "";
+  }
+  if (d.since) document.getElementById("bench-since-label").textContent = `since ${d.since}`;
+}
+
+async function loadBenchmark() {
+  const market = marketFilter;
+  if (benchmarkData[market]) { applyBenchmark(benchmarkData[market]); return; }
+  try {
+    const d = await safeFetch(`${BASE}/benchmark?market=${market}`);
+    benchmarkData[market] = d;
+    if (market === marketFilter) applyBenchmark(d);
+  } catch (e) { console.warn("benchmark", e); }
+}
+
 async function init() {
   await loadHistory();
   await loadBookStats();
@@ -980,6 +1198,7 @@ async function init() {
     pollScanStatus();
   }
   setInterval(refreshScanStatus, 60000);
+  loadBenchmark();
 }
 
 init();

@@ -30,8 +30,13 @@ async def positions():
 @router.get("/history", response_class=JSONResponse)
 async def history(limit: int = Query(100)):
     try:
+        from features.strategy.value_scan.cache import vs_cache
         from features.strategy.value_scan.engine import load_history
-        hist = sorted(load_history(), key=lambda x: x.get("exit_date", ""), reverse=True)
+
+        def _load():
+            return sorted(load_history(), key=lambda x: x.get("exit_date", ""), reverse=True)
+
+        hist = vs_cache.get("history", 600, _load)
         return JSONResponse({"history": hist[:limit]})
     except Exception as e:
         logger.exception("history error")
@@ -41,9 +46,13 @@ async def history(limit: int = Query(100)):
 @router.get("/stats", response_class=JSONResponse)
 async def stats(fast: bool = Query(False, description="DB only, no live quotes")):
     try:
+        from features.strategy.value_scan.cache import vs_cache
         from features.strategy.value_scan.engine import get_book_stats, get_summary_stats
 
-        payload = get_book_stats() if fast else get_summary_stats()
+        if fast:
+            payload = vs_cache.get("stats_fast", 300, get_book_stats)
+        else:
+            payload = get_summary_stats()  # live — no cache (uses cached get_positions_with_pnl internally)
         return JSONResponse(payload)
     except Exception as e:
         logger.exception("stats error")
@@ -54,11 +63,14 @@ async def stats(fast: bool = Query(False, description="DB only, no live quotes")
 async def famous_watchlist():
     """static/famous_*.txt 워치리스트 + 오픈 포지션 매칭."""
     try:
+        from features.strategy.value_scan.cache import vs_cache
         from features.strategy.value_scan.engine import get_positions_with_pnl
         from features.strategy.value_scan.famous import build_famous_status
 
-        positions = get_positions_with_pnl()
-        return JSONResponse(build_famous_status(positions))
+        def _build():
+            return build_famous_status(get_positions_with_pnl())
+
+        return JSONResponse(vs_cache.get("famous", 300, _build))
     except Exception as e:
         logger.exception("famous error")
         return JSONResponse({"error": str(e)}, status_code=500)
@@ -67,8 +79,10 @@ async def famous_watchlist():
 @router.get("/activity", response_class=JSONResponse)
 async def activity():
     try:
+        from features.strategy.value_scan.cache import vs_cache
         from features.strategy.value_scan.engine import get_last_activity
-        return JSONResponse(get_last_activity())
+
+        return JSONResponse(vs_cache.get("activity", 600, get_last_activity))
     except Exception as e:
         logger.exception("activity error")
         return JSONResponse({"error": str(e)}, status_code=500)
@@ -210,6 +224,39 @@ async def reset_all(wipe_files: bool = Query(True)):
     except Exception as e:
         logger.exception("reset error")
         return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+
+
+@router.get("/scan/results", response_class=JSONResponse)
+async def scan_results(market: str = Query("nasdaq", description="kospi | nasdaq")):
+    """저장된 최신 스캔 결과 rows (BUY/SELL/HOLD) — 재스캔 없이 읽기 전용."""
+    from features.strategy.value_scan.cache import vs_cache
+
+    def _load():
+        import json as _json
+        from features.strategy.value_scan.famous import position_is_famous
+        from features.strategy.value_scan.paths import SCANS_DIR
+
+        files = sorted(SCANS_DIR.glob(f"*_{market}.json"))
+        if not files:
+            return {"rows": [], "date": None, "market": market}
+        data = _json.loads(files[-1].read_text())
+        rows = data.get("rows", [])
+        for r in rows:
+            r["is_famous"] = position_is_famous(r)
+        return {"rows": rows, "date": data.get("date"), "market": market}
+
+    return JSONResponse(vs_cache.get(f"scan_results_{market}", 3600, _load))
+
+
+@router.get("/benchmark", response_class=JSONResponse)
+async def benchmark(market: str = Query("nasdaq", description="kospi | nasdaq")):
+    """SPY / ^KS11 총수익률 vs 포트폴리오 첫 진입일 기준."""
+    try:
+        from features.strategy.value_scan.engine import get_benchmark_return
+        return JSONResponse(get_benchmark_return(market))
+    except Exception as e:
+        logger.exception("benchmark error")
+        return JSONResponse({"error": str(e)}, status_code=500)
 
 
 @router.post("/scan", response_class=JSONResponse)

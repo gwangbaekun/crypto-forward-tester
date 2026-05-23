@@ -136,11 +136,12 @@
 
   <!-- tabs -->
   <div class="tabs">
-    <button class="tab-btn active" data-view="signals" data-strat="all">Signals <span class="count" id="cnt-all"></span></button>
-    <button class="tab-btn" data-view="signals" data-strat="late_convergence">LC <span class="count" id="cnt-lc"></span></button>
-    <button class="tab-btn" data-view="signals" data-strat="pair_hedge">PH <span class="count" id="cnt-ph"></span></button>
-    <button class="tab-btn" data-view="signals" data-strat="bayesian_fomc">BF <span class="count" id="cnt-bf"></span></button>
-    <button class="tab-btn" data-view="markets" data-strat="">Live Markets <span class="count" id="cnt-mkt"></span></button>
+    <button class="tab-btn active" data-view="signals" data-strat="all" data-outcome="all">Signals <span class="count" id="cnt-all"></span></button>
+    <button class="tab-btn" data-view="signals" data-strat="late_convergence" data-outcome="all">LC <span class="count" id="cnt-lc"></span></button>
+    <button class="tab-btn" data-view="signals" data-strat="pair_hedge" data-outcome="all">PH <span class="count" id="cnt-ph"></span></button>
+    <button class="tab-btn" data-view="signals" data-strat="bayesian_fomc" data-outcome="all">BF <span class="count" id="cnt-bf"></span></button>
+    <button class="tab-btn" data-view="signals" data-strat="all" data-outcome="loss" style="color:var(--red);">Losses <span class="count" id="cnt-loss"></span></button>
+    <button class="tab-btn" data-view="markets" data-strat="" data-outcome="all">Live Markets <span class="count" id="cnt-mkt"></span></button>
   </div>
 
   <!-- filter bar -->
@@ -208,16 +209,18 @@
 
 </div>
 <script>
-let currentStrat = 'all';
-let currentView  = 'signals';
+let currentStrat   = 'all';
+let currentView    = 'signals';
+let currentOutcome = 'all';
 
 // ── tabs ──
 document.querySelectorAll('.tab-btn').forEach(btn => {
   btn.addEventListener('click', () => {
     document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
     btn.classList.add('active');
-    currentView  = btn.dataset.view;
-    currentStrat = btn.dataset.strat || 'all';
+    currentView    = btn.dataset.view;
+    currentStrat   = btn.dataset.strat   || 'all';
+    currentOutcome = btn.dataset.outcome || 'all';
     document.getElementById('view-signals').style.display = currentView === 'signals' ? '' : 'none';
     document.getElementById('view-markets').style.display = currentView === 'markets' ? '' : 'none';
     document.getElementById('filter-bar').style.display   = currentView === 'signals' ? '' : 'none';
@@ -264,10 +267,11 @@ async function loadStats() {
 
     // tab counts
     const by = d.by_strategy || {};
-    document.getElementById('cnt-all').textContent = d.total ? `(${d.total})` : '';
-    document.getElementById('cnt-lc').textContent  = by.late_convergence ? `(${by.late_convergence.total})` : '';
-    document.getElementById('cnt-ph').textContent  = by.pair_hedge ? `(${by.pair_hedge.total})` : '';
-    document.getElementById('cnt-bf').textContent  = by.bayesian_fomc ? `(${by.bayesian_fomc.total})` : '';
+    document.getElementById('cnt-all').textContent  = d.total   ? `(${d.total})`   : '';
+    document.getElementById('cnt-lc').textContent   = by.late_convergence ? `(${by.late_convergence.total})` : '';
+    document.getElementById('cnt-ph').textContent   = by.pair_hedge ? `(${by.pair_hedge.total})` : '';
+    document.getElementById('cnt-bf').textContent   = by.bayesian_fomc ? `(${by.bayesian_fomc.total})` : '';
+    document.getElementById('cnt-loss').textContent = d.losses  ? `(${d.losses})`  : '';
   } catch(e) { console.error('stats error', e); }
 }
 
@@ -275,7 +279,7 @@ async function loadStats() {
 async function loadSignals() {
   const resolved = document.getElementById('sel-resolved').value;
   const limit    = document.getElementById('sel-limit').value;
-  const url = `/quant/polymarket/signals?strategy=${currentStrat}&resolved=${resolved}&limit=${limit}`;
+  const url = `/quant/polymarket/signals?strategy=${currentStrat}&resolved=${resolved}&limit=${limit}&outcome=${currentOutcome}`;
   try {
     const r = await fetch(url);
     const d = await r.json();
