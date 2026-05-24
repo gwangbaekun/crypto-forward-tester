@@ -1,6 +1,7 @@
 """Polymarket 대시보드 라우터."""
 from __future__ import annotations
 
+import time
 from datetime import datetime, date, UTC
 from itertools import groupby
 
@@ -10,6 +11,25 @@ from fastapi.responses import HTMLResponse, JSONResponse
 from common.utils import render_template
 
 INITIAL_CAPITAL = 100.0
+
+# 섹터 키워드 매핑 (소문자 매칭)
+_SECTORS: dict[str, list[str]] = {
+    "Weather":     ["weather", "rain", "temperature", "hurricane", "storm", "snow",
+                    "tornado", "flood", "climate", "wind", "typhoon", "drought"],
+    "Sports":      ["nba", "nfl", "nhl", "mlb", "soccer", "football", "baseball",
+                    "tennis", "golf", "championship", "playoff", "league", "match",
+                    "tournament", "super bowl", "world cup", "ufc", "boxing", "f1"],
+    "Politics":    ["election", "president", "senate", "congress", "vote", "republican",
+                    "democrat", "governor", "trump", "biden", "harris", "parliament",
+                    "referendum", "ballot", "primary"],
+    "Crypto":      ["bitcoin", "btc", "eth", "ethereum", "crypto", "sol", "doge",
+                    "xrp", "bnb", "altcoin", "defi", "nft", "usdt", "stablecoin"],
+    "Economics":   ["fed", "fomc", "inflation", "interest rate", "gdp", "recession",
+                    "unemployment", "cpi", "ppi", "rate cut", "rate hike", "payroll",
+                    "treasury", "yield"],
+    "Entertainment": ["oscar", "grammy", "emmy", "award", "movie", "film", "actor",
+                      "celebrity", "music", "album", "box office"],
+}
 
 router = APIRouter(prefix="/quant/polymarket", tags=["polymarket"])
 
@@ -222,6 +242,31 @@ async def reset_signals(confirm: str = Query(..., description="'yes'를 입력�
         return JSONResponse({"error": str(e)}, status_code=500)
 
 
+@router.delete("/reset-resolved")
+async def reset_resolved_signals(confirm: str = Query(..., description="'yes'를 입력해야 실행")) -> JSONResponse:
+    """resolved 시그널만 삭제. pending(미해소) 시그널은 보존."""
+    if confirm != "yes":
+        return JSONResponse({"error": "confirm=yes 필요"}, status_code=400)
+    try:
+        from db.session import get_session
+        from db.models import PolymarketSignal
+        from sqlalchemy import delete
+
+        db = get_session()
+        try:
+            stmt = delete(PolymarketSignal).where(PolymarketSignal.is_resolved == 1)
+            result = db.execute(stmt)
+            db.commit()
+            return JSONResponse({"deleted_resolved": result.rowcount})
+        except Exception as e:
+            db.rollback()
+            raise
+        finally:
+            db.close()
+    except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+
 @router.get("/stats")
 async def stats(
     since: str | None = Query(None, description="YYYY-MM-DD (created_at 기준)"),
@@ -280,5 +325,208 @@ async def stats(
             })
         finally:
             db.close()
+    except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+
+# ──────────────────────────────────────────────
+# Rotation Optimize Dashboard
+# ──────────────────────────────────────────────
+
+@router.get("/rotation/dashboard", response_class=HTMLResponse)
+async def rotation_dashboard():
+    return render_template("polymarket_rotation.html")
+
+
+def _entry_price(row) -> float | None:
+    """시그널의 실제 진입 가격 (side 기준)."""
+    if row.side == "NO":
+        return row.no_price
+    return row.yes_price
+
+
+def _sector(question: str) -> str:
+    q = (question or "").lower()
+    for sector, keywords in _SECTORS.items():
+        if any(kw in q for kw in keywords):
+            return sector
+    return "Other"
+
+
+@router.get("/rotation/top-signals")
+async def rotation_top_signals(
+    limit: int = Query(50),
+    exclude_sectors: str = Query("Sports", description="콤마 구분 섹터 제외. 기본: Sports"),
+) -> JSONResponse:
+    """Score 기반 LC 진입 후보. price >= 0.80 && 미해소 && 만기 미경과."""
+    try:
+        from db.session import get_session
+        from db.models import PolymarketSignal
+        from sqlalchemy import select
+
+        excluded = {s.strip() for s in exclude_sectors.split(",") if s.strip()}
+        now_ts = time.time()
+        db = get_session()
+        try:
+            stmt = (
+                select(PolymarketSignal)
+                .where(
+                    PolymarketSignal.is_resolved == 0,
+                    PolymarketSignal.strategy == "late_convergence",
+                    PolymarketSignal.event_end_ts.isnot(None),
+                )
+            )
+            rows = db.execute(stmt).scalars().all()
+        finally:
+            db.close()
+
+        results = []
+        for r in rows:
+            price = _entry_price(r)
+            if price is None or price < 0.80:
+                continue
+
+            hours_left = (r.event_end_ts - now_ts) / 3600
+            if hours_left <= 0:
+                continue
+
+            sector = _sector(r.question or "")
+            if sector in excluded:
+                continue
+
+            days_left = hours_left / 24
+            score = ((1 - price) / price) / max(days_left, 1 / 24)
+
+            results.append({
+                "id":           r.id,
+                "condition_id": r.condition_id,
+                "question":     (r.question or "")[:120],
+                "sector":       sector,
+                "side":         r.side,
+                "price":        round(price, 4),
+                "expected_roi": round((1 - price) / price * 100, 2),
+                "hours_left":   round(hours_left, 2),
+                "score":        round(score, 4),
+                "volume_usd":   r.volume_usd,
+                "created_at":   r.created_at.isoformat() if r.created_at else None,
+            })
+
+        results.sort(key=lambda x: x["score"], reverse=True)
+        return JSONResponse({"signals": results[:limit], "total": len(results), "excluded_sectors": list(excluded)})
+    except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+
+@router.get("/rotation/wallet")
+async def rotation_wallet(
+    since: str | None = Query(None, description="YYYY-MM-DD (resolved_at 기준)"),
+) -> JSONResponse:
+    """$100 시작, 시그널당 $1 고정 베팅 복리 시뮬."""
+    try:
+        from db.session import get_session
+        from db.models import PolymarketSignal
+        from sqlalchemy import select
+
+        since_dt = _parse_since(since)
+        db = get_session()
+        try:
+            stmt = (
+                select(PolymarketSignal)
+                .where(
+                    PolymarketSignal.is_resolved == 1,
+                    PolymarketSignal.actual_pnl.isnot(None),
+                    PolymarketSignal.strategy == "late_convergence",
+                )
+                .order_by(PolymarketSignal.resolved_at)
+            )
+            if since_dt:
+                stmt = stmt.where(PolymarketSignal.resolved_at >= since_dt)
+            rows = db.execute(stmt).scalars().all()
+        finally:
+            db.close()
+
+        wallet = 100.0
+        curve = [{"date": "start", "wallet": round(wallet, 4), "trades": 0}]
+
+        def day_key(r):
+            ts = r.resolved_at or r.created_at
+            return ts.date() if ts else date(2000, 1, 1)
+
+        for day, group in groupby(rows, key=day_key):
+            batch = list(group)
+            for r in batch:
+                wallet += 1.0 * r.actual_pnl  # 시그널당 $1 고정
+            curve.append({
+                "date":   str(day),
+                "wallet": round(wallet, 4),
+                "trades": len(batch),
+            })
+
+        total_pct = (wallet - 100.0) / 100.0 * 100
+        return JSONResponse({
+            "initial":               100.0,
+            "current_wallet":        round(wallet, 4),
+            "total_pct":             round(total_pct, 2),
+            "recommended_positions": max(1, int(wallet)),
+            "curve":                 curve,
+        })
+    except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+
+@router.get("/rotation/loss-sectors")
+async def rotation_loss_sectors(
+    since: str | None = Query(None, description="YYYY-MM-DD (resolved_at 기준)"),
+) -> JSONResponse:
+    """LC 손실 시그널을 섹터별로 분류해 반환."""
+    try:
+        from db.session import get_session
+        from db.models import PolymarketSignal
+        from sqlalchemy import select
+
+        since_dt = _parse_since(since)
+        db = get_session()
+        try:
+            stmt = (
+                select(PolymarketSignal)
+                .where(
+                    PolymarketSignal.is_resolved == 1,
+                    PolymarketSignal.actual_pnl.isnot(None),
+                    PolymarketSignal.strategy == "late_convergence",
+                )
+            )
+            if since_dt:
+                stmt = stmt.where(PolymarketSignal.resolved_at >= since_dt)
+            rows = db.execute(stmt).scalars().all()
+        finally:
+            db.close()
+
+        sector_data: dict[str, dict] = {}
+        for r in rows:
+            s = _sector(r.question or "")
+            if s not in sector_data:
+                sector_data[s] = {"wins": 0, "losses": 0, "pnls": []}
+            if r.actual_pnl > 0:
+                sector_data[s]["wins"] += 1
+            else:
+                sector_data[s]["losses"] += 1
+            sector_data[s]["pnls"].append(r.actual_pnl)
+
+        result = []
+        for sector, d in sector_data.items():
+            total = d["wins"] + d["losses"]
+            avg_pnl = sum(d["pnls"]) / len(d["pnls"]) if d["pnls"] else 0
+            wr = d["wins"] / total if total else 0
+            result.append({
+                "sector":   sector,
+                "total":    total,
+                "wins":     d["wins"],
+                "losses":   d["losses"],
+                "win_rate": round(wr * 100, 1),
+                "avg_pnl":  round(avg_pnl * 100, 2),
+            })
+
+        result.sort(key=lambda x: x["losses"], reverse=True)
+        return JSONResponse({"sectors": result})
     except Exception as e:
         return JSONResponse({"error": str(e)}, status_code=500)

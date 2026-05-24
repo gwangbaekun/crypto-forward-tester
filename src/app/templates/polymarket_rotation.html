@@ -1,0 +1,379 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Polymarket — Rotation Optimize</title>
+<link rel="stylesheet" href="/static/css/dashboard_common.css">
+<style>
+  body { padding: 10px 12px 40px; }
+  .shell { max-width: 1320px; margin: 0 auto; display: flex; flex-direction: column; gap: 10px; }
+
+  .topbar {
+    display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 8px;
+    padding: 10px 14px;
+    background: var(--card); border: 1px solid var(--border); border-radius: 8px;
+  }
+  .topbar-title { font-size: 1rem; font-weight: 700; color: var(--text); }
+  .topbar-sub   { font-size: 0.75rem; color: var(--muted); }
+  .topbar-right { display: flex; align-items: center; gap: 8px; }
+  .nav-link {
+    font-size: 0.74rem; color: var(--muted); text-decoration: none;
+    padding: 4px 10px; border: 1px solid var(--border); border-radius: 6px;
+  }
+  .nav-link:hover { color: var(--blue); border-color: var(--blue); }
+
+  /* stat pills */
+  .stats-row { display: flex; gap: 8px; flex-wrap: wrap; }
+  .stat-pill {
+    flex: 1; min-width: 130px;
+    background: var(--card); border: 1px solid var(--border); border-radius: 8px;
+    padding: 10px 14px; display: flex; flex-direction: column; gap: 2px;
+  }
+  .stat-label { font-size: 0.68rem; color: var(--muted); text-transform: uppercase; letter-spacing: .04em; }
+  .stat-value { font-size: 1.15rem; font-weight: 700; color: var(--text); }
+  .stat-value.green { color: var(--green); }
+  .stat-value.red   { color: var(--red); }
+  .stat-value.blue  { color: var(--blue); }
+  .stat-value.yellow { color: #f0c040; }
+
+  /* wallet chart */
+  .card {
+    background: var(--card); border: 1px solid var(--border); border-radius: 8px;
+    padding: 14px 16px;
+  }
+  .card-header {
+    display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;
+  }
+  .card-title { font-size: 0.8rem; font-weight: 700; color: var(--text); }
+  .card-sub   { font-size: 0.72rem; color: var(--muted); }
+  #wallet-canvas { width: 100%; height: 150px; display: block; }
+
+  /* two col layout */
+  .two-col { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+  @media (max-width: 700px) { .two-col { grid-template-columns: 1fr; } }
+
+  /* signal table */
+  .tbl-wrap { overflow-x: auto; }
+  table { width: 100%; border-collapse: collapse; font-size: 0.74rem; }
+  thead th {
+    text-align: left; padding: 6px 8px;
+    color: var(--muted); font-weight: 600; font-size: 0.67rem;
+    border-bottom: 1px solid var(--border); white-space: nowrap;
+  }
+  tbody tr { border-bottom: 1px solid rgba(255,255,255,.04); }
+  tbody tr:hover { background: rgba(255,255,255,.03); }
+  tbody td { padding: 6px 8px; color: var(--text); vertical-align: middle; }
+  .q-text { max-width: 280px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .badge {
+    display: inline-block; padding: 1px 6px; border-radius: 4px;
+    font-size: 0.65rem; font-weight: 600; text-transform: uppercase;
+  }
+  .badge-yes   { background: rgba(38,166,91,.15); color: var(--green); }
+  .badge-no    { background: rgba(218,54,51,.15);  color: var(--red); }
+  .badge-sector { background: rgba(100,100,200,.15); color: #9090dd; }
+  .score-bar {
+    display: flex; align-items: center; gap: 6px;
+  }
+  .score-fill {
+    height: 6px; border-radius: 3px; background: var(--blue); min-width: 2px;
+  }
+
+  /* sector table */
+  .sector-wr-bar {
+    display: inline-block; height: 8px; border-radius: 4px;
+    background: var(--green); vertical-align: middle; margin-right: 4px;
+  }
+  .sector-loss-bar {
+    display: inline-block; height: 8px; border-radius: 4px;
+    background: var(--red); vertical-align: middle; margin-right: 4px;
+  }
+
+  .refresh-btn {
+    font-size: 0.72rem; background: var(--bg); border: 1px solid var(--border);
+    color: var(--muted); padding: 4px 10px; border-radius: 6px; cursor: pointer;
+  }
+  .refresh-btn:hover { color: var(--blue); border-color: var(--blue); }
+  .loading { color: var(--muted); font-size: 0.78rem; padding: 20px 0; text-align: center; }
+  .err { color: var(--red); font-size: 0.76rem; padding: 8px 0; }
+</style>
+</head>
+<body>
+<div class="shell">
+
+  <!-- topbar -->
+  <div class="topbar">
+    <div>
+      <div class="topbar-title">Polymarket — Rotation Optimize</div>
+      <div class="topbar-sub">Score = ((1−price)/price) / days_left &nbsp;|&nbsp; price ≥ 0.80 &nbsp;|&nbsp; $1 per position</div>
+    </div>
+    <div class="topbar-right">
+      <label style="font-size:.74rem;color:var(--muted)">Since</label>
+      <input type="date" id="since-input" style="background:var(--bg);border:1px solid var(--border);color:var(--text);padding:4px 8px;border-radius:6px;font-size:.76rem;color-scheme:dark;" onchange="loadAll()">
+      <a class="nav-link" href="/quant/polymarket/dashboard">← Main Dashboard</a>
+      <button class="refresh-btn" onclick="loadAll()">Refresh</button>
+    </div>
+  </div>
+
+  <!-- wallet stats -->
+  <div class="stats-row" id="wallet-stats">
+    <div class="stat-pill"><div class="stat-label">Initial Capital</div><div class="stat-value">$100</div></div>
+    <div class="stat-pill"><div class="stat-label">Current Wallet</div><div class="stat-value blue" id="s-wallet">—</div></div>
+    <div class="stat-pill"><div class="stat-label">Total Return</div><div class="stat-value" id="s-pct">—</div></div>
+    <div class="stat-pill"><div class="stat-label">Recommended Positions</div><div class="stat-value yellow" id="s-positions">—</div></div>
+    <div class="stat-pill"><div class="stat-label">Top Signals Now</div><div class="stat-value blue" id="s-top-count">—</div></div>
+  </div>
+
+  <!-- wallet curve -->
+  <div class="card">
+    <div class="card-header">
+      <div class="card-title">Wallet Growth ($1 fixed/position, compounding)</div>
+      <div class="card-sub" id="wallet-summary"></div>
+    </div>
+    <canvas id="wallet-canvas"></canvas>
+  </div>
+
+  <!-- two col: top signals + loss sectors -->
+  <div class="two-col">
+
+    <!-- top signals -->
+    <div class="card">
+      <div class="card-header">
+        <div class="card-title">Top Signals by Score</div>
+        <div class="card-sub">
+          pending · price ≥ 0.80 · sorted by ROI/day &nbsp;
+          <label style="font-size:.7rem;color:var(--red);cursor:pointer">
+            <input type="checkbox" id="excl-sports" checked onchange="loadTopSignals()">
+            Exclude Sports
+          </label>
+          <label style="font-size:.7rem;color:#f0c040;cursor:pointer;margin-left:8px">
+            <input type="checkbox" id="excl-entertainment" onchange="loadTopSignals()">
+            Exclude Entertainment
+          </label>
+        </div>
+      </div>
+      <div class="tbl-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>Question</th>
+              <th>Sector</th>
+              <th>Side</th>
+              <th>Price</th>
+              <th>ROI%</th>
+              <th>Hrs Left</th>
+              <th>Score</th>
+            </tr>
+          </thead>
+          <tbody id="signal-tbody">
+            <tr><td colspan="7" class="loading">Loading…</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- loss sectors -->
+    <div class="card">
+      <div class="card-header">
+        <div class="card-title">Loss Sector Breakdown</div>
+        <div class="card-sub">resolved LC signals grouped by category</div>
+      </div>
+      <div class="tbl-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>Sector</th>
+              <th>Total</th>
+              <th>Losses</th>
+              <th>Win Rate</th>
+              <th>Avg PnL</th>
+            </tr>
+          </thead>
+          <tbody id="sector-tbody">
+            <tr><td colspan="5" class="loading">Loading…</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+  </div>
+
+</div>
+
+<script>
+const BASE = '/quant/polymarket';
+
+function getSince() {
+  return document.getElementById('since-input')?.value || '';
+}
+
+async function loadWallet() {
+  const since = getSince();
+  const params = since ? `?since=${since}` : '';
+  const r = await fetch(`${BASE}/rotation/wallet${params}`);
+  const d = await r.json();
+
+  const wallet = d.current_wallet ?? 100;
+  const pct    = d.total_pct ?? 0;
+  const pos    = d.recommended_positions ?? 100;
+
+  document.getElementById('s-wallet').textContent    = `$${wallet.toFixed(2)}`;
+  document.getElementById('s-positions').textContent = `${pos}`;
+
+  const pctEl = document.getElementById('s-pct');
+  pctEl.textContent = `${pct >= 0 ? '+' : ''}${pct.toFixed(1)}%`;
+  pctEl.className   = 'stat-value ' + (pct >= 0 ? 'green' : 'red');
+
+  document.getElementById('wallet-summary').textContent =
+    `$100 → $${wallet.toFixed(2)} · ${pos} concurrent positions now`;
+
+  drawWalletChart(d.curve || []);
+}
+
+function drawWalletChart(curve) {
+  const canvas = document.getElementById('wallet-canvas');
+  const dpr    = window.devicePixelRatio || 1;
+  const W      = canvas.offsetWidth;
+  const H      = canvas.offsetHeight;
+  canvas.width  = W * dpr;
+  canvas.height = H * dpr;
+  const ctx    = canvas.getContext('2d');
+  ctx.scale(dpr, dpr);
+
+  if (!curve.length) return;
+
+  const vals   = curve.map(p => p.wallet);
+  const minV   = Math.min(...vals);
+  const maxV   = Math.max(...vals);
+  const range  = maxV - minV || 1;
+  const pad    = { t: 8, b: 24, l: 48, r: 12 };
+  const cw     = W - pad.l - pad.r;
+  const ch     = H - pad.t - pad.b;
+
+  const xOf = i => pad.l + (i / (curve.length - 1 || 1)) * cw;
+  const yOf = v => pad.t + ch - ((v - minV) / range) * ch;
+
+  // grid lines
+  ctx.strokeStyle = 'rgba(255,255,255,.06)';
+  ctx.lineWidth   = 1;
+  [0, 0.25, 0.5, 0.75, 1].forEach(f => {
+    const y = pad.t + ch * f;
+    ctx.beginPath(); ctx.moveTo(pad.l, y); ctx.lineTo(W - pad.r, y); ctx.stroke();
+    const label = (maxV - range * f).toFixed(2);
+    ctx.fillStyle   = 'rgba(255,255,255,.35)';
+    ctx.font        = '10px monospace';
+    ctx.textAlign   = 'right';
+    ctx.fillText('$' + label, pad.l - 4, y + 4);
+  });
+
+  // gradient fill
+  const grad = ctx.createLinearGradient(0, pad.t, 0, H - pad.b);
+  grad.addColorStop(0,   'rgba(38,166,91,.35)');
+  grad.addColorStop(1,   'rgba(38,166,91,.02)');
+  ctx.beginPath();
+  curve.forEach((p, i) => {
+    const x = xOf(i), y = yOf(p.wallet);
+    i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
+  });
+  ctx.lineTo(xOf(curve.length - 1), H - pad.b);
+  ctx.lineTo(xOf(0), H - pad.b);
+  ctx.closePath();
+  ctx.fillStyle = grad;
+  ctx.fill();
+
+  // line
+  ctx.beginPath();
+  ctx.strokeStyle = 'rgba(38,166,91,.9)';
+  ctx.lineWidth   = 1.5;
+  curve.forEach((p, i) => {
+    const x = xOf(i), y = yOf(p.wallet);
+    i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
+  });
+  ctx.stroke();
+}
+
+async function loadTopSignals() {
+  const excluded = [];
+  if (document.getElementById('excl-sports')?.checked)        excluded.push('Sports');
+  if (document.getElementById('excl-entertainment')?.checked) excluded.push('Entertainment');
+  const params = new URLSearchParams({ limit: 50, exclude_sectors: excluded.join(',') || '' });
+  const r = await fetch(`${BASE}/rotation/top-signals?${params}`);
+  const d = await r.json();
+  const tbody = document.getElementById('signal-tbody');
+  const signals = d.signals || [];
+
+  document.getElementById('s-top-count').textContent = signals.length;
+
+  if (!signals.length) {
+    tbody.innerHTML = '<tr><td colspan="7" class="loading">No signals (price ≥ 0.80, pending)</td></tr>';
+    return;
+  }
+
+  const maxScore = signals[0].score || 1;
+  tbody.innerHTML = signals.map(s => {
+    const barW = Math.round((s.score / maxScore) * 60);
+    const sideClass = s.side === 'YES' ? 'badge-yes' : 'badge-no';
+    return `<tr>
+      <td><span class="q-text" title="${s.question}">${s.question}</span></td>
+      <td><span class="badge badge-sector">${s.sector}</span></td>
+      <td><span class="badge ${sideClass}">${s.side}</span></td>
+      <td>${(s.price * 100).toFixed(1)}¢</td>
+      <td class="green">+${s.expected_roi.toFixed(1)}%</td>
+      <td>${s.hours_left.toFixed(1)}h</td>
+      <td>
+        <div class="score-bar">
+          <div class="score-fill" style="width:${barW}px"></div>
+          <span style="font-size:.68rem;color:var(--muted)">${s.score.toFixed(3)}</span>
+        </div>
+      </td>
+    </tr>`;
+  }).join('');
+}
+
+async function loadLossSectors() {
+  const since = getSince();
+  const params = since ? `?since=${since}` : '';
+  const r = await fetch(`${BASE}/rotation/loss-sectors${params}`);
+  const d = await r.json();
+  const tbody = document.getElementById('sector-tbody');
+  const sectors = d.sectors || [];
+
+  if (!sectors.length) {
+    tbody.innerHTML = '<tr><td colspan="5" class="loading">No data</td></tr>';
+    return;
+  }
+
+  const maxLoss = sectors[0].losses || 1;
+  tbody.innerHTML = sectors.map(s => {
+    const lossBarW = Math.round((s.losses / maxLoss) * 50);
+    const wrBarW   = Math.round((s.win_rate / 100) * 50);
+    const pnlClass = s.avg_pnl >= 0 ? 'green' : 'red';
+    const wrClass  = s.win_rate >= 85 ? 'green' : s.win_rate >= 70 ? 'yellow' : 'red';
+    return `<tr>
+      <td><strong>${s.sector}</strong></td>
+      <td>${s.total}</td>
+      <td>
+        <span class="sector-loss-bar" style="width:${lossBarW}px"></span>${s.losses}
+      </td>
+      <td>
+        <span class="sector-wr-bar" style="width:${wrBarW}px"></span>
+        <span class="${wrClass}">${s.win_rate}%</span>
+      </td>
+      <td class="${pnlClass}">${s.avg_pnl >= 0 ? '+' : ''}${s.avg_pnl}%</td>
+    </tr>`;
+  }).join('');
+}
+
+async function loadAll() {
+  await Promise.all([loadWallet(), loadTopSignals(), loadLossSectors()]);
+}
+
+// 기본값: 오늘
+document.getElementById('since-input').value = new Date().toISOString().slice(0, 10);
+loadAll();
+window.addEventListener('resize', () => {
+  fetch(`${BASE}/rotation/wallet`).then(r => r.json()).then(d => drawWalletChart(d.curve || []));
+});
+</script>
+</body>
+</html>
