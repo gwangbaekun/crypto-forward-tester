@@ -31,6 +31,10 @@ log = logging.getLogger("polymarket.executor")
 _ORDER_SIZE_USD = float(os.environ.get("POLYMARKET_ORDER_SIZE_USD", "0"))
 _TICK_SIZE      = os.environ.get("POLYMARKET_TICK_SIZE", "0.01")
 
+# POLYMARKET_LIVE=true 일 때만 실제 주문 전송.
+# 로컬에서는 .env 에 이 값을 넣지 않으면 자동으로 시뮬 모드.
+_LIVE_ENABLED = os.environ.get("POLYMARKET_LIVE", "false").strip().lower() == "true"
+
 # Polymarket V2 최소 제약
 _MIN_SHARES    = 5.0
 _MIN_USD       = 1.0
@@ -54,8 +58,12 @@ def _min_order(price: float) -> tuple[float, float]:
 
 
 def is_live_mode() -> bool:
-    """실거래 모드 (유효 hex PK + 자격증명) 여부."""
-    return _has_pk() and _pk_valid()
+    """실거래 모드 여부.
+
+    POLYMARKET_LIVE=true AND 유효 hex PK + 자격증명 모두 있어야 true.
+    로컬에서는 POLYMARKET_LIVE 를 설정하지 않으면 항상 false.
+    """
+    return _LIVE_ENABLED and _has_pk() and _pk_valid()
 
 
 # ── 주문 생성 (BUY GTC limit) ───────────────────────────────────────────────
@@ -76,7 +84,10 @@ async def place_order(
         {"order_id": str, "status": "matched"|"live"|"delayed"|"unmatched"|"failed"|"skipped",
          "raw": dict | None, "error": str | None}
     """
-    if not is_live_mode():
+    if not _LIVE_ENABLED:
+        log.info("[executor] POLYMARKET_LIVE!=true → 주문 skip (시뮬 모드) token=%s", token_id[:12])
+        return {"order_id": "", "status": "skipped", "error": "POLYMARKET_LIVE 비활성"}
+    if not (_has_pk() and _pk_valid()):
         log.info("[executor] PK 미설정 → 주문 skip (시뮬 모드) token=%s", token_id[:12])
         return {"order_id": "", "status": "failed", "error": "POLYMARKET_PK 미설정"}
 
