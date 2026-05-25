@@ -83,7 +83,7 @@ class SpotPerpCvdForwardTest(BaseForwardTest):
                     "side":          direction,
                     "entry_price":   current_price,
                     "entry_time":    time.time(),
-                    "entry_tf":      sig.get("entry_tf") or "1h",
+                    "entry_tf":      sig.get("entry_tf") or state.get("entry_tf"),
                     "confidence":    sig.get("confidence", 0),
                     "tp":            None,
                     "sl":            sl,
