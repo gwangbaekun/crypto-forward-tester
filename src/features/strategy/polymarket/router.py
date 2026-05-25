@@ -351,6 +351,19 @@ async def rotation_live_wallet() -> JSONResponse:
         return JSONResponse({"error": str(e)}, status_code=500)
 
 
+@router.get("/rotation/debug-balance")
+async def rotation_debug_balance() -> JSONResponse:
+    """디버그: /balance-allowance 원본 응답 전체 반환 (pUSD 확인용)."""
+    try:
+        from features.strategy.polymarket._data.live import fetch_balance_raw
+        data = await fetch_balance_raw()
+        return JSONResponse(data)
+    except ValueError as e:
+        return JSONResponse({"error": str(e)}, status_code=400)
+    except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+
 def _entry_price(row) -> float | None:
     """시그널의 실제 진입 가격 (side 기준)."""
     if row.side == "NO":
@@ -371,7 +384,7 @@ async def rotation_top_signals(
     limit: int = Query(50),
     exclude_sectors: str = Query("Sports", description="콤마 구분 섹터 제외. 기본: Sports"),
 ) -> JSONResponse:
-    """Score 기반 LC 진입 후보. price >= 0.80 && 미해소 && 만기 미경과."""
+    """Score 기반 LC 진입 후보. price >= 0.80 && 미해소 && 만기 미경과. condition_id 중복 제거."""
     try:
         from db.session import get_session
         from db.models import PolymarketSignal
@@ -388,13 +401,24 @@ async def rotation_top_signals(
                     PolymarketSignal.strategy == "late_convergence",
                     PolymarketSignal.event_end_ts.isnot(None),
                 )
+                .order_by(PolymarketSignal.created_at.desc())
             )
             rows = db.execute(stmt).scalars().all()
         finally:
             db.close()
 
-        results = []
+        # condition_id 당 최신 row 1개만 유지
+        seen_conditions: set[str] = set()
+        deduped = []
         for r in rows:
+            cid = r.condition_id or ""
+            if cid in seen_conditions:
+                continue
+            seen_conditions.add(cid)
+            deduped.append(r)
+
+        results = []
+        for r in deduped:
             price = _entry_price(r)
             if price is None or price < 0.80:
                 continue
@@ -425,7 +449,11 @@ async def rotation_top_signals(
             })
 
         results.sort(key=lambda x: x["score"], reverse=True)
-        return JSONResponse({"signals": results[:limit], "total": len(results), "excluded_sectors": list(excluded)})
+        return JSONResponse({
+            "signals":          results[:limit],
+            "total":            len(results),
+            "excluded_sectors": list(excluded),
+        })
     except Exception as e:
         return JSONResponse({"error": str(e)}, status_code=500)
 

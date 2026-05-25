@@ -1,60 +1,54 @@
-"""Polymarket 실시간 지갑 조회.
+"""Polymarket 실시간 지갑 조회 (V2 SDK).
 
-인증 흐름 (L2 — HMAC-SHA256, py-clob-client 호환):
-  POLYMARKET_API_KEY / API_SECRET / PASSPHRASE  →  GET /balance-allowance
+py-clob-client-v2 기반. PK 가 있어야 잔액 조회가 가능 (V2 SDK 의 L2 인증이
+signer 를 요구하기 때문). PK 가 없으면 잔액은 0 으로 반환되고 포지션 정보만
+data-api 에서 조회한다 (시뮬레이션 모드).
 
-자격증명 1회 파생:
-  python scripts/derive_polymarket_creds.py   (개인키는 로컬에서만 사용)
-
-필요 env:
-  POLYMARKET_API_KEY          — L2 API 키
-  POLYMARKET_API_SECRET       — L2 시크릿 (base64-url-safe)
-  POLYMARKET_PASSPHRASE       — L2 패스프레이즈
-  POLYMARKET_EOA_ADDRESS      — API key를 파생한 signer EOA
-  POLYMARKET_WALLET_ADDRESS   — Polymarket 프록시(=funder) 지갑 주소
-  POLYMARKET_SIGNATURE_TYPE   — (선택) 0=EOA / 1=POLY_PROXY(이메일·매직) / 2=GNOSIS_SAFE
-                                기본: EOA != WALLET 면 1, 같으면 0
+필요 env (실거래):
+  POLYMARKET_PK               — EOA 개인키
+  POLYMARKET_API_KEY          — V2 L2 API 키
+  POLYMARKET_API_SECRET       — V2 시크릿
+  POLYMARKET_PASSPHRASE       — V2 패스프레이즈
+  POLYMARKET_WALLET_ADDRESS   — 프록시(funder) 지갑 주소
+  POLYMARKET_EOA_ADDRESS      — (선택) signature_type 자동 추정용
+  POLYMARKET_SIGNATURE_TYPE   — (선택) 0=EOA / 1=POLY_PROXY / 2=GNOSIS_SAFE
 """
 from __future__ import annotations
 
-import base64
-import hashlib
-import hmac
+import asyncio
+import logging
 import os
-import time
 from typing import Any
 
 import httpx
 
-_CLOB_BASE = "https://clob.polymarket.com"
-_DATA_API  = "https://data-api.polymarket.com"
-_TIMEOUT   = 10.0
+log = logging.getLogger("polymarket.live")
 
-# USDC 는 6-decimals — /balance-allowance 는 micro-units 문자열을 반환.
-_USDC_SCALE = 1_000_000
+_DATA_API   = "https://data-api.polymarket.com"
+_CLOB_HOST  = "https://clob.polymarket.com"
+_TIMEOUT    = 10.0
+_USDC_SCALE = 1_000_000  # pUSD / USDC — 6 decimals
+
+# Polygon mainnet (CLOB V2 collateral)
+_PUSD_TOKEN       = "0xC011a7E12a19f7B1f670d46F03B03f3342E82DFB"
+_USDC_E_TOKEN     = "0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174"
+_USDC_NATIVE_TOKEN = "0x3c499c542cEF5E3811e1192ce70d8cC03d5c3359"
+_POLYGON_RPCS = [
+    u.strip()
+    for u in (
+        os.environ.get("POLYGON_RPC_URL", ""),
+        "https://polygon-bor.publicnode.com",
+        "https://rpc.ankr.com/polygon",
+        "https://1rpc.io/matic",
+    )
+    if u.strip()
+]
+
+# 프로세스당 1개 client (PK·creds 로딩이 비싸기 때문)
+_clob_client: Any = None
 
 
-# ── env 헬퍼 ────────────────────────────────────────────────────────────────
-
-def _l2_creds() -> tuple[str, str, str, str]:
-    """(eoa_address, api_key, secret, passphrase) — 없으면 즉시 raise."""
-    eoa_address = os.environ.get("POLYMARKET_EOA_ADDRESS", "").strip()
-    api_key     = os.environ.get("POLYMARKET_API_KEY",    "").strip()
-    secret      = os.environ.get("POLYMARKET_API_SECRET", "").strip()
-    passphrase  = os.environ.get("POLYMARKET_PASSPHRASE", "").strip()
-
-    missing = [k for k, v in {
-        "POLYMARKET_EOA_ADDRESS": eoa_address,
-        "POLYMARKET_API_KEY":     api_key,
-        "POLYMARKET_API_SECRET":  secret,
-        "POLYMARKET_PASSPHRASE":  passphrase,
-    }.items() if not v]
-
-    if missing:
-        raise ValueError(f"환경변수 누락: {', '.join(missing)}")
-
-    return eoa_address, api_key, secret, passphrase
-
+# ── env / signature_type 헬퍼 ──────────────────────────────────────────────
 
 def _wallet() -> str:
     addr = os.environ.get("POLYMARKET_WALLET_ADDRESS", "").strip()
@@ -63,11 +57,11 @@ def _wallet() -> str:
     return addr
 
 
-def _signature_type(eoa: str) -> int:
+def _resolve_signature_type() -> int:
     """0=EOA, 1=POLY_PROXY(이메일/매직), 2=GNOSIS_SAFE.
 
-    명시적으로 POLYMARKET_SIGNATURE_TYPE 가 있으면 그 값 사용.
-    아니면 EOA == WALLET 이면 0, 다르면 1 (프록시 지갑) 로 추정.
+    명시적 POLYMARKET_SIGNATURE_TYPE 가 있으면 그 값. 없으면
+    EOA == WALLET 이면 0, 다르면 1 (프록시 지갑) 로 추정.
     """
     raw = os.environ.get("POLYMARKET_SIGNATURE_TYPE", "").strip()
     if raw:
@@ -77,68 +71,195 @@ def _signature_type(eoa: str) -> int:
                 return v
         except ValueError:
             pass
+    eoa    = os.environ.get("POLYMARKET_EOA_ADDRESS", "").strip().lower()
     wallet = os.environ.get("POLYMARKET_WALLET_ADDRESS", "").strip().lower()
-    return 0 if wallet and wallet == eoa.lower() else 1
+    return 0 if eoa and wallet and eoa == wallet else 1
 
 
-# ── L2 서명 (py-clob-client 호환 HMAC-SHA256) ───────────────────────────────
+# ── V2 ClobClient (실거래용 L2 인증) ────────────────────────────────────────
 
-def _l2_headers(address: str, api_key: str, secret: str, passphrase: str,
-                method: str, path: str, body: str = "") -> dict[str, str]:
-    """py_clob_client.signing.hmac.build_hmac_signature 와 동일.
+def _get_clob_client() -> Any:
+    """py-clob-client-v2 의 ClobClient 싱글턴.
 
-    - secret 은 base64-url-safe 디코딩 후 HMAC 키로 사용
-    - message = timestamp + method + path (+ body)
-    - 결과는 base64-url-safe 인코딩 문자열
-    - L2 에는 POLY_NONCE 가 들어가지 않는다 (L1 전용)
+    PK 또는 자격증명 4종 중 하나라도 빠지면 ValueError.
     """
-    timestamp = str(int(time.time()))
-    message = timestamp + method + path
-    if body:
-        message += body.replace("'", '"')
+    global _clob_client
+    if _clob_client is not None:
+        return _clob_client
 
-    key = base64.urlsafe_b64decode(secret)
-    digest = hmac.new(key, message.encode("utf-8"), hashlib.sha256).digest()
-    signature = base64.urlsafe_b64encode(digest).decode("utf-8")
+    from py_clob_client_v2 import ApiCreds, ClobClient
 
+    pk         = os.environ.get("POLYMARKET_PK",         "").strip()
+    api_key    = os.environ.get("POLYMARKET_API_KEY",    "").strip()
+    secret     = os.environ.get("POLYMARKET_API_SECRET", "").strip()
+    passphrase = os.environ.get("POLYMARKET_PASSPHRASE", "").strip()
+    funder     = os.environ.get("POLYMARKET_WALLET_ADDRESS", "").strip()
+
+    missing = [k for k, v in {
+        "POLYMARKET_PK":             pk,
+        "POLYMARKET_API_KEY":        api_key,
+        "POLYMARKET_API_SECRET":     secret,
+        "POLYMARKET_PASSPHRASE":     passphrase,
+        "POLYMARKET_WALLET_ADDRESS": funder,
+    }.items() if not v]
+    if missing:
+        raise ValueError(f"환경변수 누락 (실거래 모드): {', '.join(missing)}")
+
+    sig_type = _resolve_signature_type()
+
+    _clob_client = ClobClient(
+        host           = _CLOB_HOST,
+        chain_id       = 137,
+        key            = pk,
+        creds          = ApiCreds(api_key=api_key, api_secret=secret, api_passphrase=passphrase),
+        signature_type = sig_type,
+        funder         = funder,
+    )
+    log.info("[live] ClobClient(V2) 초기화 sig_type=%d funder=%s", sig_type, funder[:10] + "...")
+    return _clob_client
+
+
+def _has_pk() -> bool:
+    """실거래 모드 (PK + 자격증명) 활성 여부."""
+    return all(os.environ.get(k, "").strip() for k in (
+        "POLYMARKET_PK",
+        "POLYMARKET_API_KEY",
+        "POLYMARKET_API_SECRET",
+        "POLYMARKET_PASSPHRASE",
+        "POLYMARKET_WALLET_ADDRESS",
+    ))
+
+
+def _pk_valid() -> bool:
+    """MetaMask hex PK (0x + 64 hex) 여부. UUID 등 잘못된 값은 CLOB 호출 스킵."""
+    pk = os.environ.get("POLYMARKET_PK", "").strip()
+    if not pk:
+        return False
+    raw = pk[2:] if pk.startswith("0x") else pk
+    return len(raw) == 64 and all(c in "0123456789abcdefABCDEF" for c in raw)
+
+
+# ── 온체인 ERC-20 잔액 (Polygon) ─────────────────────────────────────────────
+
+def _balance_of_calldata(holder: str) -> str:
+    addr = holder.lower().removeprefix("0x")
+    return "0x70a08231" + ("0" * 24) + addr
+
+
+async def _erc20_balance(token: str, holder: str) -> float:
+    """Polygon RPC eth_call — balanceOf(holder)."""
+    payload = {
+        "jsonrpc": "2.0",
+        "id": 1,
+        "method": "eth_call",
+        "params": [
+            {"to": token, "data": _balance_of_calldata(holder)},
+            "latest",
+        ],
+    }
+    last_err: Exception | None = None
+    async with httpx.AsyncClient(timeout=_TIMEOUT) as cli:
+        for rpc in _POLYGON_RPCS:
+            try:
+                r = await cli.post(rpc, json=payload)
+                r.raise_for_status()
+                body = r.json()
+                if body.get("error"):
+                    raise RuntimeError(body["error"])
+                result = body.get("result", "0x0")
+                return int(result, 16) / _USDC_SCALE
+            except Exception as e:
+                last_err = e
+                continue
+    if last_err:
+        log.warning("[live] Polygon RPC balanceOf 실패: %s", last_err)
+    return 0.0
+
+
+async def fetch_onchain_balances(wallet: str | None = None) -> dict[str, float]:
+    """프록시 지갑의 온체인 pUSD / USDC.e / Native USDC."""
+    addr = wallet or _wallet()
+    pusd, usdc_e, usdc_native = await asyncio.gather(
+        _erc20_balance(_PUSD_TOKEN, addr),
+        _erc20_balance(_USDC_E_TOKEN, addr),
+        _erc20_balance(_USDC_NATIVE_TOKEN, addr),
+    )
     return {
-        "POLY_ADDRESS":    address,
-        "POLY_API_KEY":    api_key,
-        "POLY_SIGNATURE":  signature,
-        "POLY_TIMESTAMP":  timestamp,
-        "POLY_PASSPHRASE": passphrase,
+        "pusd_onchain":   round(pusd, 4),
+        "usdc_e":         round(usdc_e, 4),
+        "usdc_native":    round(usdc_native, 4),
     }
 
 
-# ── USDC 잔액 (CLOB API /balance-allowance) ─────────────────────────────────
+# ── CLOB V2 COLLATERAL (= pUSD trading balance) ───────────────────────────────
+
+def _clob_collateral_sync() -> tuple[float, dict[str, Any]]:
+    """balance-allowance 갱신 후 COLLATERAL(pUSD) 잔액 + 원본 응답."""
+    from py_clob_client_v2.clob_types import AssetType, BalanceAllowanceParams
+
+    client = _get_clob_client()
+    params = BalanceAllowanceParams(asset_type=AssetType.COLLATERAL)
+    try:
+        client.update_balance_allowance(params)
+    except Exception as e:
+        log.debug("[live] update_balance_allowance: %s", e)
+    resp = client.get_balance_allowance(params)
+    try:
+        bal = float(resp.get("balance", 0)) / _USDC_SCALE
+    except (TypeError, ValueError):
+        bal = 0.0
+    return round(bal, 4), resp if isinstance(resp, dict) else {"raw": resp}
+
 
 async def fetch_clob_balance() -> float:
-    """Polymarket CLOB /balance-allowance — USDC(또는 pUSD) 현금 잔액.
-
-    HMAC 서명에는 query string 을 포함하지 않고 path 만 (`/balance-allowance`)
-    사용한다 — py-clob-client 와 동일한 동작.
-    """
-    address, api_key, secret, passphrase = _l2_creds()
-    sig_type = _signature_type(address)
-
-    sign_path = "/balance-allowance"
-    request_url = f"{_CLOB_BASE}{sign_path}"
-    params = {"asset_type": "COLLATERAL", "signature_type": sig_type}
-
-    headers = _l2_headers(address, api_key, secret, passphrase, "GET", sign_path)
-
-    async with httpx.AsyncClient(timeout=_TIMEOUT) as cli:
-        r = await cli.get(request_url, headers=headers, params=params)
-        r.raise_for_status()
-        data = r.json()
-
-    raw = data.get("balance", 0)
+    """CLOB 거래용 pUSD(COLLATERAL) 잔액. PK 없거나 형식 오류면 0."""
+    if not _has_pk() or not _pk_valid():
+        return 0.0
     try:
-        balance_micro = float(raw)
-    except (TypeError, ValueError):
-        balance_micro = 0.0
+        bal, _ = await asyncio.to_thread(_clob_collateral_sync)
+        return bal
+    except Exception as e:
+        log.warning("[live] CLOB 잔액 조회 실패: %s", e)
+        return 0.0
 
-    return round(balance_micro / _USDC_SCALE, 4)
+
+async def fetch_balance_raw() -> dict[str, Any]:
+    """디버그: CLOB balance-allowance 원본 + 온체인 잔액."""
+    wallet = _wallet()
+    out: dict[str, Any] = {
+        "wallet": wallet,
+        "signature_type": _resolve_signature_type(),
+        "pk_valid": _pk_valid(),
+        "onchain": await fetch_onchain_balances(wallet),
+    }
+    if _has_pk() and _pk_valid():
+        try:
+            clob_bal, raw = await asyncio.to_thread(_clob_collateral_sync)
+            out["clob_pusd"] = clob_bal
+            out["balance_allowance"] = raw
+        except Exception as e:
+            out["clob_error"] = str(e)
+    else:
+        out["clob_error"] = "POLYMARKET_PK 미설정 또는 hex PK 아님"
+    return out
+
+
+async def fetch_cash_balances() -> dict[str, float]:
+    """대시보드용 현금 잔액: CLOB pUSD + 온체인 breakdown."""
+    wallet = _wallet()
+    onchain, clob_pusd = await asyncio.gather(
+        fetch_onchain_balances(wallet),
+        fetch_clob_balance(),
+    )
+    pusd_onchain = onchain["pusd_onchain"]
+    # UI 메인 숫자: CLOB 거래 잔액 우선, 0이면 온체인 pUSD (입금만 된 경우)
+    pusd_cash = clob_pusd if clob_pusd > 0 else pusd_onchain
+    return {
+        **onchain,
+        "clob_pusd":    clob_pusd,
+        "pusd_cash":    round(pusd_cash, 4),
+        "usdc_cash":    round(pusd_cash, 4),  # 하위 호환
+    }
 
 
 # ── 오픈 포지션 (data-api, 인증 불필요) ──────────────────────────────────────
@@ -192,21 +313,27 @@ async def fetch_portfolio_value() -> float:
 # ── 통합 ─────────────────────────────────────────────────────────────────────
 
 async def fetch_live_wallet() -> dict[str, Any]:
-    """CLOB 잔액 + 포지션 평가액 + 오픈 포지션 목록 통합 반환."""
-    import asyncio
-    usdc_cash, portfolio_val, positions = await asyncio.gather(
-        fetch_clob_balance(),
+    """CLOB pUSD + 온체인 잔액 + 포지션 평가액 통합 반환."""
+    cash, portfolio_val, positions = await asyncio.gather(
+        fetch_cash_balances(),
         fetch_portfolio_value(),
         fetch_open_positions(),
     )
 
-    total = usdc_cash + portfolio_val
+    pusd_cash = cash["pusd_cash"]
+    total = pusd_cash + portfolio_val
     return {
         "wallet_address":    _wallet(),
-        "usdc_cash":         usdc_cash,
+        "pusd_cash":         pusd_cash,
+        "clob_pusd":         cash["clob_pusd"],
+        "pusd_onchain":      cash["pusd_onchain"],
+        "usdc_e":            cash["usdc_e"],
+        "usdc_native":       cash["usdc_native"],
+        "usdc_cash":         pusd_cash,
         "positions_value":   portfolio_val,
         "total":             round(total, 4),
         "open_positions":    positions,
         "open_count":        len(positions),
-        "recommended_slots": max(1, int(usdc_cash)),
+        "recommended_slots": max(1, int(pusd_cash)),
+        "live_mode":         _has_pk() and _pk_valid(),
     }

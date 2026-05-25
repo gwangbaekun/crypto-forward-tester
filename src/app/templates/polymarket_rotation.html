@@ -118,9 +118,9 @@
   <!-- live wallet stats -->
   <div class="stats-row">
     <div class="stat-pill">
-      <div class="stat-label">USDC Cash</div>
-      <div class="stat-value blue" id="s-usdc-cash">—</div>
-      <div style="font-size:.65rem;color:var(--muted)" id="s-usdc-detail"></div>
+      <div class="stat-label">Cash (pUSD)</div>
+      <div class="stat-value blue" id="s-pusd-cash">—</div>
+      <div style="font-size:.65rem;color:var(--muted)" id="s-pusd-detail"></div>
     </div>
     <div class="stat-pill">
       <div class="stat-label">Positions Value</div>
@@ -251,14 +251,29 @@ async function loadLiveWallet() {
     const d = await r.json();
 
     if (d.error) {
-      document.getElementById('s-usdc-cash').textContent = 'N/A';
-      document.getElementById('s-usdc-detail').textContent = d.error;
+      document.getElementById('s-pusd-cash').textContent = 'N/A';
+      document.getElementById('s-pusd-detail').textContent = d.error;
       return;
     }
 
-    document.getElementById('s-usdc-cash').textContent  = `$${(d.usdc_cash ?? 0).toFixed(2)}`;
-    document.getElementById('s-usdc-detail').textContent =
-      `USDC.e $${(d.usdc_e ?? 0).toFixed(2)} · Native $${(d.usdc_native ?? 0).toFixed(2)}`;
+    const cash = d.pusd_cash ?? d.usdc_cash ?? 0;
+    const clob = d.clob_pusd ?? 0;
+    const onchain = d.pusd_onchain ?? 0;
+    const usdcE = d.usdc_e ?? 0;
+    const native = d.usdc_native ?? 0;
+
+    document.getElementById('s-pusd-cash').textContent = `$${cash.toFixed(2)}`;
+    const parts = [
+      `CLOB $${clob.toFixed(2)}`,
+      `Wallet pUSD $${onchain.toFixed(2)}`,
+    ];
+    if (usdcE > 0 || native > 0) {
+      parts.push(`USDC.e $${usdcE.toFixed(2)}`, `Native $${native.toFixed(2)}`);
+    }
+    document.getElementById('s-pusd-detail').textContent = parts.join(' · ');
+    if (!d.live_mode) {
+      document.getElementById('s-pusd-detail').textContent += ' · sim (no valid PK)';
+    }
     document.getElementById('s-pos-val').textContent    = `$${(d.positions_value ?? 0).toFixed(2)}`;
     document.getElementById('s-total').textContent      = `$${(d.total ?? 0).toFixed(2)}`;
     document.getElementById('s-open-count').textContent = d.open_count ?? 0;
@@ -270,7 +285,7 @@ async function loadLiveWallet() {
 
     renderPositions(d.open_positions || []);
   } catch(e) {
-    document.getElementById('s-usdc-cash').textContent = 'ERR';
+    document.getElementById('s-pusd-cash').textContent = 'ERR';
   }
 }
 
