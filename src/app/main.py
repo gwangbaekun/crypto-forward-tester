@@ -31,7 +31,18 @@ from features.strategy.polymarket.router import router as polymarket_router
 
 async def startup_binance_price_ws() -> None:
     try:
-        BinancePriceWS().start(["btcusdt", "ethusdt"])
+        symbols = ["btcusdt", "ethusdt"]
+        try:
+            from features.strategy.common.config_loader import get_master_config
+            for cfg in (get_master_config() or {}).values():
+                if not isinstance(cfg, dict) or not cfg.get("enabled"):
+                    continue
+                sym = str(cfg.get("symbol") or "").strip().lower()
+                if sym.endswith("usdt"):
+                    symbols.append(sym)
+        except Exception:
+            pass
+        BinancePriceWS().start(list(dict.fromkeys(symbols)))
     except Exception as exc:
         print(f"[BinancePriceWS] startup skipped: {exc}")
 

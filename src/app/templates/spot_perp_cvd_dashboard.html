@@ -16,7 +16,7 @@
         <div class="main-header">
             <div class="header-left">
                 <span class="strategy-tag">Spot-Perp CVD</span>
-                <span class="symbol-badge" id="symbol-label">ETHUSDT</span>
+                <span class="symbol-badge" id="symbol-label">ARBUSDT</span>
                 <span class="status-dot" id="dot"></span>
             </div>
             <div style="display:flex;align-items:center;gap:10px;">
@@ -44,7 +44,7 @@
     <!-- 가격 차트 -->
     <div class="card" id="chart-card">
         <div class="card-title" style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
-            <span id="chart-title-text">Price chart (1h)</span>
+            <span id="chart-title-text">Price chart (15m)</span>
             <button id="chart-toggle-btn" onclick="toggleChart()" style="font-size:0.72rem;padding:3px 9px;">Collapse</button>
         </div>
         <div id="chart-wrap">
@@ -121,7 +121,7 @@
 <script>
 (function() {
     var _params = new URLSearchParams(window.location.search);
-    var SYMBOL = _params.get('symbol') || 'ETHUSDT';
+    var SYMBOL = _params.get('symbol') || 'ARBUSDT';
     window.SYMBOL = SYMBOL;
     var timer = null;
     var binanceTimer = null;
@@ -193,7 +193,7 @@
         _initChart();
         if (!_candleSeries) return;
         // 서버 캐싱 엔드포인트 경유 — Binance 직접 호출 없음
-        fetch('/quant/spot_perp_cvd/klines?symbol=' + SYMBOL + '&interval=1h&limit=150', { cache: 'no-store' })
+        fetch('/quant/spot_perp_cvd/klines?symbol=' + SYMBOL + '&interval=15m&limit=150', { cache: 'no-store' })
             .then(function(r) { return r.json(); })
             .then(function(d) {
                 if (!d.ok) { console.warn('[chart] klines error:', d.error); return; }
@@ -388,7 +388,7 @@
         refreshCtraderStatus();
         _loadChart();
 
-        fetch('/quant/spot_perp_cvd/realtime_state?symbol=' + SYMBOL + '&timeframes=1h', { cache: 'no-store' })
+        fetch('/quant/spot_perp_cvd/realtime_state?symbol=' + SYMBOL + '&timeframes=15m', { cache: 'no-store' })
             .then(function(r) {
                 if (!r.ok) _crash('realtime_state HTTP ' + r.status);
                 return r.json();

@@ -327,6 +327,13 @@ async def _execute_verify_notify(
         except Exception as e:
             print(f"[{strategy_key}] cTrader executor 없음: {e}")
 
+    # 알림을 거래소 동기화보다 먼저 전송 — Binance/cTrader API 지연·오류가 문자를 막지 않게 함
+    try:
+        from features.strategy.common.notifier import send_event_alerts
+        send_event_alerts(strategy_key, symbol, events, sync_info={})
+    except Exception as e:
+        print(f"[{strategy_key}] 알림 전송 오류: {e}")
+
     sync_info: Dict[str, Optional[bool]] = {}
 
     for ev in events:
@@ -451,9 +458,3 @@ async def _execute_verify_notify(
                 except Exception as e:
                     sync_info["ctrader_tp_advance"] = False
                     print(f"[{strategy_key}] ❌ cTrader TP/SL 갱신 오류: {e}")
-
-    try:
-        from features.strategy.common.notifier import send_event_alerts
-        send_event_alerts(strategy_key, symbol, events, sync_info)
-    except Exception as e:
-        print(f"[{strategy_key}] Telegram 알림 오류: {e}")

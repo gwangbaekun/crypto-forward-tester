@@ -9,7 +9,7 @@ from fastapi.responses import JSONResponse
 
 from features.strategy.common.router_factory import make_router
 
-router = make_router("spot_perp_cvd", default_tfs="1h")
+router = make_router("spot_perp_cvd", default_tfs="15m")
 
 # ── 서버 캐싱 klines 엔드포인트 ───────────────────────────────────────────────
 # 브라우저가 Binance를 직접 호출하면 IP 밴 위험.
@@ -33,8 +33,8 @@ def _cache_ttl(interval: str) -> int:
 
 @router.get("/klines", response_class=JSONResponse)
 async def klines(
-    symbol:   str = Query("ETHUSDT"),
-    interval: str = Query("1h"),
+    symbol:   str = Query("ARBUSDT"),
+    interval: str = Query("15m"),
     limit:    int = Query(150, ge=10, le=500),
 ) -> JSONResponse:
     """

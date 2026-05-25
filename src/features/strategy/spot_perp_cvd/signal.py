@@ -25,7 +25,7 @@ from typing import Any, Dict, List, Optional
 
 import pandas as pd
 
-from .config_loader import get_signal_params, get_tpsl_params
+from .config_loader import get_signal_params, get_timeframes, get_tpsl_params
 
 
 def _f(v: Any) -> float:
@@ -76,6 +76,7 @@ def compute_signal(
     """
     sp = dict(get_signal_params())
     tp_p = dict(get_tpsl_params())
+    entry_tf = get_timeframes()["entry_tf"]
     if signal_overrides:
         for k, cast in [("lookback", int), ("spot_cvd_threshold", float), ("perp_cvd_threshold", float)]:
             if k in signal_overrides:
@@ -91,7 +92,7 @@ def compute_signal(
     def _no(reason: str) -> Dict[str, Any]:
         return {
             "signal": "none", "confidence": 0, "tp": None, "sl": None,
-            "entry_tf": "1h", "level_map": [],
+            "entry_tf": entry_tf, "level_map": [],
             "spot_cvd_pct": None, "perp_cvd_pct": None,
             "reasons": [reason],
         }
@@ -149,7 +150,7 @@ def compute_signal(
         "confidence":     1 if signal != "none" else 0,
         "tp":             None,
         "sl":             sl if signal != "none" else None,
-        "entry_tf":       "1h",
+        "entry_tf":       entry_tf,
         "level_map":      [],
         "spot_cvd_pct":   sc,
         "perp_cvd_pct":   pc,

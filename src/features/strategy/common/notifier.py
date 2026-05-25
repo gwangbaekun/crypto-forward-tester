@@ -232,8 +232,10 @@ def send_event_alerts(
                 send_discord=send_discord,
             )
             for channel, (ok, err) in results.items():
-                if not ok and "is not configured" not in err and "No webhook configured" not in err:
-                    print(f"[notifier] {channel} send failed ({strategy_key}): {err}")
+                if ok:
+                    print(f"[notifier] {channel} sent ({strategy_key} {kind})")
+                elif "is not configured" not in err and "No webhook configured" not in err:
+                    print(f"[notifier] {channel} send failed ({strategy_key} {kind}): {err}")
 
     except Exception as e:
         print(f"[notifier] ❌ alert send failed ({strategy_key}): {e}")

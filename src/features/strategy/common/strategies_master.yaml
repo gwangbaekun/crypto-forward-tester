@@ -137,13 +137,13 @@ oi_cvd_surge:
 spot_perp_cvd:
   enabled: true
   monitoring: true
-  symbol: "ETHUSDT"
+  symbol: "ARBUSDT"
   tick_interval: 10
   exit_tick_interval: 1.0
-  timeframes: ["1h"]
-  entry_tf: "1h"
+  timeframes: ["15m"]
+  entry_tf: "15m"
   strategy_tag: spot_perp_cvd
-  label: "Spot-Perp CVD Divergence"
+  label: "Spot-Perp CVD ARB 15m"
   emoji: "⚡"
   telegram_alerts: true
   discord_alerts: true

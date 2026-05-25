@@ -1,17 +1,17 @@
 strategy_id: spot_perp_cvd
-strategy_name: Spot-Perp CVD Divergence
+strategy_name: Spot-Perp CVD Divergence (ARB 15m)
 timeframes:
   all:
-  - 1h
-  entry_tf: 1h
+  - 15m
+  entry_tf: 15m
 signal:
-  lookback: 20
-  spot_cvd_threshold: 2.1
-  perp_cvd_threshold: 1.9
+  lookback: 16
+  spot_cvd_threshold: 9.80
+  perp_cvd_threshold: 4.50
   confidence_threshold: 1
 tpsl:
   mode: cvd_exit
-  sl_pct: 2.0
+  sl_pct: 0.10
   slippage_pct: 0.05
 exit: {}
 forward_test:
