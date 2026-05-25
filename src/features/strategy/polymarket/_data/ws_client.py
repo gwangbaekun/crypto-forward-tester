@@ -146,6 +146,16 @@ class CLOBWSClient:
         except json.JSONDecodeError:
             return
 
+        if isinstance(data, list):
+            for item in data:
+                if isinstance(item, dict):
+                    await self._dispatch(item)
+            return
+
+        if isinstance(data, dict):
+            await self._dispatch(data)
+
+    async def _dispatch(self, data: dict) -> None:
         event = data.get("event_type", "")
         if event == "book":
             _parse_book(data)

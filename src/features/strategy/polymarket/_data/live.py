@@ -67,7 +67,7 @@ def _resolve_signature_type() -> int:
     if raw:
         try:
             v = int(raw)
-            if v in (0, 1, 2):
+            if v in (0, 1, 2, 3):
                 return v
         except ValueError:
             pass

@@ -150,7 +150,7 @@ async def _place_order_and_update(sig: lc_signal.LCSignal, row_id: int) -> None:
     if not token_id:
         return
 
-    result = await place_order(token_id, sig.entry_price)
+    result = await place_order(token_id, sig.entry_price, max_usd=_cfg.get("max_order_usd", 0.0))
 
     # DB 업데이트
     db = get_session()
