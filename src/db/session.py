@@ -37,6 +37,23 @@ def get_session() -> Session:
 
 
 def init_db() -> None:
-    """Create tables if missing."""
+    """Create tables if missing + 새 컬럼 safe-migrate."""
     eng = _get_engine()
     create_tables(eng)
+    _migrate_add_columns(eng)
+
+
+def _migrate_add_columns(eng) -> None:
+    """누락된 컬럼만 ALTER TABLE로 추가 (멱등)."""
+    from sqlalchemy import text, inspect
+    insp = inspect(eng)
+    existing = {c["name"] for c in insp.get_columns("polymarket_signals")}
+    adds = []
+    if "poly_order_id" not in existing:
+        adds.append("ALTER TABLE polymarket_signals ADD COLUMN poly_order_id VARCHAR(128)")
+    if "order_status" not in existing:
+        adds.append("ALTER TABLE polymarket_signals ADD COLUMN order_status VARCHAR(16)")
+    if adds:
+        with eng.begin() as conn:
+            for stmt in adds:
+                conn.execute(text(stmt))

@@ -100,10 +100,13 @@ def _check_market_rest(cid: str, market: dict) -> None:
         sig.side, sig.question[:50], sig.entry_price, sig.expected_roi * 100,
         sig.hours_to_end, sig.volume_usd,
     )
-    _save_signal(sig)
+    row_id = _save_signal(sig)
+    if row_id:
+        asyncio.create_task(_place_order_and_update(sig, row_id))
 
 
-def _save_signal(sig: lc_signal.LCSignal) -> None:
+def _save_signal(sig: lc_signal.LCSignal) -> int | None:
+    """DB 저장 후 row id 반환."""
     db = get_session()
     try:
         row = PolymarketSignal(
@@ -121,12 +124,45 @@ def _save_signal(sig: lc_signal.LCSignal) -> None:
             yes_token_id  = sig.yes_token_id,
             no_token_id   = sig.no_token_id,
             event_end_ts  = sig.end_ts,
+            order_status  = "pending",
         )
         db.add(row)
         db.commit()
+        db.refresh(row)
+        return row.id
     except Exception as e:
         db.rollback()
         log.warning("[LC] DB save failed: %s", e)
+        return None
+    finally:
+        db.close()
+
+
+async def _place_order_and_update(sig: lc_signal.LCSignal, row_id: int) -> None:
+    """실거래 주문 후 DB 업데이트. POLYMARKET_PK 없으면 skip."""
+    import os
+    if not os.environ.get("POLYMARKET_PK", "").strip():
+        return  # PK 없으면 시뮬 모드
+
+    from features.strategy.polymarket._data.executor import place_order
+    token_id = sig.yes_token_id if sig.side == "YES" else sig.no_token_id
+    if not token_id:
+        return
+
+    result = await place_order(token_id, sig.entry_price)
+
+    # DB 업데이트
+    db = get_session()
+    try:
+        from sqlalchemy import select
+        row = db.execute(select(PolymarketSignal).where(PolymarketSignal.id == row_id)).scalar_one_or_none()
+        if row:
+            row.poly_order_id = result.get("order_id") or ""
+            row.order_status  = result.get("status", "failed")
+            db.commit()
+    except Exception as e:
+        db.rollback()
+        log.warning("[LC] order DB update failed: %s", e)
     finally:
         db.close()
 

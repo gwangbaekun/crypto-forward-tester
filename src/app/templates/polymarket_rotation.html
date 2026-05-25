@@ -115,22 +115,60 @@
     </div>
   </div>
 
-  <!-- wallet stats -->
-  <div class="stats-row" id="wallet-stats">
-    <div class="stat-pill"><div class="stat-label">Initial Capital</div><div class="stat-value">$100</div></div>
-    <div class="stat-pill"><div class="stat-label">Current Wallet</div><div class="stat-value blue" id="s-wallet">—</div></div>
-    <div class="stat-pill"><div class="stat-label">Total Return</div><div class="stat-value" id="s-pct">—</div></div>
-    <div class="stat-pill"><div class="stat-label">Recommended Positions</div><div class="stat-value yellow" id="s-positions">—</div></div>
-    <div class="stat-pill"><div class="stat-label">Top Signals Now</div><div class="stat-value blue" id="s-top-count">—</div></div>
+  <!-- live wallet stats -->
+  <div class="stats-row">
+    <div class="stat-pill">
+      <div class="stat-label">USDC Cash</div>
+      <div class="stat-value blue" id="s-usdc-cash">—</div>
+      <div style="font-size:.65rem;color:var(--muted)" id="s-usdc-detail"></div>
+    </div>
+    <div class="stat-pill">
+      <div class="stat-label">Positions Value</div>
+      <div class="stat-value" id="s-pos-val">—</div>
+    </div>
+    <div class="stat-pill">
+      <div class="stat-label">Total Wallet</div>
+      <div class="stat-value green" id="s-total">—</div>
+    </div>
+    <div class="stat-pill">
+      <div class="stat-label">Open Positions</div>
+      <div class="stat-value yellow" id="s-open-count">—</div>
+    </div>
+    <div class="stat-pill">
+      <div class="stat-label">Available Slots ($1)</div>
+      <div class="stat-value blue" id="s-slots">—</div>
+    </div>
+    <div class="stat-pill">
+      <div class="stat-label">Top Signals Now</div>
+      <div class="stat-value blue" id="s-top-count">—</div>
+    </div>
   </div>
 
-  <!-- wallet curve -->
+
+  <!-- open positions (live) -->
   <div class="card">
     <div class="card-header">
-      <div class="card-title">Wallet Growth ($1 fixed/position, compounding)</div>
-      <div class="card-sub" id="wallet-summary"></div>
+      <div class="card-title">Open Positions (Live)</div>
+      <div class="card-sub" id="pos-wallet-addr" style="font-family:monospace;font-size:.68rem"></div>
     </div>
-    <canvas id="wallet-canvas"></canvas>
+    <div class="tbl-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th>Question</th>
+            <th>Outcome</th>
+            <th>Size</th>
+            <th>Avg Price</th>
+            <th>Cur Price</th>
+            <th>Cur Value</th>
+            <th>Unrealized</th>
+          </tr>
+        </thead>
+        <tbody id="positions-tbody">
+          <tr><td colspan="7" class="loading">Loading…</td></tr>
+        </tbody>
+      </table>
+    </div>
   </div>
 
   <!-- two col: top signals + loss sectors -->
@@ -207,27 +245,57 @@ function getSince() {
   return document.getElementById('since-input')?.value || '';
 }
 
-async function loadWallet() {
-  const since = getSince();
-  const params = since ? `?since=${since}` : '';
-  const r = await fetch(`${BASE}/rotation/wallet${params}`);
-  const d = await r.json();
+async function loadLiveWallet() {
+  try {
+    const r = await fetch(`${BASE}/rotation/live-wallet`);
+    const d = await r.json();
 
-  const wallet = d.current_wallet ?? 100;
-  const pct    = d.total_pct ?? 0;
-  const pos    = d.recommended_positions ?? 100;
+    if (d.error) {
+      document.getElementById('s-usdc-cash').textContent = 'N/A';
+      document.getElementById('s-usdc-detail').textContent = d.error;
+      return;
+    }
 
-  document.getElementById('s-wallet').textContent    = `$${wallet.toFixed(2)}`;
-  document.getElementById('s-positions').textContent = `${pos}`;
+    document.getElementById('s-usdc-cash').textContent  = `$${(d.usdc_cash ?? 0).toFixed(2)}`;
+    document.getElementById('s-usdc-detail').textContent =
+      `USDC.e $${(d.usdc_e ?? 0).toFixed(2)} · Native $${(d.usdc_native ?? 0).toFixed(2)}`;
+    document.getElementById('s-pos-val').textContent    = `$${(d.positions_value ?? 0).toFixed(2)}`;
+    document.getElementById('s-total').textContent      = `$${(d.total ?? 0).toFixed(2)}`;
+    document.getElementById('s-open-count').textContent = d.open_count ?? 0;
+    document.getElementById('s-slots').textContent      = d.recommended_slots ?? 0;
 
-  const pctEl = document.getElementById('s-pct');
-  pctEl.textContent = `${pct >= 0 ? '+' : ''}${pct.toFixed(1)}%`;
-  pctEl.className   = 'stat-value ' + (pct >= 0 ? 'green' : 'red');
+    const addr = d.wallet_address || '';
+    document.getElementById('pos-wallet-addr').textContent =
+      addr ? `${addr.slice(0,6)}…${addr.slice(-4)}` : '';
 
-  document.getElementById('wallet-summary').textContent =
-    `$100 → $${wallet.toFixed(2)} · ${pos} concurrent positions now`;
+    renderPositions(d.open_positions || []);
+  } catch(e) {
+    document.getElementById('s-usdc-cash').textContent = 'ERR';
+  }
+}
 
-  drawWalletChart(d.curve || []);
+function renderPositions(positions) {
+  const tbody = document.getElementById('positions-tbody');
+  if (!positions.length) {
+    tbody.innerHTML = '<tr><td colspan="7" style="color:var(--muted);text-align:center;padding:16px">No open positions</td></tr>';
+    return;
+  }
+  tbody.innerHTML = positions.map(p => {
+    const upnl = p.unrealized_pnl;
+    const upnlStr = upnl != null
+      ? `<span class="${upnl >= 0 ? 'green' : 'red'}">${upnl >= 0 ? '+' : ''}$${upnl.toFixed(4)}</span>`
+      : '—';
+    const sideClass = (p.outcome || '').toUpperCase() === 'YES' ? 'badge-yes' : 'badge-no';
+    return `<tr>
+      <td><span class="q-text" title="${p.question}">${p.question}</span></td>
+      <td><span class="badge ${sideClass}">${p.outcome || '—'}</span></td>
+      <td>${p.size}</td>
+      <td>${(p.avg_price * 100).toFixed(1)}¢</td>
+      <td>${(p.current_price * 100).toFixed(1)}¢</td>
+      <td>$${p.current_value.toFixed(4)}</td>
+      <td>${upnlStr}</td>
+    </tr>`;
+  }).join('');
 }
 
 function drawWalletChart(curve) {
@@ -365,7 +433,7 @@ async function loadLossSectors() {
 }
 
 async function loadAll() {
-  await Promise.all([loadWallet(), loadTopSignals(), loadLossSectors()]);
+  await Promise.all([loadLiveWallet(), loadTopSignals(), loadLossSectors()]);
 }
 
 // 기본값: 오늘

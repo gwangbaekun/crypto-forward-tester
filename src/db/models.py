@@ -255,6 +255,9 @@ class PolymarketSignal(Base):
     actual_pnl:     Mapped[Optional[float]] = mapped_column(Float,       nullable=True)
     resolved_at:    Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
     created_at:     Mapped[datetime]       = mapped_column(DateTime,     nullable=False, default=datetime.utcnow)
+    # 실거래 주문 추적
+    poly_order_id:  Mapped[Optional[str]]  = mapped_column(String(128), nullable=True)
+    order_status:   Mapped[Optional[str]]  = mapped_column(String(16),  nullable=True)  # filled/failed/skipped
 
 
 class CTraderToken(Base):

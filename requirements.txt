@@ -16,3 +16,4 @@ Twisted>=24.0.0
 service-identity>=24.0.0
 yfinance>=0.2.40
 pykrx>=1.0.46
+eth-account>=0.10.0

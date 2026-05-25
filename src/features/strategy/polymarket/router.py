@@ -338,6 +338,19 @@ async def rotation_dashboard():
     return render_template("polymarket_rotation.html")
 
 
+@router.get("/rotation/live-wallet")
+async def rotation_live_wallet() -> JSONResponse:
+    """Polymarket CLOB API 잔액 + 오픈 포지션 실시간 조회."""
+    try:
+        from features.strategy.polymarket._data.live import fetch_live_wallet
+        data = await fetch_live_wallet()
+        return JSONResponse(data)
+    except ValueError as e:
+        return JSONResponse({"error": str(e)}, status_code=400)
+    except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+
 def _entry_price(row) -> float | None:
     """시그널의 실제 진입 가격 (side 기준)."""
     if row.side == "NO":
