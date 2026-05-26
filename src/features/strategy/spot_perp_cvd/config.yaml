@@ -5,13 +5,13 @@ timeframes:
   - 1h
   entry_tf: 1h
 signal:
-  lookback: 26
-  spot_cvd_threshold: 1.6
-  perp_cvd_threshold: 2.6
+  lookback: 20
+  spot_cvd_threshold: 3.90
+  perp_cvd_threshold: 2.50
   confidence_threshold: 1
 tpsl:
   mode: cvd_exit
-  sl_pct: 2.0
+  sl_pct: 1.80
   slippage_pct: 0.05
 exit: {}
 forward_test:

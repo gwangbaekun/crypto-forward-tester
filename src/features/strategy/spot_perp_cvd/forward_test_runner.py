@@ -51,10 +51,15 @@ async def get_state(
     sec_to_close = tf_sec - (now % tf_sec)
     in_pre_entry = 0 < sec_to_close <= PRE_ENTRY_SECONDS
 
-    # 윈도우 밖: 캐시만 반환
+    # 윈도우 밖: 캐시만 반환 (entry_tf는 항상 현재 config 값으로 갱신)
     if not in_pre_entry:
         cached = _signal_cache.get(cache_key)
-        return cached["state"] if cached else {}
+        if not cached:
+            return {}
+        state = {**cached["state"], "entry_tf": entry_tf}
+        if isinstance(state.get("signal"), dict):
+            state["signal"] = {**state["signal"], "entry_tf": entry_tf}
+        return state
 
     # ── Pre-entry 윈도우: fetch + 신호 계산 ───────────────────────────────────
     perp_df, spot_df = await get_dfs(symbol, interval=entry_tf, limit=200)

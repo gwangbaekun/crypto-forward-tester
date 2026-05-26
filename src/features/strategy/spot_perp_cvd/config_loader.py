@@ -29,12 +29,22 @@ def load_config() -> Dict[str, Any]:
 
 
 def get_timeframes() -> Dict[str, Any]:
+    from features.strategy.common.config_loader import get_master_config
+    master_strat = (get_master_config() or {}).get("spot_perp_cvd") or {}
+
+    # strategies_master.yaml 우선, config.yaml 은 fallback
     cfg = load_config()
     tf = cfg.get("timeframes") or {}
-    all_tfs = list(tf.get("all") or ["1h"])
+
+    master_tfs = master_strat.get("timeframes") or []
+    all_tfs = list(master_tfs) if master_tfs else list(tf.get("all") or ["1h"])
+
+    master_entry_tf = master_strat.get("entry_tf")
+    entry_tf = str(master_entry_tf or tf.get("entry_tf") or "1h")
+
     return {
         "all":      sorted(all_tfs),
-        "entry_tf": str(tf.get("entry_tf") or "1h"),
+        "entry_tf": entry_tf,
     }
 
 
