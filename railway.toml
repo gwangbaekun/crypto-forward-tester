@@ -2,27 +2,6 @@
 builder = "DOCKERFILE"
 dockerfilePath = "Dockerfile"
 
-# Railway는 아래 경로에 변경이 있을 때만 재배포함.
-# polymarket VM 전용(src/polymarket_worker/**, deploy/**, scripts/vm_*, scripts/setup_gce_*)
-# 은 제외 — 워커는 GCP e2-micro에서 별도 실행.
-watchPatterns = [
-  "src/app/**",
-  "src/common/**",
-  "src/db/**",
-  "src/features/home/**",
-  "src/features/ctrader/**",
-  "src/features/notifications/**",
-  "src/features/strategy/router.py",
-  "src/features/strategy/quant_strategies/**",
-  "src/features/strategy/common/**",
-  "src/features/strategy/spot_perp_cvd/**",
-  "src/features/strategy/eth_cvd_explosion/**",
-  "src/features/strategy/eth_cvd_explosion_v2/**",
-  "src/features/strategy/oi_cvd_surge/**",
-  "static/**",
-  "requirements.txt",
-  "Dockerfile",
-]
 
 [deploy]
 restartPolicyType = "ON_FAILURE"
