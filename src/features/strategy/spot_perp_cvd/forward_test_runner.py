@@ -37,8 +37,8 @@ _TF_TO_SEC: Dict[str, int] = {
 
 
 async def get_state(
-    symbol: str = "ARBUSDT",
-    tfs: str = "15m",
+    symbol: str = "SOLUSDT",
+    tfs: str = "1h",
     ws_only: bool = False,
 ) -> Dict[str, Any]:
     tfm = get_timeframes()
