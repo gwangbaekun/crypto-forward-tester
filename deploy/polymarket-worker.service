@@ -1,0 +1,17 @@
+[Unit]
+Description=Polymarket strategy worker
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/opt/btc_forwardtest
+Environment=PYTHONPATH=/opt/btc_forwardtest/src
+EnvironmentFile=-/etc/btc-forwardtest.env
+ExecStart=/opt/btc_forwardtest/.venv/bin/python -m polymarket_worker.main
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target
