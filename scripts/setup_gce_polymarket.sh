@@ -6,7 +6,7 @@ set -euo pipefail
 
 # ── 수정 가능 ─────────────────────────────────────────────
 PROJECT_ID="still-catalyst-474914-t7"
-ZONE="us-central1-a"
+ZONE="asia-northeast1-b"
 INSTANCE_NAME="polymarket-worker"
 MACHINE_TYPE="e2-micro"
 REPO="git@github.com:gwangbaekun/crypto-forward-tester.git"
