@@ -51,17 +51,17 @@ async def get_state(
     sec_to_close = tf_sec - (now % tf_sec)
     in_pre_entry = 0 < sec_to_close <= PRE_ENTRY_SECONDS
 
-    # 윈도우 밖: 캐시만 반환 (entry_tf는 항상 현재 config 값으로 갱신)
+    # 윈도우 밖: 캐시 있으면 즉시 반환
     if not in_pre_entry:
         cached = _signal_cache.get(cache_key)
-        if not cached:
-            return {}
-        state = {**cached["state"], "entry_tf": entry_tf}
-        if isinstance(state.get("signal"), dict):
-            state["signal"] = {**state["signal"], "entry_tf": entry_tf}
-        return state
+        if cached:
+            state = {**cached["state"], "entry_tf": entry_tf}
+            if isinstance(state.get("signal"), dict):
+                state["signal"] = {**state["signal"], "entry_tf": entry_tf}
+            return state
+        # 캐시 없음 (서버 재시작 등) → fetch해서 지표 채움, 진입/알림은 스킵
 
-    # ── Pre-entry 윈도우: fetch + 신호 계산 ───────────────────────────────────
+    # ── Fetch + 신호 계산 (pre-entry: 진입 tick 포함 / 그 외: 표시 전용) ──────
     perp_df, spot_df = await get_dfs(symbol, interval=entry_tf, limit=200)
 
     if perp_df is None or perp_df.empty or len(perp_df) < 2:
@@ -102,7 +102,8 @@ async def get_state(
 
     _signal_cache[cache_key] = {"state": state, "ts": now}
 
-    if bar_close_price > 0 and new_bar_detected:
+    # 진입 tick + 알림은 pre-entry 윈도우에서 new_bar일 때만
+    if in_pre_entry and bar_close_price > 0 and new_bar_detected:
         _fire_and_forget(_tick_and_notify("spot_perp_cvd", symbol, bar_close_price, state))
 
     return state
