@@ -135,6 +135,8 @@ async def signals(
                     "actual_pnl":     r.actual_pnl,
                     "resolved_at":    r.resolved_at.isoformat() if r.resolved_at else None,
                     "created_at":     r.created_at.isoformat() if r.created_at else None,
+                    "order_status":   r.order_status,
+                    "poly_order_id":  r.poly_order_id,
                 }
                 for r in rows
             ]

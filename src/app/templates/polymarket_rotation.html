@@ -185,6 +185,29 @@
     </div>
   </div>
 
+  <!-- pending orders (unresolved signals) -->
+  <div class="card" id="pending-orders-card" style="display:none">
+    <div class="card-header">
+      <div class="card-title">Pending Orders <span id="pending-orders-count" style="font-size:.75rem;color:var(--yellow);font-weight:400"></span></div>
+      <div class="card-sub">DB에 저장된 미해소 신호 — order_status로 Railway 주문 현황 확인</div>
+    </div>
+    <div class="tbl-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th>Question</th>
+            <th>Side</th>
+            <th>Entry</th>
+            <th>Order Status</th>
+            <th>Order ID</th>
+            <th>Signal Time</th>
+          </tr>
+        </thead>
+        <tbody id="pending-orders-tbody"></tbody>
+      </table>
+    </div>
+  </div>
+
   <!-- transaction history (resolved positions) -->
   <div class="card" id="txhist-card" style="display:none">
     <div class="card-header">
@@ -198,6 +221,7 @@
             <th>Question</th>
             <th>Side</th>
             <th>Entry</th>
+            <th>Order</th>
             <th>Result</th>
             <th>PnL</th>
             <th>Resolved</th>
@@ -466,6 +490,34 @@ async function loadTopSignals() {
   }).join('');
 }
 
+async function loadPendingOrders() {
+  const r = await fetch(`${BASE}/signals?resolved=no&limit=100`);
+  const d = await r.json();
+  const sigs = d.signals || [];
+  const card = document.getElementById('pending-orders-card');
+  if (!sigs.length) { card.style.display = 'none'; return; }
+  card.style.display = '';
+  document.getElementById('pending-orders-count').textContent = `(${sigs.length})`;
+  const tbody = document.getElementById('pending-orders-tbody');
+  tbody.innerHTML = sigs.map(s => {
+    const price = (s.side === 'YES' ? s.yes_price : s.no_price) || 0;
+    const sideClass = s.side === 'YES' ? 'badge-yes' : 'badge-no';
+    const ts = s.created_at ? s.created_at.slice(0, 16).replace('T', ' ') : '—';
+    const os = s.order_status || 'pending';
+    const osColor = os === 'matched' ? 'var(--green)' : os === 'live' ? 'var(--blue)' : os === 'skipped' ? 'var(--muted)' : os === 'failed' ? 'var(--red)' : '#f0c040';
+    const oid = s.poly_order_id || '—';
+    const oidShort = oid !== '—' ? oid.slice(0, 12) + '…' : '—';
+    return `<tr>
+      <td><span class="q-text" title="${s.question}">${s.question}</span></td>
+      <td><span class="badge ${sideClass}">${s.side || '—'}</span></td>
+      <td>${price ? (price * 100).toFixed(1) + '¢' : '—'}</td>
+      <td style="font-size:.75rem;font-weight:600;color:${osColor}">${os}</td>
+      <td style="font-size:.65rem;color:var(--muted);font-family:monospace" title="${oid}">${oidShort}</td>
+      <td style="color:var(--muted);font-size:.68rem">${ts}</td>
+    </tr>`;
+  }).join('');
+}
+
 async function loadTxHistory() {
   const since = getSince();
   const params = new URLSearchParams({ resolved: 'yes', limit: 50 });
@@ -490,10 +542,13 @@ async function loadTxHistory() {
       : '—';
     const sideClass = s.side === 'YES' ? 'badge-yes' : 'badge-no';
     const ts = s.resolved_at ? s.resolved_at.slice(0, 16).replace('T', ' ') : '—';
+    const os = s.order_status || '—';
+    const osColor = os === 'matched' ? 'var(--green)' : os === 'live' ? 'var(--blue)' : os === 'skipped' ? 'var(--muted)' : os === 'failed' ? 'var(--red)' : os === 'pending' ? '#f0c040' : 'var(--muted)';
     return `<tr>
       <td><span class="q-text" title="${s.question}">${s.question}</span></td>
       <td><span class="badge ${sideClass}">${s.side || '—'}</span></td>
       <td>${price ? (price * 100).toFixed(1) + '¢' : '—'}</td>
+      <td style="font-size:.68rem;color:${osColor}">${os}</td>
       <td>${resultStr}</td>
       <td>${pnlStr}</td>
       <td style="color:var(--muted);font-size:.68rem">${ts}</td>
@@ -502,7 +557,7 @@ async function loadTxHistory() {
 }
 
 async function loadAll() {
-  await Promise.all([loadLiveWallet(), loadTopSignals(), loadTxHistory()]);
+  await Promise.all([loadLiveWallet(), loadTopSignals(), loadPendingOrders(), loadTxHistory()]);
 }
 
 // 기본값: 오늘
