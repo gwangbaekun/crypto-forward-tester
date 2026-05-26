@@ -105,9 +105,14 @@
   <div class="topbar">
     <div>
       <div class="topbar-title">Polymarket — Rotation Optimize</div>
-      <div class="topbar-sub">Score = ((1−price)/price) / days_left &nbsp;|&nbsp; price ≥ 0.80 &nbsp;|&nbsp; $1 per position</div>
+      <div class="topbar-sub">dominant side score = (1−p)/p / days_left &nbsp;|&nbsp; skew filter 조절 가능</div>
     </div>
     <div class="topbar-right">
+      <label style="font-size:.74rem;color:var(--muted)">Skew ≥</label>
+      <input type="range" id="skew-input" min="0" max="0.99" step="0.01" value="0"
+        style="width:80px;accent-color:var(--blue)"
+        oninput="document.getElementById('skew-val').textContent=Math.round(this.value*100)+'¢'; loadTopSignals()">
+      <span id="skew-val" style="font-size:.74rem;color:var(--blue);min-width:28px">0¢</span>
       <label style="font-size:.74rem;color:var(--muted)">Since</label>
       <input type="date" id="since-input" style="background:var(--bg);border:1px solid var(--border);color:var(--text);padding:4px 8px;border-radius:6px;font-size:.76rem;color-scheme:dark;" onchange="loadAll()">
       <a class="nav-link" href="/quant/polymarket/dashboard">← Main Dashboard</a>
@@ -162,6 +167,7 @@
             <th>Cur Price</th>
             <th>Cur Value</th>
             <th>Unrealized</th>
+            <th>Time Left</th>
           </tr>
         </thead>
         <tbody id="positions-tbody">
@@ -177,9 +183,9 @@
     <!-- top signals -->
     <div class="card">
       <div class="card-header">
-        <div class="card-title">Top Signals by Score</div>
+        <div class="card-title">Live Markets</div>
         <div class="card-sub">
-          pending · price ≥ 0.80 · sorted by ROI/day &nbsp;
+          끝나는 시간순 &nbsp;|&nbsp;
           <label style="font-size:.7rem;color:var(--red);cursor:pointer">
             <input type="checkbox" id="excl-sports" checked onchange="loadTopSignals()">
             Exclude Sports
@@ -196,15 +202,16 @@
             <tr>
               <th>Question</th>
               <th>Sector</th>
-              <th>Side</th>
-              <th>Price</th>
+              <th>Dominant</th>
+              <th>YES</th>
+              <th>NO</th>
               <th>ROI%</th>
               <th>Hrs Left</th>
-              <th>Score</th>
+              <th>Vol $</th>
             </tr>
           </thead>
           <tbody id="signal-tbody">
-            <tr><td colspan="7" class="loading">Loading…</td></tr>
+            <tr><td colspan="8" class="loading">Loading…</td></tr>
           </tbody>
         </table>
       </div>
@@ -292,7 +299,7 @@ async function loadLiveWallet() {
 function renderPositions(positions) {
   const tbody = document.getElementById('positions-tbody');
   if (!positions.length) {
-    tbody.innerHTML = '<tr><td colspan="7" style="color:var(--muted);text-align:center;padding:16px">No open positions</td></tr>';
+    tbody.innerHTML = '<tr><td colspan="8" style="color:var(--muted);text-align:center;padding:16px">No open positions</td></tr>';
     return;
   }
   tbody.innerHTML = positions.map(p => {
@@ -301,6 +308,14 @@ function renderPositions(positions) {
       ? `<span class="${upnl >= 0 ? 'green' : 'red'}">${upnl >= 0 ? '+' : ''}$${upnl.toFixed(4)}</span>`
       : '—';
     const sideClass = (p.outcome || '').toUpperCase() === 'YES' ? 'badge-yes' : 'badge-no';
+    const hl = p.hours_left;
+    let timeStr = '—';
+    if (hl != null) {
+      if (hl <= 0)        timeStr = '<span class="red">Resolved</span>';
+      else if (hl < 1)    timeStr = `<span class="red">${(hl * 60).toFixed(0)}m</span>`;
+      else if (hl < 6)    timeStr = `<span class="yellow">${hl.toFixed(1)}h</span>`;
+      else                timeStr = `${hl.toFixed(1)}h`;
+    }
     return `<tr>
       <td><span class="q-text" title="${p.question}">${p.question}</span></td>
       <td><span class="badge ${sideClass}">${p.outcome || '—'}</span></td>
@@ -309,6 +324,7 @@ function renderPositions(positions) {
       <td>${(p.current_price * 100).toFixed(1)}¢</td>
       <td>$${p.current_value.toFixed(4)}</td>
       <td>${upnlStr}</td>
+      <td>${timeStr}</td>
     </tr>`;
   }).join('');
 }
@@ -379,36 +395,40 @@ async function loadTopSignals() {
   const excluded = [];
   if (document.getElementById('excl-sports')?.checked)        excluded.push('Sports');
   if (document.getElementById('excl-entertainment')?.checked) excluded.push('Entertainment');
-  const params = new URLSearchParams({ limit: 50, exclude_sectors: excluded.join(',') || '' });
+  const skewMin = parseFloat(document.getElementById('skew-input')?.value || '0');
+  const params = new URLSearchParams({
+    limit: 200,
+    exclude_sectors: excluded.join(',') || '',
+    skew_min: skewMin,
+  });
   const r = await fetch(`${BASE}/rotation/top-signals?${params}`);
   const d = await r.json();
   const tbody = document.getElementById('signal-tbody');
-  const signals = d.signals || [];
+  const markets = d.markets || [];
 
-  document.getElementById('s-top-count').textContent = signals.length;
+  document.getElementById('s-top-count').textContent = markets.length;
 
-  if (!signals.length) {
-    tbody.innerHTML = '<tr><td colspan="7" class="loading">No signals (price ≥ 0.80, pending)</td></tr>';
+  if (!markets.length) {
+    tbody.innerHTML = '<tr><td colspan="8" class="loading">No markets (engine not running or skew too high)</td></tr>';
     return;
   }
 
-  const maxScore = signals[0].score || 1;
-  tbody.innerHTML = signals.map(s => {
-    const barW = Math.round((s.score / maxScore) * 60);
-    const sideClass = s.side === 'YES' ? 'badge-yes' : 'badge-no';
+  tbody.innerHTML = markets.map(m => {
+    const yp   = `${(m.yes_price * 100).toFixed(1)}¢`;
+    const np   = `${(m.no_price  * 100).toFixed(1)}¢`;
+    const vol  = m.volume_usd != null ? `$${(m.volume_usd / 1000).toFixed(0)}k` : '—';
+    const hCls = m.hours_left < 1 ? 'red' : m.hours_left < 6 ? 'yellow' : '';
+    const domCls = m.dominant_side === 'YES' ? 'badge-yes' : 'badge-no';
+    const roi  = m.expected_roi != null ? `+${m.expected_roi.toFixed(1)}%` : '—';
     return `<tr>
-      <td><span class="q-text" title="${s.question}">${s.question}</span></td>
-      <td><span class="badge badge-sector">${s.sector}</span></td>
-      <td><span class="badge ${sideClass}">${s.side}</span></td>
-      <td>${(s.price * 100).toFixed(1)}¢</td>
-      <td class="green">+${s.expected_roi.toFixed(1)}%</td>
-      <td>${s.hours_left.toFixed(1)}h</td>
-      <td>
-        <div class="score-bar">
-          <div class="score-fill" style="width:${barW}px"></div>
-          <span style="font-size:.68rem;color:var(--muted)">${s.score.toFixed(3)}</span>
-        </div>
-      </td>
+      <td><span class="q-text" title="${m.question}">${m.question}</span></td>
+      <td><span class="badge badge-sector">${m.sector}</span></td>
+      <td><span class="badge ${domCls}">${m.dominant_side} ${(m.dominant_price*100).toFixed(1)}¢</span></td>
+      <td style="color:var(--green)">${yp}</td>
+      <td style="color:var(--red)">${np}</td>
+      <td class="green">${roi}</td>
+      <td class="${hCls}">${m.hours_left.toFixed(1)}h</td>
+      <td style="color:var(--muted)">${vol}</td>
     </tr>`;
   }).join('');
 }

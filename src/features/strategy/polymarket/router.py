@@ -381,78 +381,72 @@ def _sector(question: str) -> str:
 
 @router.get("/rotation/top-signals")
 async def rotation_top_signals(
-    limit: int = Query(50),
+    limit: int = Query(200),
     exclude_sectors: str = Query("Sports", description="콤마 구분 섹터 제외. 기본: Sports"),
+    skew_min: float = Query(0.0, description="한쪽 편중 최솟값 (0=전체, 0.85=85¢+만)"),
 ) -> JSONResponse:
-    """Score 기반 LC 진입 후보. price >= 0.80 && 미해소 && 만기 미경과. condition_id 중복 제거."""
+    """라이브 마켓 — 끝나는 시간 오름차순. skew_min 이상 편중된 마켓만 표시."""
     try:
-        from db.session import get_session
-        from db.models import PolymarketSignal
-        from sqlalchemy import select
+        from features.strategy.polymarket.late_convergence.engine import get_markets as lc_markets
+        from features.strategy.polymarket.pair_hedge.engine import get_markets as ph_markets
 
         excluded = {s.strip() for s in exclude_sectors.split(",") if s.strip()}
         now_ts = time.time()
-        db = get_session()
-        try:
-            stmt = (
-                select(PolymarketSignal)
-                .where(
-                    PolymarketSignal.is_resolved == 0,
-                    PolymarketSignal.strategy == "late_convergence",
-                    PolymarketSignal.event_end_ts.isnot(None),
-                )
-                .order_by(PolymarketSignal.created_at.desc())
-            )
-            rows = db.execute(stmt).scalars().all()
-        finally:
-            db.close()
 
-        # condition_id 당 최신 row 1개만 유지
-        seen_conditions: set[str] = set()
-        deduped = []
-        for r in rows:
-            cid = r.condition_id or ""
-            if cid in seen_conditions:
-                continue
-            seen_conditions.add(cid)
-            deduped.append(r)
+        combined: dict[str, dict] = {}
+        for m in lc_markets().values():
+            combined[m.get("condition_id", "")] = m
+        for m in ph_markets().values():
+            combined[m.get("condition_id", "")] = m
 
         results = []
-        for r in deduped:
-            price = _entry_price(r)
-            if price is None or price < 0.80:
+        for m in combined.values():
+            end_ts = m.get("end_ts")
+            if not end_ts:
                 continue
-
-            hours_left = (r.event_end_ts - now_ts) / 3600
+            hours_left = (end_ts - now_ts) / 3600
             if hours_left <= 0:
                 continue
 
-            sector = _sector(r.question or "")
+            yes_p = m.get("yes_price")
+            no_p  = m.get("no_price")
+            if yes_p is None or no_p is None:
+                continue
+
+            dominant_price = max(yes_p, no_p)
+            dominant_side  = "YES" if yes_p >= no_p else "NO"
+
+            if skew_min > 0 and dominant_price < skew_min:
+                continue
+
+            sector = _sector(m.get("question") or "")
             if sector in excluded:
                 continue
 
-            days_left = hours_left / 24
-            score = ((1 - price) / price) / max(days_left, 1 / 24)
+            days_left    = hours_left / 24
+            expected_roi = (1 - dominant_price) / dominant_price
+            score        = expected_roi / max(days_left, 1 / 24)
 
             results.append({
-                "id":           r.id,
-                "condition_id": r.condition_id,
-                "question":     (r.question or "")[:120],
-                "sector":       sector,
-                "side":         r.side,
-                "price":        round(price, 4),
-                "expected_roi": round((1 - price) / price * 100, 2),
-                "hours_left":   round(hours_left, 2),
-                "score":        round(score, 4),
-                "volume_usd":   r.volume_usd,
-                "created_at":   r.created_at.isoformat() if r.created_at else None,
+                "condition_id":   m.get("condition_id"),
+                "question":       (m.get("question") or "")[:120],
+                "sector":         sector,
+                "yes_price":      round(yes_p, 4),
+                "no_price":       round(no_p,  4),
+                "dominant_side":  dominant_side,
+                "dominant_price": round(dominant_price, 4),
+                "expected_roi":   round(expected_roi * 100, 2),
+                "hours_left":     round(hours_left, 2),
+                "score":          round(score, 4),
+                "volume_usd":     m.get("volume_usd"),
             })
 
-        results.sort(key=lambda x: x["score"], reverse=True)
+        results.sort(key=lambda x: x["hours_left"])
         return JSONResponse({
-            "signals":          results[:limit],
+            "markets":          results[:limit],
             "total":            len(results),
             "excluded_sectors": list(excluded),
+            "skew_min":         skew_min,
         })
     except Exception as e:
         return JSONResponse({"error": str(e)}, status_code=500)

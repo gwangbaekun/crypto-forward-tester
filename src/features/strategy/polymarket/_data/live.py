@@ -274,6 +274,9 @@ async def fetch_open_positions() -> list[dict[str, Any]]:
     if not isinstance(data, list):
         data = data.get("data", [])
 
+    import time as _time
+    now_ts = _time.time()
+
     out = []
     for p in data:
         size       = float(p.get("size",         0))
@@ -282,6 +285,21 @@ async def fetch_open_positions() -> list[dict[str, Any]]:
         cur_value  = float(p.get("currentValue",  0) or 0)
         init_val   = float(p.get("initialValue",  0) or size * avg_price)
         unrealized = cur_value - init_val if cur_value else None
+
+        end_date_raw = (
+            p.get("endDate") or p.get("endTime") or p.get("expiresAt")
+            or p.get("expirationDate") or p.get("end_date_iso")
+        )
+        end_ts: int | None = None
+        hours_left: float | None = None
+        if end_date_raw:
+            try:
+                from datetime import datetime, UTC
+                iso = str(end_date_raw).rstrip("Z").split(".")[0]
+                end_ts = int(datetime.fromisoformat(iso).replace(tzinfo=UTC).timestamp())
+                hours_left = round((end_ts - now_ts) / 3600, 2)
+            except Exception:
+                pass
 
         out.append({
             "condition_id":   p.get("conditionId") or p.get("condition_id"),
@@ -292,6 +310,8 @@ async def fetch_open_positions() -> list[dict[str, Any]]:
             "current_price":  round(cur_price, 4),
             "current_value":  round(cur_value, 4),
             "unrealized_pnl": round(unrealized, 4) if unrealized is not None else None,
+            "end_ts":         end_ts,
+            "hours_left":     hours_left,
         })
     return out
 
