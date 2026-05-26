@@ -100,10 +100,21 @@ def make_router(strategy_key: str, default_tfs: str = "15m,1h,4h") -> APIRouter:
 
     @router.get("/dashboard", response_class=HTMLResponse)
     async def dashboard():
-        from features.strategy.common.config_loader import is_monitoring_start_by_default
+        from features.strategy.common.config_loader import (
+            get_master_config,
+            is_monitoring_start_by_default,
+        )
+        import os
+        master_strat = (get_master_config() or {}).get(strategy_key) or {}
+        default_symbol = (
+            master_strat.get("symbol")
+            or os.getenv("STRATEGY_SYMBOL", "BTCUSDT").strip().upper()
+            or "BTCUSDT"
+        )
         return render_template(
             f"{strategy_key}_dashboard.html",
             monitoring_start_by_default=is_monitoring_start_by_default(strategy_key),
+            default_symbol=default_symbol,
         )
 
     @router.get("/realtime_state", response_class=JSONResponse)
