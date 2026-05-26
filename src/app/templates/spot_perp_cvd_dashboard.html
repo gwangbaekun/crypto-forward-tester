@@ -16,7 +16,7 @@
         <div class="main-header">
             <div class="header-left">
                 <span class="strategy-tag">Spot-Perp CVD</span>
-                <span class="symbol-badge" id="symbol-label">SOLUSDT</span>
+                <span class="symbol-badge" id="symbol-label">{{ default_symbol }}</span>
                 <span class="status-dot" id="dot"></span>
             </div>
             <div style="display:flex;align-items:center;gap:10px;">
@@ -121,7 +121,7 @@
 <script>
 (function() {
     var _params = new URLSearchParams(window.location.search);
-    var SYMBOL = _params.get('symbol') || 'SOLUSDT';
+    var SYMBOL = _params.get('symbol') || '{{ default_symbol }}';
     var ENTRY_TF = '1h';
     window.SYMBOL = SYMBOL;
     var timer = null;
