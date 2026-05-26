@@ -236,17 +236,7 @@
   <div class="card">
     <div class="card-header">
       <div class="card-title">Live Markets</div>
-      <div class="card-sub">
-        끝나는 시간순 &nbsp;|&nbsp;
-        <label style="font-size:.7rem;color:var(--red);cursor:pointer">
-          <input type="checkbox" id="excl-sports" checked onchange="loadTopSignals()">
-          Exclude Sports
-        </label>
-        <label style="font-size:.7rem;color:#f0c040;cursor:pointer;margin-left:8px">
-          <input type="checkbox" id="excl-entertainment" onchange="loadTopSignals()">
-          Exclude Entertainment
-        </label>
-      </div>
+      <div class="card-sub">80¢+ 편중 마켓 | 끝나는 시간순</div>
     </div>
     <div class="tbl-wrap">
       <table>
@@ -449,14 +439,9 @@ function drawWalletChart(curve) {
 }
 
 async function loadTopSignals() {
-  const excluded = [];
-  if (document.getElementById('excl-sports')?.checked)        excluded.push('Sports');
-  if (document.getElementById('excl-entertainment')?.checked) excluded.push('Entertainment');
-  const skewMin = 0.80;
   const params = new URLSearchParams({
     limit: 200,
-    exclude_sectors: excluded.join(',') || '',
-    skew_min: skewMin,
+    skew_min: 0.80,
   });
   const r = await fetch(`${BASE}/rotation/top-signals?${params}`);
   const d = await r.json();
