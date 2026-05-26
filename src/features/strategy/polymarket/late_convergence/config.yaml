@@ -6,3 +6,10 @@ hours_before_end: 24        # 시그널 조건: 종료 24시간 이내
 min_convergence_price: 0.80 # YES or NO ≥ 80% → 고확률 수렴 타겟
 max_convergence_price: 0.97 # 이 이하 (완전 수렴 전, 수익 여지 있음)
 min_volume_usd: 5000
+
+# 진입 금지 섹터 (0% 또는 저승률 카테고리)
+exclude_sectors:
+  - Sports        # 골프컷 0%, 스포츠스프레드 76% → 80-97¢ 진입 시 음수 기댓값
+  - Weather       # 71% 승률 → 음수 기댓값
+  - Price_Target  # BTC/ETH "up or down", "will reach $X" → 22%
+  - Earnings      # Corporate earnings 0%

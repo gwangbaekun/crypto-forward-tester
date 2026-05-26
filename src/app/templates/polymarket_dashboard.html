@@ -242,6 +242,7 @@
           <th>Time (UTC)</th>
           <th>Strategy</th>
           <th>Question</th>
+          <th>Sector</th>
           <th>Side</th>
           <th>Entry</th>
           <th>ROI</th>
@@ -302,6 +303,33 @@ let currentStrat   = 'all';
 let currentView    = 'signals';
 let currentOutcome = 'all';
 let sinceValue     = '';   // 'YYYY-MM-DD' or ''
+
+// ── 섹터 분류 (엔진 _EXCL_PATTERNS 미러) ──────────────────────────────────
+const _EXCL = {
+  Sports: [/\bgolf\b/,/\bpga\b/,/\blpga\b/,/game handicap/,/\bspread\s*:/,/games total/,
+           /\bnba\b/,/\bnfl\b/,/\bnhl\b/,/\bmlb\b/,/\btennis\b/,/\bufc\b/,
+           /finish (in|under|top|at|within) /,/will .{0,60} finish (in|under|top)/,
+           /\btournament\b/,/\bplayoff\b/,/\bchampionship\b/,
+           /\bsoccer\b/,/\bfootball\b/,/\bbasketball\b/,/\bleague\b/,
+           /world cup/,/super bowl/,/world series/,/stanley cup/],
+  Weather: [/temperature/,/°c\b/,/\bcelsius\b/,/highest temp/,
+            /\bweather\b/,/\brain\b/,/\bhurricane\b/,/\bstorm\b/,/\bsnow\b/,/\bflood\b/],
+  Price_Target: [/up or down/,/will .{0,60} reach \$/,/will .{0,60} hit \$/,
+                 /will .{0,60} be above \$/,/will .{0,60} exceed \$/,
+                 /price of .{0,40} be (above|below|over|under)/],
+  Earnings: [/\bearnings\b/,/same.store sales/,/q[1-4] .{0,20}(sales|growth|revenue)/i,
+             /autozone/,/same store/],
+};
+const EXCLUDED_SECTORS = new Set(['Sports','Weather','Price_Target','Earnings']);
+
+function getSector(q) {
+  const ql = (q || '').toLowerCase();
+  for (const [sector, pats] of Object.entries(_EXCL)) {
+    if (pats.some(p => p.test(ql))) return sector;
+  }
+  return 'Other';
+}
+function isExcluded(q) { return EXCLUDED_SECTORS.has(getSector(q)); }
 
 // ── since filter ──
 function applyFilter() {
@@ -541,13 +569,14 @@ async function loadSignals() {
     document.getElementById('last-updated').textContent = 'Updated ' + new Date().toUTCString();
 
     if (!rows.length) {
-      tbody.innerHTML = '<tr><td colspan="10" class="empty-row">No signals yet.</td></tr>';
+      tbody.innerHTML = '<tr><td colspan="11" class="empty-row">No signals yet.</td></tr>';
       return;
     }
 
     const stratBadge = { late_convergence: 'badge-lc', pair_hedge: 'badge-ph', bayesian_fomc: 'badge-bf' };
     const sideBadge  = { YES: 'badge-yes', NO: 'badge-no', BOTH: 'badge-both' };
     const stratLabel = { late_convergence: 'LC', pair_hedge: 'PH', bayesian_fomc: 'BF' };
+    const sectorColor = { Sports: '#e06060', Weather: '#60a0e0', Price_Target: '#e0a030', Earnings: '#c060c0', Other: 'var(--muted)' };
 
     tbody.innerHTML = rows.map(s => {
       const ts = s.created_at ? s.created_at.replace('T',' ').slice(0,16) : '—';
@@ -575,10 +604,13 @@ async function loadSignals() {
           ? `<span class="pnl-pos">+${(s.actual_pnl*100).toFixed(1)}%</span>`
           : `<span class="pnl-neg">${(s.actual_pnl*100).toFixed(1)}%</span>`;
       const qText = (s.question || '').slice(0, 60) + ((s.question||'').length > 60 ? '…' : '');
+      const sec   = getSector(s.question);
+      const secColor = sectorColor[sec] || 'var(--muted)';
       return `<tr>
         <td style="white-space:nowrap;color:var(--muted);font-size:0.7rem;">${ts}</td>
         <td><span class="badge ${stratBadge[s.strategy]||''}">${stratLabel[s.strategy]||s.strategy}</span></td>
         <td><div class="q-text" title="${(s.question||'').replace(/"/g,"'")}">${qText}</div></td>
+        <td style="font-size:0.68rem;color:${secColor};white-space:nowrap;">${sec}</td>
         <td><span class="badge ${sideBadge[s.side]||''}">${s.side||'—'}</span></td>
         <td style="font-family:monospace;">${entry}</td>
         <td style="font-family:monospace;">${div}</td>
@@ -600,7 +632,8 @@ async function loadMarkets() {
   try {
     const r = await fetch('/quant/polymarket/markets');
     const d = await r.json();
-    const rows = d.markets || [];
+    const all  = d.markets || [];
+    const rows = all.filter(m => !isExcluded(m.question));
     document.getElementById('cnt-mkt').textContent = rows.length ? `(${rows.length})` : '';
     document.getElementById('last-updated').textContent = 'Updated ' + new Date().toUTCString();
     if (!rows.length) {

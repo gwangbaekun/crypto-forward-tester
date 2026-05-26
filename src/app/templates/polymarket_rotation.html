@@ -79,16 +79,6 @@
     height: 6px; border-radius: 3px; background: var(--blue); min-width: 2px;
   }
 
-  /* sector table */
-  .sector-wr-bar {
-    display: inline-block; height: 8px; border-radius: 4px;
-    background: var(--green); vertical-align: middle; margin-right: 4px;
-  }
-  .sector-loss-bar {
-    display: inline-block; height: 8px; border-radius: 4px;
-    background: var(--red); vertical-align: middle; margin-right: 4px;
-  }
-
   .refresh-btn {
     font-size: 0.72rem; background: var(--bg); border: 1px solid var(--border);
     color: var(--muted); padding: 4px 10px; border-radius: 6px; cursor: pointer;
@@ -105,14 +95,9 @@
   <div class="topbar">
     <div>
       <div class="topbar-title">Polymarket — Rotation Optimize</div>
-      <div class="topbar-sub">dominant side score = (1−p)/p / days_left &nbsp;|&nbsp; skew filter 조절 가능</div>
+      <div class="topbar-sub">80¢+ 편중 마켓 | 끝나는 시간순</div>
     </div>
     <div class="topbar-right">
-      <label style="font-size:.74rem;color:var(--muted)">Skew ≥</label>
-      <input type="range" id="skew-input" min="0" max="0.99" step="0.01" value="0"
-        style="width:80px;accent-color:var(--blue)"
-        oninput="document.getElementById('skew-val').textContent=Math.round(this.value*100)+'¢'; loadTopSignals()">
-      <span id="skew-val" style="font-size:.74rem;color:var(--blue);min-width:28px">0¢</span>
       <label style="font-size:.74rem;color:var(--muted)">Since</label>
       <input type="date" id="since-input" style="background:var(--bg);border:1px solid var(--border);color:var(--text);padding:4px 8px;border-radius:6px;font-size:.76rem;color-scheme:dark;" onchange="loadAll()">
       <a class="nav-link" href="/quant/polymarket/dashboard">← Main Dashboard</a>
@@ -153,7 +138,7 @@
   <!-- open positions (live) -->
   <div class="card">
     <div class="card-header">
-      <div class="card-title">Open Positions (Live)</div>
+      <div class="card-title">Active Positions <span id="active-count" style="font-size:.75rem;color:var(--blue);font-weight:400"></span></div>
       <div class="card-sub" id="pos-wallet-addr" style="font-family:monospace;font-size:.68rem"></div>
     </div>
     <div class="tbl-wrap">
@@ -171,77 +156,95 @@
           </tr>
         </thead>
         <tbody id="positions-tbody">
-          <tr><td colspan="7" class="loading">Loading…</td></tr>
+          <tr><td colspan="8" class="loading">Loading…</td></tr>
         </tbody>
       </table>
     </div>
   </div>
 
-  <!-- two col: top signals + loss sectors -->
-  <div class="two-col">
-
-    <!-- top signals -->
-    <div class="card">
-      <div class="card-header">
-        <div class="card-title">Live Markets</div>
-        <div class="card-sub">
-          끝나는 시간순 &nbsp;|&nbsp;
-          <label style="font-size:.7rem;color:var(--red);cursor:pointer">
-            <input type="checkbox" id="excl-sports" checked onchange="loadTopSignals()">
-            Exclude Sports
-          </label>
-          <label style="font-size:.7rem;color:#f0c040;cursor:pointer;margin-left:8px">
-            <input type="checkbox" id="excl-entertainment" onchange="loadTopSignals()">
-            Exclude Entertainment
-          </label>
-        </div>
-      </div>
-      <div class="tbl-wrap">
-        <table>
-          <thead>
-            <tr>
-              <th>Question</th>
-              <th>Sector</th>
-              <th>Dominant</th>
-              <th>YES</th>
-              <th>NO</th>
-              <th>ROI%</th>
-              <th>Hrs Left</th>
-              <th>Vol $</th>
-            </tr>
-          </thead>
-          <tbody id="signal-tbody">
-            <tr><td colspan="8" class="loading">Loading…</td></tr>
-          </tbody>
-        </table>
-      </div>
+  <!-- pending redemption -->
+  <div class="card" id="redemption-card" style="display:none">
+    <div class="card-header">
+      <div class="card-title" style="color:var(--yellow)">Pending Redemption <span id="redemption-count" style="font-size:.75rem;font-weight:400"></span></div>
+      <div class="card-sub">해소됐지만 USDC 미회수 — Polymarket 자동 처리 대기 (24-48h)</div>
     </div>
-
-    <!-- loss sectors -->
-    <div class="card">
-      <div class="card-header">
-        <div class="card-title">Loss Sector Breakdown</div>
-        <div class="card-sub">resolved LC signals grouped by category</div>
-      </div>
-      <div class="tbl-wrap">
-        <table>
-          <thead>
-            <tr>
-              <th>Sector</th>
-              <th>Total</th>
-              <th>Losses</th>
-              <th>Win Rate</th>
-              <th>Avg PnL</th>
-            </tr>
-          </thead>
-          <tbody id="sector-tbody">
-            <tr><td colspan="5" class="loading">Loading…</td></tr>
-          </tbody>
-        </table>
-      </div>
+    <div class="tbl-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th>Question</th>
+            <th>Outcome</th>
+            <th>Size</th>
+            <th>Avg Price</th>
+            <th>Cur Value</th>
+            <th>Unrealized</th>
+          </tr>
+        </thead>
+        <tbody id="redemption-tbody"></tbody>
+      </table>
     </div>
-
   </div>
+
+  <!-- transaction history (resolved positions) -->
+  <div class="card" id="txhist-card" style="display:none">
+    <div class="card-header">
+      <div class="card-title">Transaction History <span id="txhist-count" style="font-size:.75rem;color:var(--muted);font-weight:400"></span></div>
+      <div class="card-sub">resolved signals — wins &amp; losses</div>
+    </div>
+    <div class="tbl-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th>Question</th>
+            <th>Side</th>
+            <th>Entry</th>
+            <th>Result</th>
+            <th>PnL</th>
+            <th>Resolved</th>
+          </tr>
+        </thead>
+        <tbody id="txhist-tbody"></tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- live markets (full width) -->
+  <div class="card">
+    <div class="card-header">
+      <div class="card-title">Live Markets</div>
+      <div class="card-sub">
+        끝나는 시간순 &nbsp;|&nbsp;
+        <label style="font-size:.7rem;color:var(--red);cursor:pointer">
+          <input type="checkbox" id="excl-sports" checked onchange="loadTopSignals()">
+          Exclude Sports
+        </label>
+        <label style="font-size:.7rem;color:#f0c040;cursor:pointer;margin-left:8px">
+          <input type="checkbox" id="excl-entertainment" onchange="loadTopSignals()">
+          Exclude Entertainment
+        </label>
+      </div>
+    </div>
+    <div class="tbl-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th>Question</th>
+            <th>Sector</th>
+            <th>Dominant</th>
+            <th>YES</th>
+            <th>NO</th>
+            <th>ROI%</th>
+            <th>Hrs Left</th>
+            <th>Vol $</th>
+          </tr>
+        </thead>
+        <tbody id="signal-tbody">
+          <tr><td colspan="8" class="loading">Loading…</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
 
 </div>
 
@@ -297,34 +300,64 @@ async function loadLiveWallet() {
 }
 
 function renderPositions(positions) {
+  const active   = positions.filter(p => p.hours_left == null || p.hours_left > 0);
+  // resolved + cur_value > 0 → pending redemption (won, waiting for payout)
+  // resolved + cur_value == 0 → already lost, skip from view (shown in TX history)
+  const resolved = positions.filter(p => p.hours_left != null && p.hours_left <= 0 && (p.current_value || 0) > 0);
+
+  // Active positions
   const tbody = document.getElementById('positions-tbody');
-  if (!positions.length) {
-    tbody.innerHTML = '<tr><td colspan="8" style="color:var(--muted);text-align:center;padding:16px">No open positions</td></tr>';
+  document.getElementById('active-count').textContent = active.length ? `(${active.length})` : '';
+  if (!active.length) {
+    tbody.innerHTML = '<tr><td colspan="8" style="color:var(--muted);text-align:center;padding:16px">No active positions</td></tr>';
+  } else {
+    tbody.innerHTML = active.map(p => {
+      const upnl = p.unrealized_pnl;
+      const upnlStr = upnl != null
+        ? `<span class="${upnl >= 0 ? 'green' : 'red'}">${upnl >= 0 ? '+' : ''}$${upnl.toFixed(4)}</span>`
+        : '—';
+      const sideClass = (p.outcome || '').toUpperCase() === 'YES' ? 'badge-yes' : 'badge-no';
+      const hl = p.hours_left;
+      const timeStr = hl == null ? '—'
+        : hl < 1  ? `<span class="red">${(hl * 60).toFixed(0)}m</span>`
+        : hl < 6  ? `<span style="color:var(--yellow)">${hl.toFixed(1)}h</span>`
+        :           `${hl.toFixed(1)}h`;
+      return `<tr>
+        <td><span class="q-text" title="${p.question}">${p.question}</span></td>
+        <td><span class="badge ${sideClass}">${p.outcome || '—'}</span></td>
+        <td>${p.size}</td>
+        <td>${(p.avg_price * 100).toFixed(1)}¢</td>
+        <td>${(p.current_price * 100).toFixed(1)}¢</td>
+        <td>$${p.current_value.toFixed(4)}</td>
+        <td>${upnlStr}</td>
+        <td>${timeStr}</td>
+      </tr>`;
+    }).join('');
+  }
+
+  // Pending redemption
+  const card = document.getElementById('redemption-card');
+  const rtbody = document.getElementById('redemption-tbody');
+  if (!resolved.length) {
+    card.style.display = 'none';
     return;
   }
-  tbody.innerHTML = positions.map(p => {
+  card.style.display = '';
+  document.getElementById('redemption-count').textContent = `(${resolved.length})`;
+  const totalPending = resolved.reduce((s, p) => s + (p.current_value || 0), 0);
+  rtbody.innerHTML = resolved.map(p => {
     const upnl = p.unrealized_pnl;
     const upnlStr = upnl != null
       ? `<span class="${upnl >= 0 ? 'green' : 'red'}">${upnl >= 0 ? '+' : ''}$${upnl.toFixed(4)}</span>`
       : '—';
     const sideClass = (p.outcome || '').toUpperCase() === 'YES' ? 'badge-yes' : 'badge-no';
-    const hl = p.hours_left;
-    let timeStr = '—';
-    if (hl != null) {
-      if (hl <= 0)        timeStr = '<span class="red">Resolved</span>';
-      else if (hl < 1)    timeStr = `<span class="red">${(hl * 60).toFixed(0)}m</span>`;
-      else if (hl < 6)    timeStr = `<span class="yellow">${hl.toFixed(1)}h</span>`;
-      else                timeStr = `${hl.toFixed(1)}h`;
-    }
     return `<tr>
       <td><span class="q-text" title="${p.question}">${p.question}</span></td>
       <td><span class="badge ${sideClass}">${p.outcome || '—'}</span></td>
       <td>${p.size}</td>
       <td>${(p.avg_price * 100).toFixed(1)}¢</td>
-      <td>${(p.current_price * 100).toFixed(1)}¢</td>
       <td>$${p.current_value.toFixed(4)}</td>
       <td>${upnlStr}</td>
-      <td>${timeStr}</td>
     </tr>`;
   }).join('');
 }
@@ -395,7 +428,7 @@ async function loadTopSignals() {
   const excluded = [];
   if (document.getElementById('excl-sports')?.checked)        excluded.push('Sports');
   if (document.getElementById('excl-entertainment')?.checked) excluded.push('Entertainment');
-  const skewMin = parseFloat(document.getElementById('skew-input')?.value || '0');
+  const skewMin = 0.80;
   const params = new URLSearchParams({
     limit: 200,
     exclude_sectors: excluded.join(',') || '',
@@ -433,42 +466,43 @@ async function loadTopSignals() {
   }).join('');
 }
 
-async function loadLossSectors() {
+async function loadTxHistory() {
   const since = getSince();
-  const params = since ? `?since=${since}` : '';
-  const r = await fetch(`${BASE}/rotation/loss-sectors${params}`);
+  const params = new URLSearchParams({ resolved: 'yes', limit: 50 });
+  if (since) params.set('since', since);
+  const r = await fetch(`${BASE}/signals?${params}`);
   const d = await r.json();
-  const tbody = document.getElementById('sector-tbody');
-  const sectors = d.sectors || [];
-
-  if (!sectors.length) {
-    tbody.innerHTML = '<tr><td colspan="5" class="loading">No data</td></tr>';
-    return;
-  }
-
-  const maxLoss = sectors[0].losses || 1;
-  tbody.innerHTML = sectors.map(s => {
-    const lossBarW = Math.round((s.losses / maxLoss) * 50);
-    const wrBarW   = Math.round((s.win_rate / 100) * 50);
-    const pnlClass = s.avg_pnl >= 0 ? 'green' : 'red';
-    const wrClass  = s.win_rate >= 85 ? 'green' : s.win_rate >= 70 ? 'yellow' : 'red';
+  const sigs = d.signals || [];
+  const card = document.getElementById('txhist-card');
+  if (!sigs.length) { card.style.display = 'none'; return; }
+  card.style.display = '';
+  document.getElementById('txhist-count').textContent = `(${sigs.length})`;
+  const tbody = document.getElementById('txhist-tbody');
+  tbody.innerHTML = sigs.map(s => {
+    const price = (s.side === 'YES' ? s.yes_price : s.no_price) || 0;
+    const pnl   = s.actual_pnl;
+    const isWin = pnl != null && pnl > 0;
+    const pnlStr = pnl != null
+      ? `<span class="${isWin ? 'green' : 'red'}">${pnl >= 0 ? '+' : ''}${(pnl * 100).toFixed(1)}%</span>`
+      : '—';
+    const resultStr = s.actual_outcome
+      ? `<span class="${isWin ? 'green' : 'red'}">${s.actual_outcome}</span>`
+      : '—';
+    const sideClass = s.side === 'YES' ? 'badge-yes' : 'badge-no';
+    const ts = s.resolved_at ? s.resolved_at.slice(0, 16).replace('T', ' ') : '—';
     return `<tr>
-      <td><strong>${s.sector}</strong></td>
-      <td>${s.total}</td>
-      <td>
-        <span class="sector-loss-bar" style="width:${lossBarW}px"></span>${s.losses}
-      </td>
-      <td>
-        <span class="sector-wr-bar" style="width:${wrBarW}px"></span>
-        <span class="${wrClass}">${s.win_rate}%</span>
-      </td>
-      <td class="${pnlClass}">${s.avg_pnl >= 0 ? '+' : ''}${s.avg_pnl}%</td>
+      <td><span class="q-text" title="${s.question}">${s.question}</span></td>
+      <td><span class="badge ${sideClass}">${s.side || '—'}</span></td>
+      <td>${price ? (price * 100).toFixed(1) + '¢' : '—'}</td>
+      <td>${resultStr}</td>
+      <td>${pnlStr}</td>
+      <td style="color:var(--muted);font-size:.68rem">${ts}</td>
     </tr>`;
   }).join('');
 }
 
 async function loadAll() {
-  await Promise.all([loadLiveWallet(), loadTopSignals(), loadLossSectors()]);
+  await Promise.all([loadLiveWallet(), loadTopSignals(), loadTxHistory()]);
 }
 
 // 기본값: 오늘
