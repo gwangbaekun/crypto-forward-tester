@@ -49,6 +49,11 @@ async def dashboard():
     return render_template("polymarket_dashboard.html")
 
 
+@router.get("/analytics/dashboard", response_class=HTMLResponse)
+async def analytics_dashboard():
+    return render_template("polymarket_analytics.html")
+
+
 @router.get("/markets")
 async def markets() -> JSONResponse:
     """현재 모니터링 중인 마켓 목록 (LC + PH 합산)."""
@@ -388,6 +393,293 @@ async def stats(
 
 
 # ──────────────────────────────────────────────
+# Sector analytics
+# ──────────────────────────────────────────────
+
+def _entry_price_row(row) -> float | None:
+    if row.side == "YES":
+        return row.yes_price
+    if row.side == "NO":
+        return row.no_price
+    return row.yes_price or row.no_price
+
+
+def _dedupe_markets(rows: list) -> list:
+    """condition_id 당 최신 resolved row 1건."""
+    by_cid: dict[str, object] = {}
+    for r in rows:
+        cid = r.condition_id or f"id:{r.id}"
+        prev = by_cid.get(cid)
+        if prev is None:
+            by_cid[cid] = r
+            continue
+        rt, pt = r.resolved_at, prev.resolved_at
+        if rt and (not pt or rt > pt):
+            by_cid[cid] = r
+    return list(by_cid.values())
+
+
+def _aggregate_sector_rows(rows: list) -> dict:
+    from features.strategy.polymarket.sectors import classify_sector
+
+    out: dict[str, dict] = {}
+    for r in rows:
+        sec = classify_sector(r.question)
+        if sec not in out:
+            out[sec] = {"signals": 0, "wins": 0, "losses": 0, "pending": 0, "pnls": []}
+        out[sec]["signals"] += 1
+        if not r.is_resolved:
+            out[sec]["pending"] += 1
+            continue
+        if r.actual_pnl is None:
+            continue
+        out[sec]["pnls"].append(r.actual_pnl)
+        if r.actual_pnl > 0:
+            out[sec]["wins"] += 1
+        elif r.actual_pnl < 0:
+            out[sec]["losses"] += 1
+    return out
+
+
+@router.get("/analytics/overview")
+async def analytics_overview(
+    since: str | None = Query(None, description="YYYY-MM-DD (created_at)"),
+    dedupe: str = Query("market", description="market | signal"),
+    resolved_only: bool = Query(False),
+) -> JSONResponse:
+    """세분화 섹터별 집계 + 구 router Other 대비 breakdown."""
+    try:
+        from db.session import get_session
+        from db.models import PolymarketSignal
+        from sqlalchemy import select
+        from features.strategy.polymarket.sectors import SECTOR_ORDER, classify_sector
+
+        since_dt = _parse_since(since)
+        db = get_session()
+        try:
+            stmt = select(PolymarketSignal).where(
+                PolymarketSignal.strategy == "late_convergence",
+            )
+            if since_dt:
+                stmt = stmt.where(PolymarketSignal.created_at >= since_dt)
+            if resolved_only:
+                stmt = stmt.where(PolymarketSignal.is_resolved == 1)
+            rows = db.execute(stmt).scalars().all()
+        finally:
+            db.close()
+
+        signal_rows = list(rows)
+        market_rows = _dedupe_markets(signal_rows)
+        use_rows = market_rows if dedupe == "market" else signal_rows
+        agg = _aggregate_sector_rows(use_rows)
+        raw_agg = _aggregate_sector_rows(signal_rows) if dedupe == "market" else agg
+
+        sectors = []
+        for sec in SECTOR_ORDER:
+            d = agg.get(sec)
+            if not d:
+                continue
+            resolved_n = d["wins"] + d["losses"]
+            raw_n = raw_agg.get(sec, {}).get("signals", d["signals"])
+            sectors.append({
+                "sector":       sec,
+                "label":        sec.replace("_", " "),
+                "signals":      d["signals"],
+                "raw_signals":  raw_n,
+                "resolved":     resolved_n,
+                "pending":      d["pending"],
+                "wins":         d["wins"],
+                "losses":       d["losses"],
+                "win_rate":     round(d["wins"] / resolved_n, 4) if resolved_n else None,
+                "avg_pnl":      round(sum(d["pnls"]) / len(d["pnls"]), 4) if d["pnls"] else None,
+                "is_gambling":  sec.startswith("Esports") or sec.startswith("Sports_"),
+            })
+
+        router_other = sum(1 for r in use_rows if _sector(r.question or "") == "Other")
+        granular_other = agg.get("Other", {}).get("signals", 0)
+
+        return JSONResponse({
+            "since":              since,
+            "dedupe":             dedupe,
+            "total_signals":      len(signal_rows),
+            "total_markets":      len(market_rows),
+            "rows_analyzed":      len(use_rows),
+            "router_other_count": router_other,
+            "granular_other":     granular_other,
+            "sectors":            sectors,
+        })
+    except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+
+@router.get("/analytics/markets")
+async def analytics_markets(
+    sector: str = Query(..., description="세분화 섹터명"),
+    since: str | None = Query(None),
+    dedupe: str = Query("market"),
+    limit: int = Query(50, le=200),
+    sort: str = Query("signals", description="signals | loss | win_rate"),
+) -> JSONResponse:
+    """섹터 내 마켓(질문)별 집계."""
+    try:
+        from db.session import get_session
+        from db.models import PolymarketSignal
+        from sqlalchemy import select
+        from features.strategy.polymarket.sectors import classify_sector
+
+        since_dt = _parse_since(since)
+        db = get_session()
+        try:
+            stmt = select(PolymarketSignal).where(
+                PolymarketSignal.strategy == "late_convergence",
+            )
+            if since_dt:
+                stmt = stmt.where(PolymarketSignal.created_at >= since_dt)
+            rows = db.execute(stmt).scalars().all()
+        finally:
+            db.close()
+
+        filtered = [r for r in rows if classify_sector(r.question) == sector]
+        if dedupe == "market":
+            filtered = _dedupe_markets(filtered)
+
+        by_q: dict[str, dict] = {}
+        for r in filtered:
+            q = (r.question or "")[:500]
+            if q not in by_q:
+                by_q[q] = {
+                    "question": q,
+                    "condition_id": r.condition_id,
+                    "signals": 0,
+                    "wins": 0,
+                    "losses": 0,
+                    "entries": [],
+                }
+            by_q[q]["signals"] += 1
+            e = _entry_price_row(r)
+            if e is not None:
+                by_q[q]["entries"].append(e)
+            if r.is_resolved and r.actual_pnl is not None:
+                if r.actual_pnl > 0:
+                    by_q[q]["wins"] += 1
+                elif r.actual_pnl < 0:
+                    by_q[q]["losses"] += 1
+
+        markets = []
+        for d in by_q.values():
+            entries = d.pop("entries")
+            n = d["wins"] + d["losses"]
+            markets.append({
+                **d,
+                "win_rate": round(d["wins"] / n, 4) if n else None,
+                "avg_entry": round(sum(entries) / len(entries), 4) if entries else None,
+            })
+
+        if sort == "loss":
+            markets.sort(key=lambda x: (-x["losses"], -x["signals"]))
+        elif sort == "win_rate":
+            markets.sort(key=lambda x: (-(x["win_rate"] or 0), -x["signals"]))
+        else:
+            markets.sort(key=lambda x: -x["signals"])
+
+        return JSONResponse({
+            "sector":  sector,
+            "total":   len(markets),
+            "markets": markets[:limit],
+        })
+    except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+
+@router.get("/analytics/curve")
+async def analytics_curve(
+    since: str | None = Query(None),
+    initial: float = Query(INITIAL_CAPITAL),
+    include_sectors: str | None = Query(None, description="콤마 구분 포함 섹터"),
+    exclude_sectors: str | None = Query(
+        "Esports_Prop,Esports_Match,Sports_Prop,Sports_Match,Weather",
+        description="콤마 구분 제외 섹터",
+    ),
+) -> JSONResponse:
+    """필터된 섹터만으로 일별 재투자 PnL 곡선."""
+    try:
+        from db.session import get_session
+        from db.models import PolymarketSignal
+        from sqlalchemy import select
+        from features.strategy.polymarket.sectors import classify_sector, DEFAULT_EXCLUDE
+
+        since_dt = _parse_since(since)
+        inc = {s.strip() for s in (include_sectors or "").split(",") if s.strip()}
+        exc = {s.strip() for s in (exclude_sectors or "").split(",") if s.strip()} or set(DEFAULT_EXCLUDE)
+
+        db = get_session()
+        try:
+            stmt = (
+                select(PolymarketSignal)
+                .where(
+                    PolymarketSignal.strategy == "late_convergence",
+                    PolymarketSignal.is_resolved == 1,
+                    PolymarketSignal.actual_pnl.isnot(None),
+                )
+                .order_by(PolymarketSignal.resolved_at)
+            )
+            if since_dt:
+                stmt = stmt.where(PolymarketSignal.resolved_at >= since_dt)
+            rows = db.execute(stmt).scalars().all()
+        finally:
+            db.close()
+
+        filtered = []
+        for r in rows:
+            sec = classify_sector(r.question)
+            if inc and sec not in inc:
+                continue
+            if sec in exc:
+                continue
+            filtered.append(r)
+
+        if not filtered:
+            return JSONResponse({"curve": [], "final": initial, "total_pct": 0.0, "initial": initial, "trades": 0})
+
+        def day_key(r):
+            ts = r.resolved_at or r.created_at
+            return ts.date() if ts else date(2000, 1, 1)
+
+        capital = initial
+        curve = [{"date": "start", "capital": round(capital, 4), "trades": 0, "wins": 0}]
+        for day, group in groupby(filtered, key=day_key):
+            batch = list(group)
+            n = len(batch)
+            per_bet = capital / n
+            day_capital = 0.0
+            wins = 0
+            for r in batch:
+                day_capital += per_bet * (1.0 + r.actual_pnl)
+                if r.actual_pnl > 0:
+                    wins += 1
+            capital = day_capital
+            curve.append({
+                "date":    str(day),
+                "capital": round(capital, 4),
+                "trades":  n,
+                "wins":    wins,
+            })
+
+        total_pct = (capital - initial) / initial * 100
+        return JSONResponse({
+            "initial":   initial,
+            "final":     round(capital, 4),
+            "total_pct": round(total_pct, 2),
+            "trades":    len(filtered),
+            "curve":     curve,
+            "exclude_sectors": list(exc),
+            "include_sectors": list(inc) if inc else None,
+        })
+    except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+
+# ──────────────────────────────────────────────
 # Rotation Optimize Dashboard
 # ──────────────────────────────────────────────
 
@@ -440,15 +732,14 @@ def _sector(question: str) -> str:
 @router.get("/rotation/top-signals")
 async def rotation_top_signals(
     limit: int = Query(200),
-    exclude_sectors: str = Query("Sports", description="콤마 구분 섹터 제외. 기본: Sports"),
     skew_min: float = Query(0.0, description="한쪽 편중 최솟값 (0=전체, 0.85=85¢+만)"),
 ) -> JSONResponse:
-    """라이브 마켓 — 끝나는 시간 오름차순. skew_min 이상 편중된 마켓만 표시."""
+    """라이브 마켓 — 허용 섹터(whitelist)만, 끝나는 시간 오름차순."""
     try:
         from features.strategy.polymarket.late_convergence.engine import get_markets as lc_markets
         from features.strategy.polymarket.pair_hedge.engine import get_markets as ph_markets
+        from features.strategy.polymarket.sectors import classify_sector, ALLOWED_SECTORS
 
-        excluded = {s.strip() for s in exclude_sectors.split(",") if s.strip()}
         now_ts = time.time()
 
         combined: dict[str, dict] = {}
@@ -477,8 +768,8 @@ async def rotation_top_signals(
             if skew_min > 0 and dominant_price < skew_min:
                 continue
 
-            sector = _sector(m.get("question") or "")
-            if sector in excluded:
+            sec = classify_sector(m.get("question") or "")
+            if sec not in ALLOWED_SECTORS:
                 continue
 
             days_left    = hours_left / 24
@@ -488,7 +779,7 @@ async def rotation_top_signals(
             results.append({
                 "condition_id":   m.get("condition_id"),
                 "question":       (m.get("question") or "")[:120],
-                "sector":         sector,
+                "sector":         sec,
                 "yes_price":      round(yes_p, 4),
                 "no_price":       round(no_p,  4),
                 "dominant_side":  dominant_side,
@@ -501,10 +792,10 @@ async def rotation_top_signals(
 
         results.sort(key=lambda x: x["hours_left"])
         return JSONResponse({
-            "markets":          results[:limit],
-            "total":            len(results),
-            "excluded_sectors": list(excluded),
-            "skew_min":         skew_min,
+            "markets":         results[:limit],
+            "total":           len(results),
+            "allow_sectors":   sorted(ALLOWED_SECTORS),
+            "skew_min":        skew_min,
         })
     except Exception as e:
         return JSONResponse({"error": str(e)}, status_code=500)

@@ -9,58 +9,19 @@ from __future__ import annotations
 
 import asyncio
 import logging
-import re
 import time
 from pathlib import Path
 
 import yaml
 
-# ── 섹터 분류 (router._sector 와 별개 — circular import 방지) ─────────────────
-_EXCL_PATTERNS: dict[str, list[str]] = {
-    "Sports": [
-        r"\bgolf\b", r"\bpga\b", r"\blpga\b",
-        r"game handicap", r"\bspread\s*:", r"games total",
-        r"\bnba\b", r"\bnfl\b", r"\bnhl\b", r"\bmlb\b",
-        r"\btennis\b", r"\bufc\b", r"\bbox(ing)?\b",
-        r"finish (in|under|top|at|within) ",
-        r"will .{0,60} finish (in|under|top)",
-        r"\btournament\b", r"\bplayoff\b", r"\bchampionship\b",
-        r"\b(fc|sc|ac|if|bk|sk) (vs|v\.)\b",
-        r"\bvs\.? .{1,30} (fc|sc|united|city|madrid|barcelona)\b",
-        r"\bsoccer\b", r"\bfootball\b", r"\bbasketball\b",
-        r"\bleague\b", r"world cup", r"super bowl",
-        r"\bworld series\b", r"\bstanley cup\b",
-    ],
-    "Weather": [
-        r"temperature", r"°c\b", r"\bcelsius\b",
-        r"highest temp", r"\bweather\b", r"\brain\b",
-        r"\bhurricane\b", r"\btyphoon\b", r"\bstorm\b",
-        r"\bsnow\b", r"\bflood\b",
-    ],
-    "Price_Target": [
-        r"up or down",
-        r"will .{0,60} reach \$", r"will .{0,60} hit \$",
-        r"will .{0,60} be above \$", r"will .{0,60} exceed \$",
-        r"price of .{0,40} be (above|below|over|under)",
-    ],
-    "Earnings": [
-        r"\bearnings\b", r"same.store sales",
-        r"q[1-4] \d{4}.{0,30}(sales|growth|revenue)",
-        r"autozone", r"same store",
-    ],
-}
+from features.strategy.polymarket.sectors import classify_sector, ALLOWED_SECTORS
 
 
-def _excluded_sector(question: str, exclude: list[str]) -> str | None:
-    """질문이 exclude 목록 섹터에 해당하면 섹터명 반환, 아니면 None."""
-    if not exclude:
-        return None
-    q = question.lower()
-    excl_set = set(exclude)
-    for sector, patterns in _EXCL_PATTERNS.items():
-        if sector in excl_set and any(re.search(p, q) for p in patterns):
-            return sector
-    return None
+def _sector_allowed(question: str, allow: list[str]) -> bool:
+    """질문이 허용 섹터에 해당하면 True. allow 목록이 비어 있으면 전체 허용."""
+    if not allow:
+        return True
+    return classify_sector(question) in allow
 
 from features.strategy.polymarket._data.client import fetch_by_expiry
 from features.strategy.polymarket._data import ws_client as ws
@@ -122,12 +83,10 @@ async def _refresh_and_scan(ws_client: ws.CLOBWSClient) -> None:
 
 def _check_market_rest(cid: str, market: dict) -> None:
     """Gamma API 가격으로 시그널 평가."""
-    excluded_sector = _excluded_sector(
-        market.get("question", ""),
-        _cfg.get("exclude_sectors", []),
-    )
-    if excluded_sector:
-        log.debug("[LC] skip excluded sector=%s cid=%s", excluded_sector, cid[:12])
+    allow = _cfg.get("allow_sectors", list(ALLOWED_SECTORS))
+    if not _sector_allowed(market.get("question", ""), allow):
+        sec = classify_sector(market.get("question", ""))
+        log.debug("[LC] skip sector=%s cid=%s", sec, cid[:12])
         return
 
     yes_tid = market.get("yes_token_id")

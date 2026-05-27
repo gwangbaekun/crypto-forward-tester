@@ -7,9 +7,11 @@ min_convergence_price: 0.80 # YES or NO ≥ 80% → 고확률 수렴 타겟
 max_convergence_price: 0.97 # 이 이하 (완전 수렴 전, 수익 여지 있음)
 min_volume_usd: 5000
 
-# 진입 금지 섹터 (0% 또는 저승률 카테고리)
-exclude_sectors:
-  - Sports        # 골프컷 0%, 스포츠스프레드 76% → 80-97¢ 진입 시 음수 기댓값
-  - Weather       # 71% 승률 → 음수 기댓값
-  - Price_Target  # BTC/ETH "up or down", "will reach $X" → 22%
-  - Earnings      # Corporate earnings 0%
+# 진입 허용 섹터 화이트리스트 (sectors.py classify_sector 기준)
+# 여기 없는 섹터(Esports_Prop, Sports_Prop, Weather, Entertainment, Other)는 전부 skip
+allow_sectors:
+  - Esports_Match   # LoL BO5, Dota 대회 매치 결과
+  - Sports_Match    # FC 승부, NBA/NFL 경기 결과
+  - Politics        # 선거, 상원, 대통령 등
+  - Economics       # 금리 결정, FOMC, 중앙은행
+  - Crypto          # BTC/ETH 가격·이벤트
