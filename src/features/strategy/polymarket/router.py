@@ -244,6 +244,62 @@ async def reset_signals(confirm: str = Query(..., description="'yes'를 입력�
         return JSONResponse({"error": str(e)}, status_code=500)
 
 
+def _gambler_band_delete_stmt(min_price: float, max_price: float):
+    """side 기준 진입가가 [min_price, max_price] 인 LC 시그널 삭제 조건."""
+    from db.models import PolymarketSignal
+    from sqlalchemy import delete, or_, and_
+
+    yes_band = and_(
+        PolymarketSignal.yes_price.isnot(None),
+        PolymarketSignal.yes_price >= min_price,
+        PolymarketSignal.yes_price <= max_price,
+    )
+    no_band = and_(
+        PolymarketSignal.no_price.isnot(None),
+        PolymarketSignal.no_price >= min_price,
+        PolymarketSignal.no_price <= max_price,
+    )
+    return delete(PolymarketSignal).where(
+        or_(
+            and_(PolymarketSignal.side == "YES", yes_band),
+            and_(PolymarketSignal.side == "NO", no_band),
+            and_(PolymarketSignal.side.is_(None), or_(yes_band, no_band)),
+        )
+    )
+
+
+@router.delete("/reset-gambler-band")
+async def reset_gambler_band_signals(
+    confirm: str = Query(..., description="'yes'를 입력해야 실행"),
+    min_price: float = Query(0.1, description="진입가 하한 (포함)"),
+    max_price: float = Query(0.4, description="진입가 상한 (포함)"),
+) -> JSONResponse:
+    """0.10–0.40 등 잘못된 밴드 시그널만 삭제. confirm=yes 필수."""
+    if confirm != "yes":
+        return JSONResponse({"error": "confirm=yes 필요"}, status_code=400)
+    if min_price > max_price:
+        return JSONResponse({"error": "min_price must be <= max_price"}, status_code=400)
+    try:
+        from db.session import get_session
+
+        db = get_session()
+        try:
+            result = db.execute(_gambler_band_delete_stmt(min_price, max_price))
+            db.commit()
+            return JSONResponse({
+                "deleted": result.rowcount,
+                "min_price": min_price,
+                "max_price": max_price,
+            })
+        except Exception as e:
+            db.rollback()
+            raise
+        finally:
+            db.close()
+    except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+
 @router.delete("/reset-resolved")
 async def reset_resolved_signals(confirm: str = Query(..., description="'yes'를 입력해야 실행")) -> JSONResponse:
     """resolved 시그널만 삭제. pending(미해소) 시그널은 보존."""
