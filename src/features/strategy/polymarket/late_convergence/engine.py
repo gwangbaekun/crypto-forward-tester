@@ -155,7 +155,6 @@ def _save_signal(sig: lc_signal.LCSignal) -> int | None:
 
 async def _place_order_and_update(sig: lc_signal.LCSignal, row_id: int) -> None:
     """실거래 주문 후 DB 업데이트. POLYMARKET_PK 없으면 skip."""
-    import os
     from features.strategy.polymarket._data.live import _has_pk, _pk_valid
     if not (_has_pk() and _pk_valid()):
         return  # 유효 PK 없으면 시뮬 모드
@@ -164,6 +163,29 @@ async def _place_order_and_update(sig: lc_signal.LCSignal, row_id: int) -> None:
     token_id = sig.yes_token_id if sig.side == "YES" else sig.no_token_id
     if not token_id:
         return
+
+    # 동일 condition_id로 이미 live/matched 주문 있으면 중복 진입 차단
+    # failed/skipped는 차단 안 함 → 자연 재시도
+    from sqlalchemy import select
+    _db = get_session()
+    try:
+        existing = _db.execute(
+            select(PolymarketSignal).where(
+                PolymarketSignal.condition_id == sig.condition_id,
+                PolymarketSignal.order_status.in_(["live", "matched"]),
+            )
+        ).first()
+        if existing:
+            log.info("[LC] dup block condition_id=%s (already %s)", sig.condition_id[:12], existing[0].order_status)
+            row = _db.execute(select(PolymarketSignal).where(PolymarketSignal.id == row_id)).scalar_one_or_none()
+            if row:
+                row.order_status = "skipped"
+                _db.commit()
+            return
+    except Exception as e:
+        log.warning("[LC] dup check failed: %s", e)
+    finally:
+        _db.close()
 
     result = await place_order(token_id, sig.entry_price, max_usd=_cfg.get("max_order_usd", 0.0))
 
