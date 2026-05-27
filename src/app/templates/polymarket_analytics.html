@@ -1,0 +1,444 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Polymarket — Sector Analytics</title>
+<link rel="stylesheet" href="/static/css/dashboard_common.css">
+<style>
+  body { padding: 10px 12px 40px; }
+  .shell { max-width: 1400px; margin: 0 auto; display: flex; flex-direction: column; gap: 10px; }
+  .topbar {
+    display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 8px;
+    padding: 10px 14px; background: var(--card); border: 1px solid var(--border); border-radius: 8px;
+  }
+  .topbar-title { font-size: 1rem; font-weight: 700; }
+  .topbar-sub { font-size: 0.72rem; color: var(--muted); margin-top: 2px; }
+  .topbar a { font-size: 0.74rem; color: var(--blue); text-decoration: none; }
+  .topbar a:hover { text-decoration: underline; }
+  .ctrl-bar {
+    display: flex; flex-wrap: wrap; gap: 8px; align-items: center;
+    background: var(--card); border: 1px solid var(--border); border-radius: 8px; padding: 8px 12px;
+  }
+  .ctrl-bar label { font-size: 0.72rem; color: var(--muted); }
+  .ctrl-bar input[type="date"], .ctrl-bar select, .ctrl-bar button {
+    background: var(--bg); border: 1px solid var(--border); color: var(--text);
+    padding: 4px 8px; border-radius: 6px; font-size: 0.76rem;
+  }
+  .ctrl-bar button { cursor: pointer; }
+  .ctrl-bar button:hover { border-color: var(--blue); color: var(--blue); }
+  .ctrl-bar button.primary { background: rgba(88,166,255,0.15); border-color: var(--blue); color: var(--blue); }
+  .summary-row { display: flex; flex-wrap: wrap; gap: 8px; }
+  .pill {
+    flex: 1; min-width: 120px; padding: 10px 12px;
+    background: var(--card); border: 1px solid var(--border); border-radius: 8px;
+  }
+  .pill .lbl { font-size: 0.65rem; color: var(--muted); text-transform: uppercase; }
+  .pill .val { font-size: 1.1rem; font-weight: 700; }
+  .pill .sub { font-size: 0.68rem; color: var(--muted); margin-top: 2px; }
+  .card {
+    background: var(--card); border: 1px solid var(--border); border-radius: 8px; padding: 12px 14px;
+  }
+  .card-title { font-size: 0.78rem; font-weight: 700; margin-bottom: 8px; }
+  .chart-row { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+  @media (max-width: 900px) { .chart-row { grid-template-columns: 1fr; } }
+  canvas.chart { width: 100%; height: 200px; display: block; }
+  .sector-chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
+  .chip {
+    font-size: 0.7rem; padding: 4px 10px; border-radius: 999px; cursor: pointer;
+    border: 1px solid var(--border); background: var(--bg); color: var(--muted);
+    user-select: none;
+  }
+  .chip.on { border-color: var(--blue); color: var(--blue); background: rgba(88,166,255,0.12); }
+  .chip.excluded { opacity: 0.45; text-decoration: line-through; }
+  .chip.gamble { border-color: rgba(239,83,80,0.4); }
+  .tbl { width: 100%; border-collapse: collapse; font-size: 0.74rem; }
+  .tbl th, .tbl td { padding: 6px 8px; border-bottom: 1px solid rgba(48,54,61,.5); text-align: left; }
+  .tbl th { color: var(--muted); font-weight: 600; position: sticky; top: 0; background: var(--card); }
+  .tbl tr:hover td { background: rgba(255,255,255,0.03); }
+  .tbl tr.sel td { background: rgba(88,166,255,0.08); }
+  .tbl .num { text-align: right; font-variant-numeric: tabular-nums; }
+  .wr-good { color: var(--green); }
+  .wr-bad { color: var(--red); }
+  .tag {
+    display: inline-block; font-size: 0.62rem; padding: 1px 6px; border-radius: 4px;
+    background: rgba(239,83,80,0.15); color: #ef5350; margin-left: 4px;
+  }
+  .split { display: grid; grid-template-columns: 340px 1fr; gap: 10px; }
+  @media (max-width: 1000px) { .split { grid-template-columns: 1fr; } }
+  .table-scroll { max-height: 420px; overflow: auto; }
+  #curve-summary { font-size: 0.75rem; color: var(--muted); }
+  #curve-summary .big { font-weight: 700; font-size: 0.9rem; }
+</style>
+</head>
+<body>
+<div class="shell">
+  <div class="topbar">
+    <div>
+      <div class="topbar-title">Polymarket — Sector Analytics</div>
+      <div class="topbar-sub">Other(구분) 안의 esports·스포츠 prop 비중 · 섹터별 승률 · 필터 PnL</div>
+    </div>
+    <div>
+      <a href="/quant/polymarket/dashboard">← Signals Dashboard</a>
+    </div>
+  </div>
+
+  <div class="ctrl-bar">
+    <label>Since</label>
+    <input type="date" id="since-input">
+    <label>집계</label>
+    <select id="dedupe-select">
+      <option value="market">마켓당 1건 (condition_id)</option>
+      <option value="signal">시그널 전체 (중복 포함)</option>
+    </select>
+    <label><input type="checkbox" id="resolved-only"> 해소만</label>
+    <button type="button" class="primary" id="btn-apply">Apply</button>
+    <button type="button" id="btn-clear">Reset</button>
+    <button type="button" id="btn-gamble-off">도박 prop 제외 (기본)</button>
+  </div>
+
+  <div class="summary-row" id="summary-row">
+    <div class="pill"><div class="lbl">시그널 (DB)</div><div class="val" id="s-signals">—</div></div>
+    <div class="pill"><div class="lbl">유니크 마켓</div><div class="val" id="s-markets">—</div></div>
+    <div class="pill"><div class="lbl">Other (구 router)</div><div class="val" id="s-router-other">—</div><div class="sub">키워드만 쓸 때</div></div>
+    <div class="pill"><div class="lbl">Other (세분화)</div><div class="val" id="s-granular-other">—</div><div class="sub">진짜 미분류</div></div>
+    <div class="pill"><div class="lbl">Esports Prop</div><div class="val" id="s-esports-prop">—</div><div class="sub">쿼드라/펜타/바론 등</div></div>
+  </div>
+
+  <div class="chart-row">
+    <div class="card">
+      <div class="card-title">섹터별 건수 <span style="font-weight:400;color:var(--muted)">(클릭 → 하단 마켓 목록)</span></div>
+      <canvas class="chart" id="chart-count"></canvas>
+    </div>
+    <div class="card">
+      <div class="card-title">섹터별 승률 % (해소된 것만)</div>
+      <canvas class="chart" id="chart-wr"></canvas>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="card-title">필터 — 차트/곡선에 반영 (OFF = 제외)</div>
+    <div class="sector-chips" id="sector-chips"></div>
+  </div>
+
+  <div class="card">
+    <div class="card-title">필터 적용 누적 PnL ($100 균등·일별 재투자)</div>
+    <div id="curve-summary">—</div>
+    <canvas class="chart" id="chart-curve" style="height:180px"></canvas>
+  </div>
+
+  <div class="split">
+    <div class="card">
+      <div class="card-title">섹터 테이블</div>
+      <div class="table-scroll">
+        <table class="tbl" id="sector-table">
+          <thead>
+            <tr>
+              <th>Sector</th>
+              <th class="num">N</th>
+              <th class="num" id="th-raw" title="중복 시그널 포함">Raw</th>
+              <th class="num">W</th>
+              <th class="num">L</th>
+              <th class="num">WR%</th>
+              <th class="num">Avg PnL</th>
+            </tr>
+          </thead>
+          <tbody></tbody>
+        </table>
+      </div>
+    </div>
+    <div class="card">
+      <div class="card-title" id="markets-title">마켓 목록 — 섹터를 선택하세요</div>
+      <div class="table-scroll">
+        <table class="tbl" id="markets-table">
+          <thead>
+            <tr>
+              <th>Question</th>
+              <th class="num">Sig</th>
+              <th class="num">W</th>
+              <th class="num">L</th>
+              <th class="num">WR%</th>
+              <th class="num">Entry</th>
+            </tr>
+          </thead>
+          <tbody></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+const GAMBLE_SECTORS = new Set(['Esports_Prop','Esports_Match','Sports_Prop','Sports_Match','Weather']);
+const DEFAULT_EXCLUDE = new Set(GAMBLE_SECTORS);
+
+let sinceValue = '';
+let dedupeMode = 'market';
+let resolvedOnly = false;
+let sectorData = [];
+let excluded = new Set(DEFAULT_EXCLUDE);
+let selectedSector = null;
+
+const SECTOR_COLORS = {
+  Esports_Prop: '#ef5350',
+  Esports_Match: '#ff7043',
+  Sports_Prop: '#ffa726',
+  Sports_Match: '#ffb74d',
+  Politics: '#58a6ff',
+  Economics: '#4caf50',
+  Crypto: '#ab47bc',
+  Weather: '#78909c',
+  Entertainment: '#26c6da',
+  Other: '#8b949e',
+};
+
+function qs() {
+  const p = new URLSearchParams();
+  if (sinceValue) p.set('since', sinceValue);
+  p.set('dedupe', dedupeMode);
+  if (resolvedOnly) p.set('resolved_only', 'true');
+  return p.toString() ? '?' + p.toString() : '';
+}
+
+function curveQs() {
+  const exc = [...excluded].join(',');
+  const p = new URLSearchParams();
+  if (sinceValue) p.set('since', sinceValue);
+  if (exc) p.set('exclude_sectors', exc);
+  return '?' + p.toString();
+}
+
+async function loadOverview() {
+  const r = await fetch('/quant/polymarket/analytics/overview' + qs());
+  const d = await r.json();
+  if (d.error) throw new Error(d.error);
+
+  document.getElementById('s-signals').textContent = (d.total_signals ?? 0).toLocaleString();
+  document.getElementById('s-markets').textContent = (d.total_markets ?? 0).toLocaleString();
+  document.getElementById('s-router-other').textContent = (d.router_other_count ?? 0).toLocaleString();
+  document.getElementById('s-granular-other').textContent = (d.granular_other ?? 0).toLocaleString();
+
+  const ep = (d.sectors || []).find(s => s.sector === 'Esports_Prop');
+  const em = (d.sectors || []).find(s => s.sector === 'Esports_Match');
+  const nProp = ep ? ep.signals : 0;
+  const rawProp = ep ? (ep.raw_signals ?? ep.signals) : 0;
+  const nMatch = em ? em.signals : 0;
+  const tot = d.rows_analyzed || 1;
+  const dupNote = dedupeMode === 'market' && rawProp > nProp
+    ? ` <span style="font-size:0.68rem;color:var(--muted)">시그널 ${rawProp.toLocaleString()}건</span>` : '';
+  document.getElementById('s-esports-prop').innerHTML =
+    `${nProp.toLocaleString()} 마켓 (${(100*nProp/tot).toFixed(0)}%)${dupNote}`;
+
+  sectorData = d.sectors || [];
+  document.getElementById('th-raw').style.display = dedupeMode === 'market' ? '' : 'none';
+  renderSectorTable();
+  renderChips();
+  drawBarChart('chart-count', sectorData, s => s.signals, '건수');
+  drawBarChart('chart-wr', sectorData.filter(s => s.win_rate != null), s => (s.win_rate || 0) * 100, '%', true);
+
+  if (!selectedSector && sectorData.length) {
+    const first = sectorData.find(s => !GAMBLE_SECTORS.has(s.sector)) || sectorData[0];
+    selectSector(first.sector);
+  } else if (selectedSector) {
+    selectSector(selectedSector);
+  }
+}
+
+async function loadCurve() {
+  const r = await fetch('/quant/polymarket/analytics/curve' + curveQs());
+  const d = await r.json();
+  const el = document.getElementById('curve-summary');
+  const pct = d.total_pct ?? 0;
+  const sign = pct >= 0 ? '+' : '';
+  el.innerHTML = `<span class="big ${pct >= 0 ? 'wr-good' : 'wr-bad'}">${sign}${pct.toFixed(1)}%</span>`
+    + ` &nbsp;$${(d.initial||100).toFixed(0)} → $${(d.final||100).toFixed(2)}`
+    + ` &nbsp;· ${d.trades ?? 0} trades`
+    + ` &nbsp;· 제외: ${(d.exclude_sectors||[]).join(', ') || '없음'}`;
+  drawLineChart('chart-curve', d.curve || [], d.initial || 100);
+}
+
+function renderSectorTable() {
+  const tb = document.querySelector('#sector-table tbody');
+  tb.innerHTML = '';
+  for (const s of sectorData) {
+    const tr = document.createElement('tr');
+    if (s.sector === selectedSector) tr.classList.add('sel');
+    tr.style.cursor = 'pointer';
+    const wr = s.win_rate != null ? (s.win_rate * 100).toFixed(1) : '—';
+    const ap = s.avg_pnl != null ? ((s.avg_pnl >= 0 ? '+' : '') + (s.avg_pnl * 100).toFixed(1) + '%') : '—';
+    const gamble = s.is_gambling ? '<span class="tag">prop</span>' : '';
+    const raw = s.raw_signals != null && s.raw_signals !== s.signals
+      ? s.raw_signals : '—';
+    tr.innerHTML = `
+      <td>${s.label}${gamble}</td>
+      <td class="num">${s.signals}</td>
+      <td class="num">${raw}</td>
+      <td class="num">${s.wins}</td>
+      <td class="num">${s.losses}</td>
+      <td class="num ${s.win_rate >= 0.85 ? 'wr-good' : s.win_rate < 0.7 ? 'wr-bad' : ''}">${wr}</td>
+      <td class="num">${ap}</td>`;
+    tr.onclick = () => selectSector(s.sector);
+    tb.appendChild(tr);
+  }
+}
+
+function renderChips() {
+  const box = document.getElementById('sector-chips');
+  box.innerHTML = '';
+  for (const s of sectorData) {
+    const c = document.createElement('span');
+    const isExc = excluded.has(s.sector);
+    c.className = 'chip' + (isExc ? ' excluded' : ' on') + (s.is_gambling ? ' gamble' : '');
+    c.textContent = `${s.label} (${s.signals})`;
+    c.title = isExc ? '클릭하면 포함' : '클릭하면 제외';
+    c.onclick = () => {
+      if (excluded.has(s.sector)) excluded.delete(s.sector);
+      else excluded.add(s.sector);
+      renderChips();
+      loadCurve();
+    };
+    box.appendChild(c);
+  }
+}
+
+async function selectSector(sector) {
+  selectedSector = sector;
+  renderSectorTable();
+  document.getElementById('markets-title').textContent = `마켓 — ${sector.replace(/_/g, ' ')}`;
+  const p = new URLSearchParams(qs().replace('?', ''));
+  p.set('sector', sector);
+  p.set('limit', '80');
+  p.set('sort', 'signals');
+  const r = await fetch('/quant/polymarket/analytics/markets?' + p.toString());
+  const d = await r.json();
+  const tb = document.querySelector('#markets-table tbody');
+  tb.innerHTML = '';
+  for (const m of (d.markets || [])) {
+    const tr = document.createElement('tr');
+    const wr = m.win_rate != null ? (m.win_rate * 100).toFixed(0) + '%' : '—';
+    tr.innerHTML = `
+      <td title="${escapeHtml(m.question)}">${escapeHtml(m.question.slice(0, 72))}${m.question.length > 72 ? '…' : ''}</td>
+      <td class="num">${m.signals}</td>
+      <td class="num">${m.wins}</td>
+      <td class="num">${m.losses}</td>
+      <td class="num">${wr}</td>
+      <td class="num">${m.avg_entry != null ? m.avg_entry.toFixed(3) : '—'}</td>`;
+    tb.appendChild(tr);
+  }
+}
+
+function escapeHtml(s) {
+  return (s || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
+
+function setupCanvas(id, h) {
+  const canvas = document.getElementById(id);
+  const dpr = window.devicePixelRatio || 1;
+  const W = canvas.parentElement.clientWidth - 8;
+  const H = h || 200;
+  canvas.width = W * dpr;
+  canvas.height = H * dpr;
+  canvas.style.width = W + 'px';
+  canvas.style.height = H + 'px';
+  const ctx = canvas.getContext('2d');
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  ctx.scale(dpr, dpr);
+  return { ctx, W, H };
+}
+
+function drawBarChart(id, rows, fn, suffix, isPct) {
+  const { ctx, W, H } = setupCanvas(id);
+  if (!rows.length) {
+    ctx.fillStyle = 'rgba(139,148,158,0.5)';
+    ctx.font = '12px monospace';
+    ctx.textAlign = 'center';
+    ctx.fillText('데이터 없음', W/2, H/2);
+    return;
+  }
+  const pad = { t: 12, b: 52, l: 12, r: 12 };
+  const vals = rows.map(fn);
+  const maxV = Math.max(...vals, isPct ? 100 : 1);
+  const barW = Math.max(8, (W - pad.l - pad.r) / rows.length - 6);
+  const cH = H - pad.t - pad.b;
+
+  rows.forEach((s, i) => {
+    const v = fn(s);
+    const h = (v / maxV) * cH;
+    const x = pad.l + i * (barW + 6);
+    const y = pad.t + cH - h;
+    const col = SECTOR_COLORS[s.sector] || '#8b949e';
+    ctx.fillStyle = excluded.has(s.sector) ? 'rgba(139,148,158,0.25)' : col;
+    ctx.fillRect(x, y, barW, h);
+    ctx.fillStyle = 'rgba(139,148,158,0.85)';
+    ctx.font = '9px monospace';
+    ctx.textAlign = 'center';
+    ctx.fillText(String(Math.round(v)), x + barW/2, y - 3);
+    ctx.save();
+    ctx.translate(x + barW/2, H - pad.b + 8);
+    ctx.rotate(-0.55);
+    ctx.textAlign = 'right';
+    ctx.fillText(s.label.split(' ')[0].slice(0, 12), 0, 0);
+    ctx.restore();
+  });
+}
+
+function drawLineChart(id, curve, initial) {
+  const { ctx, W, H } = setupCanvas(id, 180);
+  if (!curve || curve.length < 2) return;
+  const vals = curve.map(p => p.capital);
+  const minV = Math.min(...vals, initial);
+  const maxV = Math.max(...vals, initial);
+  const range = maxV - minV || 1;
+  const pad = { t: 10, b: 22, l: 44, r: 10 };
+  const cW = W - pad.l - pad.r;
+  const cH = H - pad.t - pad.b;
+  const xOf = i => pad.l + (i / (curve.length - 1)) * cW;
+  const yOf = v => pad.t + (1 - (v - minV) / range) * cH;
+  const pos = vals[vals.length - 1] >= initial;
+  ctx.beginPath();
+  ctx.strokeStyle = pos ? '#4caf50' : '#ef5350';
+  ctx.lineWidth = 1.8;
+  curve.forEach((p, i) => {
+    i === 0 ? ctx.moveTo(xOf(i), yOf(p.capital)) : ctx.lineTo(xOf(i), yOf(p.capital));
+  });
+  ctx.stroke();
+}
+
+async function refresh() {
+  try {
+    await loadOverview();
+    await loadCurve();
+  } catch (e) {
+    console.error(e);
+    alert('로드 실패: ' + e.message);
+  }
+}
+
+document.getElementById('btn-apply').onclick = () => {
+  sinceValue = document.getElementById('since-input').value || '';
+  dedupeMode = document.getElementById('dedupe-select').value;
+  resolvedOnly = document.getElementById('resolved-only').checked;
+  refresh();
+};
+document.getElementById('btn-clear').onclick = () => {
+  sinceValue = '';
+  document.getElementById('since-input').value = '';
+  refresh();
+};
+document.getElementById('btn-gamble-off').onclick = () => {
+  excluded = new Set(GAMBLE_SECTORS);
+  renderChips();
+  loadCurve();
+};
+
+refresh();
+window.addEventListener('resize', () => {
+  if (sectorData.length) {
+    drawBarChart('chart-count', sectorData, s => s.signals, '');
+    drawBarChart('chart-wr', sectorData.filter(s => s.win_rate != null), s => (s.win_rate||0)*100, '%', true);
+    loadCurve();
+  }
+});
+</script>
+</body>
+</html>
