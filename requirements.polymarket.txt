@@ -10,3 +10,4 @@ scipy==1.13.1
 PyYAML>=6.0.0
 eth-account>=0.10.0
 py-clob-client-v2>=1.0.1
+web3>=6.0.0

@@ -20,6 +20,8 @@ from features.strategy.polymarket.late_convergence import engine as lc_engine
 from features.strategy.polymarket.pair_hedge       import engine as ph_engine
 from features.strategy.polymarket.bayesian_fomc    import engine as bf_engine
 from features.strategy.polymarket.log_config import configure_polymarket_logging
+from features.strategy.polymarket._data.executor import redeem_positions
+
 
 log = logging.getLogger("polymarket.runner")
 
@@ -65,6 +67,9 @@ async def _run_resolver() -> None:
                     continue
                 _apply_resolution(sig, outcome)
                 db.add(sig)
+                if sig.condition_id:
+                    redeem_result = await redeem_positions(sig.condition_id)
+                    log.info("[Resolver] redeem condition_id=%s result=%s", sig.condition_id[:12], redeem_result)
             except Exception as e:
                 log.warning("[Resolver] signal id=%s error: %s", sig.id, e)
 
