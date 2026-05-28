@@ -227,6 +227,32 @@ async def redeem_positions(condition_id: str) -> dict[str, Any]:
         return {"ok": False, "error": str(e)}
 
 
+# ── Pending Redemption 전체 일괄 청산 ───────────────────────────────────────
+
+async def redeem_all_pending() -> list[dict[str, Any]]:
+    """data-api에서 redeemable 포지션 전체 조회 후 즉시 일괄 redeem.
+
+    챌린지 기간 무시 — 포지션 회수를 최우선.
+    시뮬 모드(POLYMARKET_LIVE!=true)면 로그만 출력하고 skip.
+    """
+    from features.strategy.polymarket._data.live import fetch_redeemable_positions
+
+    positions = await fetch_redeemable_positions()
+    if not positions:
+        log.info("[executor] redeem_all_pending: 청산 대상 없음")
+        return []
+
+    log.info("[executor] redeem_all_pending: %d개 처리 시작", len(positions))
+    results = []
+    for pos in positions:
+        cid = pos["condition_id"]
+        result = await redeem_positions(cid)
+        entry = {"condition_id": cid, "question": pos["question"], **result}
+        results.append(entry)
+        log.info("[executor] redeemed %s → %s", pos["question"][:40], result)
+    return results
+
+
 # ── 주문 취소 (미체결 GTC 회수용) ───────────────────────────────────────────
 
 async def cancel_order(order_id: str) -> dict[str, Any]:

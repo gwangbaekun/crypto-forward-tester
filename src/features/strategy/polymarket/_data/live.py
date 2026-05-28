@@ -316,6 +316,41 @@ async def fetch_open_positions() -> list[dict[str, Any]]:
     return out
 
 
+async def fetch_redeemable_positions() -> list[dict[str, Any]]:
+    """Pending Redemption 상태 포지션 목록 (condition_id 포함).
+
+    data-api ?redeemable=true 를 먼저 시도하고, 결과가 없으면
+    전체 포지션에서 currentPrice ≥ 0.99 or ≤ 0.01 로 필터.
+    """
+    wallet = _wallet()
+    async with httpx.AsyncClient(timeout=_TIMEOUT) as cli:
+        r = await cli.get(
+            f"{_DATA_API}/positions",
+            params={"user": wallet, "redeemable": "true", "limit": 500},
+        )
+        r.raise_for_status()
+        data = r.json()
+    if not isinstance(data, list):
+        data = data.get("data", [])
+
+    # redeemable 파라미터가 무시되는 버전 대비: 가격으로 2차 필터
+    out = []
+    for p in data:
+        cid       = p.get("conditionId") or p.get("condition_id")
+        cur_price = float(p.get("currentPrice", 0) or p.get("price", 0) or 0)
+        size      = float(p.get("size", 0))
+        if not cid or size <= 0:
+            continue
+        if cur_price >= 0.99 or cur_price <= 0.01:
+            out.append({
+                "condition_id": cid,
+                "question":     (p.get("title") or p.get("question") or "")[:80],
+                "size":         round(size, 4),
+                "current_price": round(cur_price, 4),
+            })
+    return out
+
+
 async def fetch_portfolio_value() -> float:
     """data-api.polymarket.com/value — 오픈 포지션 총 평가액."""
     wallet = _wallet()

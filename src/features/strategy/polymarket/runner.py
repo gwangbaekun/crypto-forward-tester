@@ -20,7 +20,7 @@ from features.strategy.polymarket.late_convergence import engine as lc_engine
 from features.strategy.polymarket.pair_hedge       import engine as ph_engine
 from features.strategy.polymarket.bayesian_fomc    import engine as bf_engine
 from features.strategy.polymarket.log_config import configure_polymarket_logging
-from features.strategy.polymarket._data.executor import redeem_positions
+from features.strategy.polymarket._data.executor import redeem_positions, redeem_all_pending
 
 
 log = logging.getLogger("polymarket.runner")
@@ -45,6 +45,11 @@ async def _run_resolver() -> None:
     from db.session import get_session
     from db.models import PolymarketSignal
     from sqlalchemy import select
+
+    try:
+        await redeem_all_pending()
+    except Exception as e:
+        log.warning("[Resolver] redeem_all_pending error: %s", e)
 
     now_ts = int(datetime.now(UTC).timestamp())
     db = get_session()
