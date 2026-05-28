@@ -24,6 +24,7 @@ DEFAULT_EXCLUDE: frozenset[str] = frozenset({
     "Sports_Prop",
     "Weather",
     "Entertainment",
+    "Crypto",
     "Other",
 })
 
@@ -33,7 +34,6 @@ ALLOWED_SECTORS: frozenset[str] = frozenset({
     "Sports_Match",
     "Politics",
     "Economics",
-    "Crypto",
 })
 
 
