@@ -317,10 +317,9 @@ async def fetch_open_positions() -> list[dict[str, Any]]:
 
 
 async def fetch_redeemable_positions() -> list[dict[str, Any]]:
-    """Pending Redemption 상태 포지션 목록 (condition_id 포함).
+    """Pending Redemption 상태 포지션 목록.
 
-    data-api ?redeemable=true 를 먼저 시도하고, 결과가 없으면
-    전체 포지션에서 currentPrice ≥ 0.99 or ≤ 0.01 로 필터.
+    data-api ?redeemable=true 필터 사용. asset(token_id) 포함해 반환.
     """
     wallet = _wallet()
     async with httpx.AsyncClient(timeout=_TIMEOUT) as cli:
@@ -333,21 +332,21 @@ async def fetch_redeemable_positions() -> list[dict[str, Any]]:
     if not isinstance(data, list):
         data = data.get("data", [])
 
-    # redeemable 파라미터가 무시되는 버전 대비: 가격으로 2차 필터
     out = []
     for p in data:
-        cid       = p.get("conditionId") or p.get("condition_id")
-        cur_price = float(p.get("currentPrice", 0) or p.get("price", 0) or 0)
-        size      = float(p.get("size", 0))
-        if not cid or size <= 0:
+        token_id = p.get("asset")
+        size     = float(p.get("size", 0))
+        if not token_id or size <= 0:
             continue
-        if cur_price >= 0.99 or cur_price <= 0.01:
-            out.append({
-                "condition_id": cid,
-                "question":     (p.get("title") or p.get("question") or "")[:80],
-                "size":         round(size, 4),
-                "current_price": round(cur_price, 4),
-            })
+        if not p.get("redeemable"):
+            continue
+        out.append({
+            "token_id":     token_id,
+            "condition_id": p.get("conditionId"),
+            "question":     (p.get("title") or "")[:80],
+            "size":         round(size, 4),
+            "cur_price":    float(p.get("curPrice", 0) or 0),
+        })
     return out
 
 

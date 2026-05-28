@@ -72,9 +72,10 @@ async def _run_resolver() -> None:
                     continue
                 _apply_resolution(sig, outcome)
                 db.add(sig)
-                if sig.condition_id:
-                    redeem_result = await redeem_positions(sig.condition_id)
-                    log.info("[Resolver] redeem condition_id=%s result=%s", sig.condition_id[:12], redeem_result)
+                if sig.yes_token_id:
+                    token = sig.yes_token_id if (outcome == "YES") else (sig.no_token_id or sig.yes_token_id)
+                    redeem_result = await redeem_positions(token)
+                    log.info("[Resolver] redeem token=%s result=%s", token[:12], redeem_result)
             except Exception as e:
                 log.warning("[Resolver] signal id=%s error: %s", sig.id, e)
 

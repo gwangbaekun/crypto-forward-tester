@@ -142,88 +142,32 @@ async def place_order(
         return {"order_id": "", "status": "failed", "error": str(e)}
 
 
-# ── 온체인 포지션 청산 (CTF redeemPositions) ────────────────────────────────
+# ── CLOB gasless 포지션 청산 (MATIC 불필요) ─────────────────────────────────
 
-# Polygon mainnet CTF 컨트랙트
-_CTF_ADDRESS  = "0x4D97DCd97eC945f40cF65F87097ACe5EA0476045"
-_CTF_ABI = [{
-    "name": "redeemPositions",
-    "type": "function",
-    "inputs": [
-        {"name": "collateralToken",      "type": "address"},
-        {"name": "parentCollectionId",   "type": "bytes32"},
-        {"name": "conditionId",          "type": "bytes32"},
-        {"name": "indexSets",            "type": "uint256[]"},
-    ],
-    "outputs": [],
-    "stateMutability": "nonpayable",
-}]
+async def redeem_positions(token_id: str) -> dict[str, Any]:
+    """CLOB update_balance_allowance(CONDITIONAL) — gasless redeem.
 
-
-async def redeem_positions(condition_id: str) -> dict[str, Any]:
-    """Polygon CTF에서 settled condition 포지션 청산 (pUSD 회수).
-
-    YES(indexSet=1) + NO(indexSet=2) 동시 시도 — 보유하지 않은 쪽은 0 처리.
+    Polymarket V2 relayer가 처리. MATIC 가스비 불필요.
     POLYMARKET_LIVE=true + 유효 PK 없으면 skip.
     """
     if not is_live_mode():
-        log.info("[executor] POLYMARKET_LIVE!=true → redeem skip condition_id=%s", condition_id[:12])
+        log.info("[executor] POLYMARKET_LIVE!=true → redeem skip token_id=%s", token_id[:12])
         return {"ok": False, "error": "POLYMARKET_LIVE 비활성"}
 
-    pk = os.environ.get("POLYMARKET_PK", "").strip()
-
-    from features.strategy.polymarket._data.live import _PUSD_TOKEN, _POLYGON_RPCS
+    from py_clob_client_v2.clob_types import AssetType, BalanceAllowanceParams
 
     def _sync() -> dict[str, Any]:
-        from web3 import Web3
-        from eth_account import Account
-
-        cid_hex = condition_id.removeprefix("0x")
-        if len(cid_hex) != 64:
-            raise ValueError(f"condition_id 길이 오류: {len(cid_hex)} (64 expected)")
-        cid_bytes = bytes.fromhex(cid_hex)
-
-        for rpc in _POLYGON_RPCS:
-            try:
-                w3 = Web3(Web3.HTTPProvider(rpc, request_kwargs={"timeout": 20}))
-                if not w3.is_connected():
-                    continue
-                account = Account.from_key(pk)
-                ctf = w3.eth.contract(
-                    address=Web3.to_checksum_address(_CTF_ADDRESS),
-                    abi=_CTF_ABI,
-                )
-                tx = ctf.functions.redeemPositions(
-                    Web3.to_checksum_address(_PUSD_TOKEN),
-                    b"\x00" * 32,
-                    cid_bytes,
-                    [1, 2],
-                ).build_transaction({
-                    "from":     account.address,
-                    "nonce":    w3.eth.get_transaction_count(account.address, "pending"),
-                    "gas":      200_000,
-                    "gasPrice": w3.eth.gas_price,
-                    "chainId":  137,
-                })
-                signed  = account.sign_transaction(tx)
-                tx_hash = w3.eth.send_raw_transaction(signed.raw_transaction)
-                receipt = w3.eth.wait_for_transaction_receipt(tx_hash, timeout=60)
-                return {
-                    "ok":      receipt.status == 1,
-                    "tx_hash": tx_hash.hex(),
-                    "gas_used": receipt.gasUsed,
-                }
-            except Exception as e:
-                log.warning("[executor] redeem RPC=%s err=%s", rpc[:30], e)
-                continue
-        return {"ok": False, "error": "모든 RPC 실패"}
+        client = _get_clob_client()
+        params = BalanceAllowanceParams(asset_type=AssetType.CONDITIONAL, token_id=token_id)
+        resp = client.update_balance_allowance(params)
+        return {"ok": True, "raw": resp}
 
     try:
         result = await asyncio.to_thread(_sync)
-        log.info("[executor] redeem condition_id=%s result=%s", condition_id[:12], result)
+        log.info("[executor] redeem token_id=%s result=%s", token_id[:12], result)
         return result
     except Exception as e:
-        log.error("[executor] redeem 예외 condition_id=%s err=%s", condition_id[:12], e)
+        log.error("[executor] redeem 예외 token_id=%s err=%s", token_id[:12], e)
         return {"ok": False, "error": str(e)}
 
 
@@ -245,9 +189,9 @@ async def redeem_all_pending() -> list[dict[str, Any]]:
     log.info("[executor] redeem_all_pending: %d개 처리 시작", len(positions))
     results = []
     for pos in positions:
-        cid = pos["condition_id"]
-        result = await redeem_positions(cid)
-        entry = {"condition_id": cid, "question": pos["question"], **result}
+        token_id = pos["token_id"]
+        result = await redeem_positions(token_id)
+        entry = {"token_id": token_id, "question": pos["question"], **result}
         results.append(entry)
         log.info("[executor] redeemed %s → %s", pos["question"][:40], result)
     return results
