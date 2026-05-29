@@ -30,15 +30,12 @@ _RESOLVER_INTERVAL = 900   # 15분마다 미해소 시그널 체크
 
 async def _resolve_signals() -> None:
     """해소 시각이 지난 미해소 시그널을 체크해 PnL 기록."""
-    from db.session import get_session
-    from db.models import PolymarketSignal
-
     while True:
-        await asyncio.sleep(_RESOLVER_INTERVAL)
         try:
             await _run_resolver()
         except Exception as e:
             log.warning("[Resolver] loop error: %s", e)
+        await asyncio.sleep(_RESOLVER_INTERVAL)
 
 
 async def _run_resolver() -> None:
@@ -47,7 +44,11 @@ async def _run_resolver() -> None:
     from sqlalchemy import select
 
     try:
-        await redeem_all_pending()
+        redeemed = await redeem_all_pending()
+        if redeemed:
+            log.info("[Resolver] redeem_all_pending processed=%d", len(redeemed))
+        else:
+            log.info("[Resolver] redeem_all_pending processed=0")
     except Exception as e:
         log.warning("[Resolver] redeem_all_pending error: %s", e)
 

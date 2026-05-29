@@ -6,6 +6,7 @@
 """
 from __future__ import annotations
 
+import html as _html
 import os
 from typing import Any, Dict, List, Optional
 
@@ -96,7 +97,7 @@ def _fmt_entry(
         lines.append("")
         lines.append("<b>📋 Signal Conditions</b>")
         for r in reasons:
-            lines.append(f"  • {r}")
+            lines.append(f"  • {_html.escape(str(r))}")
     if synced is True:
         lines.append("")
         lines.append("Binance: ✅ Fill Confirmed")
