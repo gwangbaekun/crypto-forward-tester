@@ -211,6 +211,7 @@ async def _place_order_and_update(sig: lc_signal.LCSignal, row_id: int) -> None:
             row = _db.execute(select(PolymarketSignal).where(PolymarketSignal.id == row_id)).scalar_one_or_none()
             if row:
                 row.order_status = "skipped"
+                row.order_error  = f"dup: already {existing[0].order_status}"
                 _db.commit()
             return
     except Exception as e:
@@ -228,6 +229,7 @@ async def _place_order_and_update(sig: lc_signal.LCSignal, row_id: int) -> None:
         if row:
             row.poly_order_id = result.get("order_id") or ""
             row.order_status  = result.get("status", "failed")
+            row.order_error   = result.get("error") or ""
             db.commit()
     except Exception as e:
         db.rollback()

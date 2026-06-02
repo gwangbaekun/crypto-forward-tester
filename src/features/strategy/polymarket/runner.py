@@ -28,17 +28,17 @@ log = logging.getLogger("polymarket.runner")
 _RESOLVER_INTERVAL = 900   # 15분마다 미해소 시그널 체크
 
 
-async def _resolve_signals() -> None:
+async def _resolve_signals(ws_client) -> None:
     """해소 시각이 지난 미해소 시그널을 체크해 PnL 기록."""
     while True:
         try:
-            await _run_resolver()
+            await _run_resolver(ws_client)
         except Exception as e:
             log.warning("[Resolver] loop error: %s", e)
         await asyncio.sleep(_RESOLVER_INTERVAL)
 
 
-async def _run_resolver() -> None:
+async def _run_resolver(ws_client) -> None:
     from db.session import get_session
     from db.models import PolymarketSignal
     from sqlalchemy import select
@@ -46,7 +46,8 @@ async def _run_resolver() -> None:
     try:
         redeemed = await redeem_all_pending()
         if redeemed:
-            log.info("[Resolver] redeem_all_pending processed=%d", len(redeemed))
+            log.info("[Resolver] redeem_all_pending processed=%d → LC 즉시 재스캔", len(redeemed))
+            asyncio.create_task(lc_engine._refresh_and_scan(ws_client))
         else:
             log.info("[Resolver] redeem_all_pending processed=0")
     except Exception as e:
@@ -144,6 +145,6 @@ async def run_polymarket() -> None:
         lc_engine.run(ws_client),
         ph_engine.run(ws_client),
         bf_engine.run(),
-        _resolve_signals(),
+        _resolve_signals(ws_client),
         return_exceptions=True,
     )

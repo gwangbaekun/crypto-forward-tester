@@ -221,13 +221,19 @@ def _ensure_polymarket_signals_columns(engine) -> None:
         "actual_outcome": "ALTER TABLE polymarket_signals ADD COLUMN actual_outcome VARCHAR(8)",
         "actual_pnl":     "ALTER TABLE polymarket_signals ADD COLUMN actual_pnl FLOAT",
         "resolved_at":    "ALTER TABLE polymarket_signals ADD COLUMN resolved_at TIMESTAMP",
+        "order_error":    "ALTER TABLE polymarket_signals ADD COLUMN order_error VARCHAR(256)",
     }
     missing = [sql for col, sql in required.items() if col not in existing]
-    if not missing:
-        return
     with engine.begin() as conn:
         for sql in missing:
             conn.execute(text(sql))
+        # 기존 skipped/failed 레코드에 placeholder 채우기
+        conn.execute(text(
+            "UPDATE polymarket_signals"
+            " SET order_error = 'pre-error-logging'"
+            " WHERE order_status IN ('skipped', 'failed')"
+            "   AND (order_error IS NULL OR order_error = '')"
+        ))
 
 
 class ValueScanSnapshot(Base):
@@ -272,6 +278,7 @@ class PolymarketSignal(Base):
     # 실거래 주문 추적
     poly_order_id:  Mapped[Optional[str]]  = mapped_column(String(128), nullable=True)
     order_status:   Mapped[Optional[str]]  = mapped_column(String(16),  nullable=True)  # filled/failed/skipped
+    order_error:    Mapped[Optional[str]]  = mapped_column(String(256), nullable=True)
 
 
 class CTraderToken(Base):
