@@ -562,8 +562,13 @@ async function retryFailed() {
     const r = await fetch(`${BASE}/rotation/retry-failed`, { method: 'POST' });
     const d = await r.json();
     if (d.error) { alert('Error: ' + d.error); return; }
-    btn.textContent = `✓ ${d.matched}/${d.retried} matched`;
-    btn.style.color = d.matched > 0 ? 'var(--green)' : '#f0c040';
+    if (d.queued) {
+      btn.textContent = `✓ Queued #${d.job_id}`;
+      btn.style.color = 'var(--green)';
+    } else {
+      btn.textContent = `✓ ${d.matched}/${d.retried} matched`;
+      btn.style.color = d.matched > 0 ? 'var(--green)' : '#f0c040';
+    }
     await loadPendingOrders();
   } catch(e) {
     btn.textContent = '↺ Retry Failed';

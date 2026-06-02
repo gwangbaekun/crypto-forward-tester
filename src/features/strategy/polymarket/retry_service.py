@@ -14,14 +14,19 @@ log = logging.getLogger("polymarket.retry_service")
 
 async def retry_failed_orders_impl(max_rows: int = 500) -> dict[str, Any]:
     """failed/skipped 미해소 시그널 재주문 실행."""
-    from sqlalchemy import select
+    from sqlalchemy import select, or_
 
+    now_ts = int(datetime.now(UTC).timestamp())
     db = get_session()
     try:
         rows = db.execute(
             select(PolymarketSignal).where(
                 PolymarketSignal.is_resolved == 0,
                 PolymarketSignal.order_status.in_(["skipped", "failed"]),
+                or_(
+                    PolymarketSignal.event_end_ts.is_(None),
+                    PolymarketSignal.event_end_ts > now_ts,
+                ),
             ).limit(max_rows)
         ).scalars().all()
     finally:
