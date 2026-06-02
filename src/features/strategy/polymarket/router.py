@@ -881,72 +881,24 @@ async def retry_failed_orders() -> JSONResponse:
     다시 place_order 호출해 실제 주문 시도.
     """
     try:
-        from db.session import get_session
-        from db.models import PolymarketSignal
-        from sqlalchemy import select
-        from features.strategy.polymarket._data.executor import place_order, is_live_mode
+        from features.strategy.polymarket._data.executor import is_live_mode
+        from features.strategy.polymarket.retry_service import (
+            enqueue_retry_failed_job,
+            retry_failed_orders_impl,
+        )
 
         if not is_live_mode():
+            job_id = enqueue_retry_failed_job(source="railway_api")
             return JSONResponse(
-                {"error": "POLYMARKET_LIVE 비활성 환경에서는 retry-failed를 실행하지 않습니다."},
-                status_code=400,
+                {
+                    "queued": True,
+                    "job_id": job_id,
+                    "message": "POLYMARKET_LIVE 비활성 환경이므로 GCP worker 큐에 적재했습니다.",
+                }
             )
 
-        db = get_session()
-        try:
-            rows = db.execute(
-                select(PolymarketSignal).where(
-                    PolymarketSignal.is_resolved == 0,
-                    PolymarketSignal.order_status.in_(["skipped", "failed"]),
-                )
-            ).scalars().all()
-        finally:
-            db.close()
-
-        if not rows:
-            return JSONResponse({"retried": 0, "results": []})
-
-        # LC config — max_order_usd
-        try:
-            import yaml, pathlib
-            cfg_path = pathlib.Path(__file__).parent / "late_convergence" / "config.yaml"
-            cfg = yaml.safe_load(cfg_path.read_text())
-        except Exception:
-            cfg = {}
-
-        results = []
-        for row in rows:
-            token_id = row.yes_token_id if row.side == "YES" else row.no_token_id
-            entry_price = row.yes_price if row.side == "YES" else row.no_price
-            if not token_id or not entry_price:
-                results.append({"id": row.id, "status": "skipped", "error": "token_id or price missing"})
-                continue
-
-            result = await place_order(token_id, entry_price, max_usd=cfg.get("max_order_usd", 0.0))
-
-            db2 = get_session()
-            try:
-                r = db2.execute(select(PolymarketSignal).where(PolymarketSignal.id == row.id)).scalar_one_or_none()
-                if r:
-                    r.order_status = result.get("status", "failed")
-                    r.poly_order_id = result.get("order_id") or ""
-                    r.order_error = result.get("error") or ""
-                    db2.commit()
-            except Exception as e:
-                db2.rollback()
-            finally:
-                db2.close()
-
-            results.append({
-                "id":       row.id,
-                "question": (row.question or "")[:60],
-                "status":   result.get("status"),
-                "order_id": result.get("order_id"),
-                "error":    result.get("error"),
-            })
-
-        matched = sum(1 for r in results if r["status"] == "matched")
-        return JSONResponse({"retried": len(results), "matched": matched, "results": results})
+        result = await retry_failed_orders_impl()
+        return JSONResponse(result)
     except Exception as e:
         return JSONResponse({"error": str(e)}, status_code=500)
 

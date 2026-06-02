@@ -42,6 +42,14 @@ async def _run_resolver(ws_client) -> None:
     from db.session import get_session
     from db.models import PolymarketSignal
     from sqlalchemy import select
+    from features.strategy.polymarket.retry_service import process_pending_jobs
+
+    try:
+        processed = await process_pending_jobs(limit=5)
+        if processed:
+            log.info("[Resolver] processed pending polymarket jobs=%d", processed)
+    except Exception as e:
+        log.warning("[Resolver] process_pending_jobs error: %s", e)
 
     try:
         redeemed = await redeem_all_pending()

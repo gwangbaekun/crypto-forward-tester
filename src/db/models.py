@@ -281,6 +281,22 @@ class PolymarketSignal(Base):
     order_error:    Mapped[Optional[str]]  = mapped_column(String(256), nullable=True)
 
 
+class PolymarketJob(Base):
+    """Polymarket 비동기 작업 큐 (Railway enqueue -> GCP worker execute)."""
+
+    __tablename__ = "polymarket_jobs"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    job_type: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    status: Mapped[str] = mapped_column(String(16), nullable=False, default="pending", index=True)
+    payload: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    result: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    error: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.utcnow, index=True)
+    started_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    finished_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+
+
 class CTraderToken(Base):
     """cTrader OAuth tokens (singleton row, key='default')."""
 
