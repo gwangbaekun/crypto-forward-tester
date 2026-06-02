@@ -139,6 +139,7 @@ def _already_signaled(condition_id: str, side: str | None) -> bool:
             .where(
                 PolymarketSignal.condition_id == condition_id,
                 PolymarketSignal.is_resolved == 0,
+                PolymarketSignal.order_status.notin_(["failed", "skipped"]),
             )
         )
         if side:
