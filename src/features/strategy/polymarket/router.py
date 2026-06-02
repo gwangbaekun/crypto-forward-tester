@@ -56,30 +56,33 @@ async def analytics_dashboard():
 
 @router.get("/markets")
 async def markets() -> JSONResponse:
-    """현재 모니터링 중인 마켓 목록 (LC + PH 합산)."""
+    """현재 모니터링 중인 마켓 목록 — DB에서 읽음 (GCP 엔진이 upsert)."""
     try:
         import time
-        from features.strategy.polymarket.late_convergence.engine import get_markets as lc_markets
-        from features.strategy.polymarket.pair_hedge.engine import get_markets as ph_markets
+        from sqlalchemy import select
+        from db.session import get_session
+        from db.models import PolymarketLiveMarket
 
         now = time.time()
-        combined: dict[str, dict] = {}
-        for m in lc_markets().values():
-            combined[m.get("condition_id", "")] = m
-        for m in ph_markets().values():
-            combined[m.get("condition_id", "")] = m
+        db = get_session()
+        try:
+            rows = db.execute(select(PolymarketLiveMarket)).scalars().all()
+        finally:
+            db.close()
 
         result = []
-        for m in sorted(combined.values(), key=lambda x: x.get("end_ts") or 0):
-            end_ts = m.get("end_ts")
+        for m in sorted(rows, key=lambda x: x.end_ts or 0):
+            end_ts = m.end_ts
+            if end_ts and end_ts < now:
+                continue  # 이미 종료된 마켓 제외
             hours_left = (end_ts - now) / 3600 if end_ts else None
             result.append({
-                "condition_id": m.get("condition_id"),
-                "question":     m.get("question", "")[:120],
-                "slug":         m.get("slug"),
-                "yes_price":    m.get("yes_price"),
-                "no_price":     m.get("no_price"),
-                "volume_usd":   m.get("volume_usd"),
+                "condition_id": m.condition_id,
+                "question":     (m.question or "")[:120],
+                "slug":         m.slug,
+                "yes_price":    m.yes_price,
+                "no_price":     m.no_price,
+                "volume_usd":   m.volume_usd,
                 "hours_to_end": round(hours_left, 2) if hours_left is not None else None,
                 "end_ts":       end_ts,
             })
@@ -736,15 +739,20 @@ async def rotation_top_signals(
     skew_min: float = Query(0.80, description="dominant price 최솟값 (LC 기준 0.80)"),
     skew_max: float = Query(0.97, description="dominant price 최댓값 (완전 수렴 전, LC 기준 0.97)"),
 ) -> JSONResponse:
-    """LC 엔진 시그널을 직접 공급 — score = dominant_price / hours_left (고확률 × 단기 우선)."""
+    """Live Markets 직접 계산 (엔진/DB 비의존).
+
+    Railway가 요청 시점에 Gamma active markets를 조회해
+    skew/sector/expiry 기준으로 바로 상위 시그널을 반환한다.
+    """
     try:
-        from features.strategy.polymarket.late_convergence.engine import get_markets as lc_markets
+        from features.strategy.polymarket._data.client import fetch_by_expiry
         from features.strategy.polymarket.sectors import classify_sector, ALLOWED_SECTORS
 
         now_ts = time.time()
+        fetched = await fetch_by_expiry(max_hours=48, min_volume=5000)
 
         results = []
-        for m in lc_markets().values():
+        for m in fetched:
             end_ts = m.get("end_ts")
             if not end_ts:
                 continue

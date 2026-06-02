@@ -17,9 +17,40 @@ from features.strategy.polymarket._data import ws_client as ws
 from features.strategy.polymarket._data.ws_client import PriceLevel
 from features.strategy.polymarket.pair_hedge import signal as ph_signal
 from db.session import get_session
-from db.models import PolymarketSignal
+from db.models import PolymarketSignal, PolymarketLiveMarket
 
 log = logging.getLogger("polymarket.pair_hedge")
+
+
+def _upsert_live_markets(markets: list[dict], strategy: str) -> None:
+    from datetime import datetime
+    db = get_session()
+    try:
+        now = datetime.utcnow()
+        for m in markets:
+            cid = m.get("condition_id")
+            if not cid:
+                continue
+            row = db.get(PolymarketLiveMarket, cid)
+            if row is None:
+                row = PolymarketLiveMarket(condition_id=cid)
+                db.add(row)
+            row.strategy    = strategy
+            row.question    = m.get("question")
+            row.slug        = m.get("slug")
+            row.yes_price   = m.get("yes_price")
+            row.no_price    = m.get("no_price")
+            row.volume_usd  = m.get("volume_usd")
+            row.end_ts      = m.get("end_ts")
+            row.yes_token_id = m.get("yes_token_id")
+            row.no_token_id  = m.get("no_token_id")
+            row.updated_at  = now
+        db.commit()
+    except Exception as e:
+        db.rollback()
+        log.warning("[PH] live market upsert failed: %s", e)
+    finally:
+        db.close()
 
 _CFG_PATH = Path(__file__).parent / "config.yaml"
 _cfg: dict = {}
@@ -50,6 +81,7 @@ async def _refresh_and_scan(ws_client: ws.CLOBWSClient) -> None:
         for m in fetched:
             ws_client.add_tokens(m.get("yes_token_id"), m.get("no_token_id"))
         log.debug("[PH] markets refreshed: %d active", len(_markets))
+        _upsert_live_markets(list(_markets.values()), "ph")
     except Exception as e:
         log.warning("[PH] market refresh failed: %s", e)
         return

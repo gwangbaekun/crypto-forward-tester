@@ -297,6 +297,24 @@ class PolymarketJob(Base):
     finished_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
 
 
+class PolymarketLiveMarket(Base):
+    """GCP 엔진이 주기적으로 upsert하는 활성 마켓 캐시."""
+
+    __tablename__ = "polymarket_live_markets"
+
+    condition_id: Mapped[str]            = mapped_column(String(128), primary_key=True)
+    strategy:     Mapped[str]            = mapped_column(String(16),  nullable=False)
+    question:     Mapped[Optional[str]]  = mapped_column(String(512), nullable=True)
+    slug:         Mapped[Optional[str]]  = mapped_column(String(256), nullable=True)
+    yes_price:    Mapped[Optional[float]] = mapped_column(Float,       nullable=True)
+    no_price:     Mapped[Optional[float]] = mapped_column(Float,       nullable=True)
+    volume_usd:   Mapped[Optional[float]] = mapped_column(Float,       nullable=True)
+    end_ts:       Mapped[Optional[int]]  = mapped_column(Integer,      nullable=True)
+    yes_token_id: Mapped[Optional[str]]  = mapped_column(String(128), nullable=True)
+    no_token_id:  Mapped[Optional[str]]  = mapped_column(String(128), nullable=True)
+    updated_at:   Mapped[datetime]       = mapped_column(DateTime,     nullable=False, default=datetime.utcnow)
+
+
 class CTraderToken(Base):
     """cTrader OAuth tokens (singleton row, key='default')."""
 
