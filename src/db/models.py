@@ -230,6 +230,20 @@ def _ensure_polymarket_signals_columns(engine) -> None:
             conn.execute(text(sql))
 
 
+class ValueScanSnapshot(Base):
+    """스캔 결과 rows — date + market 기준으로 upsert."""
+
+    __tablename__ = "value_scan_snapshots"
+
+    id:         Mapped[int]      = mapped_column(Integer, primary_key=True, autoincrement=True)
+    date:       Mapped[str]      = mapped_column(String(10), nullable=False, index=True)
+    market:     Mapped[str]      = mapped_column(String(16), nullable=False, index=True)
+    rows_json:  Mapped[str]      = mapped_column(Text, nullable=False)
+    saved_at:   Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.utcnow)
+
+    __table_args__ = (UniqueConstraint("date", "market", name="uq_vs_snapshot_date_market"),)
+
+
 class PolymarketSignal(Base):
     """Polymarket 전략 시그널 로그."""
 

@@ -228,24 +228,37 @@ async def reset_all(wipe_files: bool = Query(True)):
 
 @router.get("/scan/results", response_class=JSONResponse)
 async def scan_results(market: str = Query("nasdaq", description="kospi | nasdaq")):
-    """저장된 최신 스캔 결과 rows (BUY/SELL/HOLD) — 재스캔 없이 읽기 전용."""
+    """저장된 최신 스캔 결과 rows — DB 우선, JSON 폴백."""
     from features.strategy.value_scan.cache import vs_cache
 
     def _load():
         import json as _json
         from features.strategy.value_scan.famous import position_is_famous
-        from features.strategy.value_scan.paths import SCANS_DIR
 
-        files = sorted(SCANS_DIR.glob(f"*_{market}.json"))
-        if not files:
-            return {"rows": [], "date": None, "market": market}
-        data = _json.loads(files[-1].read_text())
-        rows = data.get("rows", [])
-        for r in rows:
+        # 1) DB에서 최신 스냅샷 조회
+        try:
+            from features.strategy.value_scan.repository import load_latest_snapshot_from_db
+            data = load_latest_snapshot_from_db(market)
+        except Exception:
+            data = None
+
+        # 2) DB miss → JSON 폴백
+        if data is None:
+            from features.strategy.value_scan.paths import SCANS_DIR
+            files = sorted(SCANS_DIR.glob(f"*_{market}.json"))
+            if not files:
+                return {"rows": [], "date": None, "market": market, "source": "none"}
+            raw = _json.loads(files[-1].read_text())
+            data = {"rows": raw.get("rows", []), "date": raw.get("date"), "market": market}
+            data["source"] = "json"
+        else:
+            data["source"] = "db"
+
+        for r in data["rows"]:
             r["is_famous"] = position_is_famous(r)
-        return {"rows": rows, "date": data.get("date"), "market": market}
+        return data
 
-    return JSONResponse(vs_cache.get(f"scan_results_{market}", 3600, _load))
+    return JSONResponse(vs_cache.get(f"scan_results_{market}", 86400, _load))
 
 
 @router.get("/benchmark", response_class=JSONResponse)

@@ -141,6 +141,45 @@ def _fetch_sp500_universe() -> list[str]:
 
 # ── 펀더멘털 조회 ─────────────────────────────────────────────────────────────
 
+def _enrich_kospi_with_yfinance(symbol: str, base: dict) -> dict:
+    """yfinance .KS 로 quality/health/growth/sentiment 필드 보완."""
+    import yfinance as yf
+    try:
+        info = yf.Ticker(f"{symbol}.KS").info
+
+        def _f(v: Any) -> float:
+            return float(v) if v is not None else math.nan
+
+        def _fp(v: Any) -> float:
+            f = float(v) if v is not None else math.nan
+            return f * 100 if not math.isnan(f) else math.nan
+
+        cur_price = _f(info.get("currentPrice") or info.get("regularMarketPrice"))
+        target    = _f(info.get("targetMeanPrice"))
+
+        base.update({
+            "roe":          _fp(info.get("returnOnEquity")),
+            "roa":          _fp(info.get("returnOnAssets")),
+            "op_margin":    _fp(info.get("operatingMargins")),
+            "net_margin":   _fp(info.get("profitMargins")),
+            "d_e":          _f(info.get("debtToEquity")),
+            "current_ratio":_f(info.get("currentRatio")),
+            "fcf":          _f(info.get("freeCashflow")),
+            "rev_growth":   _fp(info.get("revenueGrowth")),
+            "eps_growth":   _fp(info.get("earningsGrowth")),
+            "ev_ebitda":    _f(info.get("enterpriseToEbitda")),
+            "analyst_rec":  _f(info.get("recommendationMean")),
+            "target_upside": (
+                round((target / cur_price - 1) * 100, 1)
+                if not math.isnan(target) and not math.isnan(cur_price) and cur_price > 0
+                else math.nan
+            ),
+        })
+    except Exception:
+        pass
+    return base
+
+
 def _fetch_kospi_fundamental(symbol: str, sector: str) -> Optional[dict[str, Any]]:
     try:
         req = _urllib_req.Request(
@@ -164,7 +203,7 @@ def _fetch_kospi_fundamental(symbol: str, sector: str) -> Optional[dict[str, Any
         if any(math.isnan(v) for v in [per, pbr]):
             return None
 
-        return {
+        base = {
             "symbol": symbol, "name": data.get("stockName") or symbol,
             "market": "kospi", "sector": sector,
             "eps": _f(info.get("eps", "")), "bps": _f(info.get("bps", "")),
@@ -173,6 +212,7 @@ def _fetch_kospi_fundamental(symbol: str, sector: str) -> Optional[dict[str, Any
             "forward_eps": _f(info.get("cnsEps", "")),
             "div": _f(info.get("dividendYieldRatio", "")),
         }
+        return _enrich_kospi_with_yfinance(symbol, base)
     except Exception:
         return None
 
@@ -187,22 +227,200 @@ def _fetch_nasdaq_fundamental(symbol: str) -> Optional[dict[str, Any]]:
         def _f(v: Any) -> float:
             return float(v) if v is not None else math.nan
 
+        def _fp(v: Any) -> float:
+            f = float(v) if v is not None else math.nan
+            return f * 100 if not math.isnan(f) else math.nan
+
         per = _f(info.get("trailingPE"))
         pbr = _f(info.get("priceToBook"))
         if math.isnan(per) and math.isnan(pbr):
             return None
 
+        cur_price = _f(info.get("currentPrice") or info.get("regularMarketPrice"))
+        target    = _f(info.get("targetMeanPrice"))
+        target_upside = (
+            round((target / cur_price - 1) * 100, 1)
+            if not math.isnan(target) and not math.isnan(cur_price) and cur_price > 0
+            else math.nan
+        )
+
         return {
             "symbol": symbol, "name": info.get("shortName") or info.get("longName") or symbol,
             "market": "nasdaq", "sector": info.get("sector") or "Other",
+            # base valuation
             "eps": _f(info.get("trailingEps")), "bps": _f(info.get("bookValue")),
             "per": per, "pbr": pbr,
             "forward_eps": _f(info.get("forwardEps")),
             "forward_per": _f(info.get("forwardPE")),
-            "div": _f(info.get("dividendYield", math.nan)) * 100 if info.get("dividendYield") else math.nan,
+            "div": _fp(info.get("dividendYield")) if info.get("dividendYield") else math.nan,
+            "ev_ebitda": _f(info.get("enterpriseToEbitda")),
+            # quality
+            "roe": _fp(info.get("returnOnEquity")),
+            "roa": _fp(info.get("returnOnAssets")),
+            "op_margin": _fp(info.get("operatingMargins")),
+            "net_margin": _fp(info.get("profitMargins")),
+            # health
+            "d_e": _f(info.get("debtToEquity")),
+            "current_ratio": _f(info.get("currentRatio")),
+            "fcf": _f(info.get("freeCashflow")),
+            # growth
+            "rev_growth": _fp(info.get("revenueGrowth")),
+            "eps_growth": _fp(info.get("earningsGrowth")),
+            # sentiment
+            "analyst_rec": _f(info.get("recommendationMean")),
+            "target_upside": target_upside,
         }
     except Exception:
         return None
+
+
+def _score_stock(r: dict, sector_med: dict) -> dict:
+    return _score_nasdaq(r, sector_med)
+
+
+def _score_nasdaq(r: dict, sector_med: dict) -> dict:
+    """5-factor composite score 0-100 for a NASDAQ stock."""
+
+    def _v(key: str) -> float:
+        v = r.get(key)
+        return math.nan if v is None else float(v)
+
+    def ok(v: float) -> bool:
+        return not math.isnan(v)
+
+    # ── Valuation (30 pts) ────────────────────────────────────────────────────
+    val = 0
+    per = _v("per")
+    med = sector_med.get(r["sector"], math.nan)
+    if ok(per) and per > 0 and ok(med) and med > 0:
+        ratio = per / med
+        if   ratio <= 0.45: val += 15
+        elif ratio <= 0.65: val += 11
+        elif ratio <= 0.85: val += 7
+        elif ratio <= 1.00: val += 3
+        elif ratio <= 1.20: val += 1
+
+    ev_ebitda = _v("ev_ebitda")
+    if ok(ev_ebitda) and ev_ebitda > 0:
+        if   ev_ebitda < 8:  val += 9
+        elif ev_ebitda < 12: val += 6
+        elif ev_ebitda < 18: val += 3
+        elif ev_ebitda < 25: val += 1
+
+    eps_g    = _v("eps_growth")
+    fwd_per  = _v("forward_per")
+    if ok(fwd_per) and fwd_per > 0 and ok(eps_g) and eps_g > 0:
+        peg = fwd_per / eps_g
+        if   peg < 0.8: val += 6
+        elif peg < 1.2: val += 4
+        elif peg < 1.8: val += 2
+
+    val_score = min(val, 30)
+
+    # ── Quality (30 pts) ──────────────────────────────────────────────────────
+    qual = 0
+    roe = _v("roe")
+    if ok(roe):
+        if   roe >= 30: qual += 12
+        elif roe >= 20: qual += 9
+        elif roe >= 12: qual += 6
+        elif roe >= 5:  qual += 2
+
+    op_margin = _v("op_margin")
+    if ok(op_margin):
+        if   op_margin >= 35: qual += 10
+        elif op_margin >= 20: qual += 7
+        elif op_margin >= 10: qual += 4
+        elif op_margin >= 0:  qual += 1
+
+    roa = _v("roa")
+    if ok(roa):
+        if   roa >= 15: qual += 8
+        elif roa >= 8:  qual += 5
+        elif roa >= 0:  qual += 2
+
+    qual_score = min(qual, 30)
+
+    # ── Health (20 pts) ───────────────────────────────────────────────────────
+    health = 0
+    de = _v("d_e")
+    if ok(de):
+        if   de < 0:   health += 10
+        elif de < 30:  health += 10
+        elif de < 80:  health += 7
+        elif de < 150: health += 3
+    else:
+        health += 4
+
+    cr = _v("current_ratio")
+    if ok(cr):
+        if   cr >= 3.0: health += 6
+        elif cr >= 2.0: health += 5
+        elif cr >= 1.5: health += 3
+        elif cr >= 1.0: health += 1
+
+    fcf = _v("fcf")
+    if ok(fcf):
+        health += 4 if fcf > 0 else 0
+
+    health_score = min(health, 20)
+
+    # ── Growth (15 pts) ───────────────────────────────────────────────────────
+    growth = 0
+    rev_g = _v("rev_growth")
+    if ok(rev_g):
+        if   rev_g >= 25: growth += 8
+        elif rev_g >= 15: growth += 6
+        elif rev_g >= 5:  growth += 3
+        elif rev_g >= 0:  growth += 1
+
+    if ok(eps_g):
+        if   eps_g >= 25: growth += 7
+        elif eps_g >= 15: growth += 5
+        elif eps_g >= 5:  growth += 2
+
+    growth_score = min(growth, 15)
+
+    # ── Sentiment (5 pts) ─────────────────────────────────────────────────────
+    rec = _v("analyst_rec")
+    if ok(rec) and rec > 0:
+        if   rec <= 1.5: sent_score = 5
+        elif rec <= 2.0: sent_score = 4
+        elif rec <= 2.5: sent_score = 3
+        elif rec <= 3.0: sent_score = 1
+        else:            sent_score = 0
+    else:
+        sent_score = 0
+
+    composite = val_score + qual_score + health_score + growth_score + sent_score
+
+    return {
+        "score":           composite,
+        "score_valuation": val_score,
+        "score_quality":   qual_score,
+        "score_health":    health_score,
+        "score_growth":    growth_score,
+        "score_sentiment": sent_score,
+    }
+
+
+def _rate_nasdaq_by_score(r: dict) -> str:
+    score  = r.get("score", 0) or 0
+    qual   = r.get("score_quality", 0) or 0
+    health = r.get("score_health", 0) or 0
+    de     = r.get("d_e", math.nan)
+    roe    = r.get("roe", math.nan)
+
+    if not math.isnan(de) and de > 400:
+        return "SELL"
+    if not math.isnan(roe) and roe < -15:
+        return "SELL"
+
+    if score >= 65 and qual >= 14 and health >= 8:
+        return "BUY"
+    if score <= 28 or health <= 4:
+        return "SELL"
+    return "HOLD"
 
 
 # ── 섹터 중앙값 + 판정 ─────────────────────────────────────────────────────────
@@ -314,7 +532,8 @@ def run_scan(market: str, max_workers: int = 10) -> list[dict]:
     sec_med = _sector_medians(rows)
     for r in rows:
         r["sector_median"] = sec_med.get(r["sector"], math.nan)
-        r["rating"] = _rate(r, sec_med)
+        r.update(_score_stock(r, sec_med))
+        r["rating"] = _rate_nasdaq_by_score(r)
     return rows
 
 
@@ -471,12 +690,23 @@ def update_positions(
 
 
 def save_snapshot(today: str, market: str, rows: list[dict]) -> None:
+    clean = [_clean_row(r) for r in rows]
+
+    # JSON 백업 (기존)
     SCANS_DIR.mkdir(parents=True, exist_ok=True)
     path = SCANS_DIR / f"{today}_{market}.json"
     path.write_text(json.dumps(
-        {"date": today, "market": market, "rows": [_clean_row(r) for r in rows]},
+        {"date": today, "market": market, "rows": clean},
         ensure_ascii=False, indent=2,
     ))
+
+    # DB upsert (영속)
+    try:
+        from features.strategy.value_scan.repository import save_snapshot_to_db
+        save_snapshot_to_db(today, market, clean)
+    except Exception as e:
+        import logging
+        logging.getLogger(__name__).warning("save_snapshot DB upsert failed: %s", e)
 
 
 # ── 엔트리포인트 ──────────────────────────────────────────────────────────────

@@ -14,6 +14,7 @@ from db.models import (
     ValueScanLot,
     ValueScanMarketMeta,
     ValueScanPosition,
+    ValueScanSnapshot,
 )
 from db.session import get_session
 from features.strategy.value_scan.paths import (
@@ -363,3 +364,33 @@ def ensure_migrated_from_json_if_needed() -> Optional[dict]:
     if not POSITIONS_FILE.exists() and not HISTORY_FILE.exists():
         return None
     return migrate_json_files_to_db(archive=True)
+
+
+# ── Scan Snapshot (DB) ────────────────────────────────────────────────────────
+
+def save_snapshot_to_db(date: str, market: str, rows: list[dict]) -> None:
+    """스캔 결과를 DB에 upsert (date+market 기준)."""
+    from datetime import datetime as _dt
+    rows_json = json.dumps(rows, ensure_ascii=False)
+    with get_session() as s:
+        existing = s.query(ValueScanSnapshot).filter_by(date=date, market=market).first()
+        if existing:
+            existing.rows_json = rows_json
+            existing.saved_at  = _dt.utcnow()
+        else:
+            s.add(ValueScanSnapshot(date=date, market=market, rows_json=rows_json))
+        s.commit()
+
+
+def load_latest_snapshot_from_db(market: str) -> Optional[dict]:
+    """DB에서 해당 market의 최신 스캔 결과 반환. 없으면 None."""
+    with get_session() as s:
+        row = (
+            s.query(ValueScanSnapshot)
+            .filter_by(market=market)
+            .order_by(ValueScanSnapshot.date.desc(), ValueScanSnapshot.saved_at.desc())
+            .first()
+        )
+        if row is None:
+            return None
+        return {"date": row.date, "market": market, "rows": json.loads(row.rows_json)}
