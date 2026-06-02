@@ -1,7 +1,6 @@
 # pyright: reportMissingImports=false
 import asyncio
 import logging
-import os
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from pathlib import Path
@@ -20,15 +19,6 @@ class _AccessLogFilter(logging.Filter):
         return not any(p in msg for p in _MUTE_PATHS)
 
 logging.getLogger("uvicorn.access").addFilter(_AccessLogFilter())
-
-
-def _polymarket_runner_enabled() -> bool:
-    """API 서버에서 Polymarket runner 실행 여부.
-
-    기본값 false: Railway 같은 웹 서버에서는 주문 실행을 막고,
-    전용 GCP worker(polymarket_worker.main)에서만 주문을 처리한다.
-    """
-    return os.environ.get("POLYMARKET_RUNNER_ENABLED", "false").strip().lower() == "true"
 
 from common.binance_price_ws import BinancePriceWS
 from db.session import init_db
@@ -167,15 +157,12 @@ async def lifespan(_app: FastAPI):
         print(f"[StrategyLoop] startup skipped: {exc}")
         strategy_task = None
 
-    polymarket_task = None
-    if _polymarket_runner_enabled():
-        try:
-            from features.strategy.polymarket.runner import run_polymarket
-            polymarket_task = asyncio.create_task(run_polymarket())
-        except Exception as exc:
-            print(f"[Polymarket] startup skipped: {exc}")
-    else:
-        print("[Polymarket] runner disabled on API process (set POLYMARKET_RUNNER_ENABLED=true to enable)")
+    try:
+        from features.strategy.polymarket.runner import run_polymarket
+        polymarket_task = asyncio.create_task(run_polymarket())
+    except Exception as exc:
+        print(f"[Polymarket] startup skipped: {exc}")
+        polymarket_task = None
 
     scan_task = asyncio.create_task(_value_scan_scheduler())
     yield
