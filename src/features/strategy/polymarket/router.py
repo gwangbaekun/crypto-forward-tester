@@ -884,7 +884,13 @@ async def retry_failed_orders() -> JSONResponse:
         from db.session import get_session
         from db.models import PolymarketSignal
         from sqlalchemy import select
-        from features.strategy.polymarket._data.executor import place_order
+        from features.strategy.polymarket._data.executor import place_order, is_live_mode
+
+        if not is_live_mode():
+            return JSONResponse(
+                {"error": "POLYMARKET_LIVE 비활성 환경에서는 retry-failed를 실행하지 않습니다."},
+                status_code=400,
+            )
 
         db = get_session()
         try:

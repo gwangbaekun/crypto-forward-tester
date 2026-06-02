@@ -187,8 +187,8 @@ def _save_signal(sig: lc_signal.LCSignal) -> int | None:
 
 async def _place_order_and_update(sig: lc_signal.LCSignal, row_id: int) -> None:
     """실거래 주문 후 DB 업데이트. POLYMARKET_PK 없으면 skip."""
-    from features.strategy.polymarket._data.live import _has_pk, _pk_valid
-    if not (_has_pk() and _pk_valid()):
+    from features.strategy.polymarket._data.executor import is_live_mode
+    if not is_live_mode():
         return  # 유효 PK 없으면 시뮬 모드
 
     from features.strategy.polymarket._data.executor import place_order

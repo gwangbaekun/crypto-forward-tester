@@ -136,6 +136,10 @@ def _apply_resolution(sig, outcome: str) -> None:
 
 async def run_polymarket() -> None:
     configure_polymarket_logging()
+    from features.strategy.polymarket._data.executor import is_live_mode
+    if not is_live_mode():
+        log.warning("POLYMARKET_LIVE 비활성 — run_polymarket 전체 루프 skip")
+        return
     log.debug("runner started (LC + PH + BF + Resolver)")
 
     ws_client = CLOBWSClient()

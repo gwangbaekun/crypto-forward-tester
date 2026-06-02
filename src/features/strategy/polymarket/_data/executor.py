@@ -21,6 +21,7 @@ import asyncio
 import logging
 import math
 import os
+import re
 from typing import Any
 
 from features.strategy.polymarket._data.live import _get_clob_client, _has_pk, _pk_valid
@@ -38,6 +39,8 @@ _LIVE_ENABLED = os.environ.get("POLYMARKET_LIVE", "false").strip().lower() == "t
 # shares × price ≥ $1.02 (2% 마진) 만족하는 최솟값으로 자동 계산
 _MIN_USD_MARGIN = 1.02  # rounding 여유 2 %
 
+_MIN_SIZE_RE = re.compile(r"minimum:\s*([0-9]+(?:\.[0-9]+)?)", re.IGNORECASE)
+
 
 def _min_order(price: float) -> tuple[float, float]:
     """V2 정책을 만족하는 최소 (shares, usd).
@@ -51,6 +54,19 @@ def _min_order(price: float) -> tuple[float, float]:
     # 소수 2자리 올림 (ceil at 2dp)
     shares = math.ceil(shares_raw * 100) / 100
     return shares, round(shares * price, 4)
+
+
+def _extract_minimum_size(error_text: str) -> float | None:
+    """주문 실패 메시지에서 'minimum: N' 형태의 최소 shares 파싱."""
+    if not error_text:
+        return None
+    m = _MIN_SIZE_RE.search(error_text)
+    if not m:
+        return None
+    try:
+        return float(m.group(1))
+    except (TypeError, ValueError):
+        return None
 
 
 def is_live_mode() -> bool:
@@ -134,8 +150,21 @@ async def place_order(
         )
         return {"order_id": order_id, "status": status, "raw": resp, "shares": shares, "usd": effective_usd}
     except Exception as e:
-        log.error("[executor] 주문 실패 token=%s err=%s", token_id[:12], e)
-        return {"order_id": "", "status": "failed", "error": str(e)}
+        err_text = str(e)
+        min_size = _extract_minimum_size(err_text)
+        if min_size is not None:
+            log.error(
+                "[executor] 주문 실패 token=%s err=%s | parsed_min_size=%.4f requested_shares=%.2f",
+                token_id[:12], err_text, min_size, shares,
+            )
+        else:
+            log.error("[executor] 주문 실패 token=%s err=%s", token_id[:12], err_text)
+        return {
+            "order_id": "",
+            "status": "failed",
+            "error": err_text,
+            "parsed_min_size": min_size,
+        }
 
 
 # ── CLOB gasless 포지션 청산 (MATIC 불필요) ─────────────────────────────────
