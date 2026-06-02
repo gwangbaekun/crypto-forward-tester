@@ -110,6 +110,11 @@ def _check_market_rest(cid: str, market: dict) -> None:
         return
     _last_signal_ts[cid] = time.time()
 
+    # DB 레벨 중복 차단: 동일 condition_id+side로 이미 활성 시그널 있으면 skip
+    # (서버 재시작으로 in-memory 쿨다운이 리셋돼도 DB가 막아줌)
+    if _already_signaled(cid, sig.side if sig else None):
+        return
+
     log.debug(
         "[LC] SIGNAL %s | %s | price=%.3f roi=+%.1f%% | %.1fh left | $%.0f vol",
         sig.side, sig.question[:50], sig.entry_price, sig.expected_roi * 100,
@@ -118,6 +123,32 @@ def _check_market_rest(cid: str, market: dict) -> None:
     row_id = _save_signal(sig)
     if row_id:
         asyncio.create_task(_place_order_and_update(sig, row_id))
+
+
+def _already_signaled(condition_id: str, side: str | None) -> bool:
+    """동일 condition_id+side로 이미 unresolved 시그널이 있으면 True.
+
+    서버 재시작으로 in-memory 쿨다운이 리셋돼도 DB로 중복 발화 차단.
+    resolved=1(이미 종료)된 건 무시 → 마켓이 종료 후 새 라운드 시작 시 재진입 허용.
+    """
+    from sqlalchemy import select as sa_select
+    db = get_session()
+    try:
+        stmt = (
+            sa_select(PolymarketSignal)
+            .where(
+                PolymarketSignal.condition_id == condition_id,
+                PolymarketSignal.is_resolved == 0,
+            )
+        )
+        if side:
+            stmt = stmt.where(PolymarketSignal.side == side)
+        return db.execute(stmt).first() is not None
+    except Exception as e:
+        log.warning("[LC] _already_signaled check failed: %s", e)
+        return False
+    finally:
+        db.close()
 
 
 def _save_signal(sig: lc_signal.LCSignal) -> int | None:

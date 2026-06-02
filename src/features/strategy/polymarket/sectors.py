@@ -29,8 +29,9 @@ DEFAULT_EXCLUDE: frozenset[str] = frozenset({
 })
 
 # 진입 허용 섹터 — 엔진·rotation 화이트리스트
+# Esports_Match 제거 (78.6% WR, -3.69 pnl), Esports_Prop 추가 (91.8% WR, +7.24 pnl)
 ALLOWED_SECTORS: frozenset[str] = frozenset({
-    "Esports_Match",
+    "Esports_Prop",
     "Sports_Match",
     "Politics",
     "Economics",
@@ -45,8 +46,9 @@ class _Rule(NamedTuple):
 # 위에서 아래로 우선 매칭
 _RULES: list[_Rule] = [
     _Rule("Esports_Prop", [
-        r"game \d+:",
-        r"\bmap \d+:",
+        r"game \d+",       # "Game 3 Winner", "Game 3:" 등 — 특정 게임 단위 prop
+        r"\bmap \d+",      # "Map 2 Winner", "Map 2:" 등 — 특정 맵 단위 prop
+        r"\bmap handicap", # "Map Handicap: ..." — 핸디캡 prop
         r"baron nashor",
         r"\broshan\b",
         r"\binhibitor",

@@ -732,24 +732,18 @@ def _sector(question: str) -> str:
 @router.get("/rotation/top-signals")
 async def rotation_top_signals(
     limit: int = Query(200),
-    skew_min: float = Query(0.0, description="한쪽 편중 최솟값 (0=전체, 0.85=85¢+만)"),
+    skew_min: float = Query(0.80, description="dominant price 최솟값 (LC 기준 0.80)"),
+    skew_max: float = Query(0.97, description="dominant price 최댓값 (완전 수렴 전, LC 기준 0.97)"),
 ) -> JSONResponse:
-    """라이브 마켓 — 허용 섹터(whitelist)만, 끝나는 시간 오름차순."""
+    """LC 엔진 시그널을 직접 공급 — score = dominant_price / hours_left (고확률 × 단기 우선)."""
     try:
         from features.strategy.polymarket.late_convergence.engine import get_markets as lc_markets
-        from features.strategy.polymarket.pair_hedge.engine import get_markets as ph_markets
         from features.strategy.polymarket.sectors import classify_sector, ALLOWED_SECTORS
 
         now_ts = time.time()
 
-        combined: dict[str, dict] = {}
-        for m in lc_markets().values():
-            combined[m.get("condition_id", "")] = m
-        for m in ph_markets().values():
-            combined[m.get("condition_id", "")] = m
-
         results = []
-        for m in combined.values():
+        for m in lc_markets().values():
             end_ts = m.get("end_ts")
             if not end_ts:
                 continue
@@ -765,16 +759,17 @@ async def rotation_top_signals(
             dominant_price = max(yes_p, no_p)
             dominant_side  = "YES" if yes_p >= no_p else "NO"
 
-            if skew_min > 0 and dominant_price < skew_min:
+            if dominant_price < skew_min or dominant_price > skew_max:
                 continue
 
             sec = classify_sector(m.get("question") or "")
             if sec not in ALLOWED_SECTORS:
                 continue
 
-            days_left    = hours_left / 24
+            # score: 고확률 × 단기 → 자본 회전 속도 최대화
+            # 95% @ 1h = 0.95, 80% @ 2h = 0.40, 95% @ 24h = 0.0396
+            score        = dominant_price / max(hours_left, 0.1)
             expected_roi = (1 - dominant_price) / dominant_price
-            score        = expected_roi / max(days_left, 1 / 24)
 
             results.append({
                 "condition_id":   m.get("condition_id"),
@@ -790,12 +785,13 @@ async def rotation_top_signals(
                 "volume_usd":     m.get("volume_usd"),
             })
 
-        results.sort(key=lambda x: x["hours_left"])
+        results.sort(key=lambda x: x["score"], reverse=True)
         return JSONResponse({
-            "markets":         results[:limit],
-            "total":           len(results),
-            "allow_sectors":   sorted(ALLOWED_SECTORS),
-            "skew_min":        skew_min,
+            "markets":       results[:limit],
+            "total":         len(results),
+            "allow_sectors": sorted(ALLOWED_SECTORS),
+            "skew_min":      skew_min,
+            "skew_max":      skew_max,
         })
     except Exception as e:
         return JSONResponse({"error": str(e)}, status_code=500)
@@ -805,7 +801,21 @@ async def rotation_top_signals(
 async def rotation_wallet(
     since: str | None = Query(None, description="YYYY-MM-DD (resolved_at 기준)"),
 ) -> JSONResponse:
-    """$100 시작, 시그널당 $1 고정 베팅 복리 시뮬."""
+    """실제 체결된 시그널(matched/live/delayed/failed)만으로 $100 시작 복리 시뮬.
+
+    skipped/pending/NULL order_status는 제외 — 실제 LC 엔진이 실행한 것만 반영.
+    베팅 단위: shares×price ≥ $1.02 (V2 최솟값).
+    """
+    import math
+
+    _EXECUTED = {"matched", "live", "delayed", "failed"}
+
+    def _bet_usd(entry_price: float) -> float:
+        if not entry_price or entry_price <= 0:
+            return 1.02
+        shares = math.ceil(1.02 / entry_price * 100) / 100
+        return round(shares * entry_price, 4)
+
     try:
         from db.session import get_session
         from db.models import PolymarketSignal
@@ -820,6 +830,7 @@ async def rotation_wallet(
                     PolymarketSignal.is_resolved == 1,
                     PolymarketSignal.actual_pnl.isnot(None),
                     PolymarketSignal.strategy == "late_convergence",
+                    PolymarketSignal.order_status.in_(list(_EXECUTED)),
                 )
                 .order_by(PolymarketSignal.resolved_at)
             )
@@ -839,7 +850,9 @@ async def rotation_wallet(
         for day, group in groupby(rows, key=day_key):
             batch = list(group)
             for r in batch:
-                wallet += 1.0 * r.actual_pnl  # 시그널당 $1 고정
+                entry = (r.yes_price if r.side == "YES" else r.no_price) or 0.9
+                bet = _bet_usd(entry)
+                wallet += bet * r.actual_pnl
             curve.append({
                 "date":   str(day),
                 "wallet": round(wallet, 4),
@@ -851,8 +864,9 @@ async def rotation_wallet(
             "initial":               100.0,
             "current_wallet":        round(wallet, 4),
             "total_pct":             round(total_pct, 2),
-            "recommended_positions": max(1, int(wallet)),
+            "recommended_positions": max(1, int(wallet / 1.02)),
             "curve":                 curve,
+            "note":                  f"executed signals only (matched/live/delayed/failed), total={len(rows)}",
         })
     except Exception as e:
         return JSONResponse({"error": str(e)}, status_code=500)
