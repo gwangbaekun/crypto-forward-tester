@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 from datetime import datetime, UTC
@@ -52,6 +53,7 @@ async def retry_failed_orders_impl(max_rows: int = 500) -> dict[str, Any]:
             continue
 
         result = await place_order(token_id, entry_price, max_usd=cfg.get("max_order_usd", 0.0))
+        await asyncio.sleep(0.5)
 
         db2 = get_session()
         try:

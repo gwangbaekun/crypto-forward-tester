@@ -154,16 +154,49 @@ async def place_order(
         min_size = _extract_minimum_size(err_text)
         if min_size is not None:
             log.error(
-                "[executor] 주문 실패 token=%s err=%s | parsed_min_size=%.4f requested_shares=%.2f",
+                "[executor] 주문 실패 token=%s err=%s | parsed_min_size=%.4f requested_shares=%.2f — minimum size로 재시도",
                 token_id[:12], err_text, min_size, shares,
             )
+            corrected_shares = math.ceil(min_size * 100) / 100
+            corrected_usd    = round(corrected_shares * price, 4)
+            if max_usd > 0 and corrected_usd > max_usd:
+                return {
+                    "order_id": "",
+                    "status": "skipped",
+                    "error": f"min_cost ${corrected_usd:.2f} > max ${max_usd:.2f} (minimum size={min_size})",
+                }
+
+            def _sync_retry() -> dict[str, Any]:
+                client = _get_clob_client()
+                return client.create_and_post_order(
+                    order_args = OrderArgs(
+                        token_id = token_id,
+                        price    = round(price, 4),
+                        size     = corrected_shares,
+                        side     = Side.BUY,
+                    ),
+                    options    = PartialCreateOrderOptions(tick_size=_TICK_SIZE),
+                    order_type = OrderType.GTC,
+                )
+
+            try:
+                resp2    = await asyncio.to_thread(_sync_retry)
+                order_id = resp2.get("orderID") or resp2.get("orderId") or resp2.get("id") or ""
+                status   = resp2.get("status", "live")
+                log.info(
+                    "[executor] BUY retry(min_size=%.2f) token=%s order_id=%s status=%s",
+                    corrected_shares, token_id[:12], order_id, status,
+                )
+                return {"order_id": order_id, "status": status, "raw": resp2, "shares": corrected_shares, "usd": corrected_usd}
+            except Exception as e2:
+                log.error("[executor] 재시도도 실패 token=%s err=%s", token_id[:12], e2)
+                return {"order_id": "", "status": "failed", "error": str(e2), "parsed_min_size": min_size}
         else:
             log.error("[executor] 주문 실패 token=%s err=%s", token_id[:12], err_text)
         return {
             "order_id": "",
             "status": "failed",
             "error": err_text,
-            "parsed_min_size": min_size,
         }
 
 
