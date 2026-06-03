@@ -281,8 +281,11 @@ async def fetch_open_positions() -> list[dict[str, Any]]:
     for p in data:
         size       = float(p.get("size",         0))
         avg_price  = float(p.get("avgPrice",      0) or p.get("avgCost",      0) or 0)
-        cur_price  = float(p.get("currentPrice",  0) or p.get("price",        0) or 0)
+        cur_price  = float(
+            p.get("currentPrice", 0) or p.get("curPrice", 0) or p.get("price", 0) or 0
+        )
         cur_value  = float(p.get("currentValue",  0) or 0)
+        redeemable = bool(p.get("redeemable"))
         init_val   = float(p.get("initialValue",  0) or size * avg_price)
         unrealized = cur_value - init_val if cur_value else None
 
@@ -312,6 +315,7 @@ async def fetch_open_positions() -> list[dict[str, Any]]:
             "unrealized_pnl": round(unrealized, 4) if unrealized is not None else None,
             "end_ts":         end_ts,
             "hours_left":     hours_left,
+            "redeemable":     redeemable,
         })
     return out
 

@@ -320,10 +320,9 @@ async function loadLiveWallet() {
 }
 
 function renderPositions(positions) {
-  const active   = positions.filter(p => p.hours_left == null || p.hours_left > 0);
-  // resolved + cur_value > 0 → pending redemption (won, waiting for payout)
-  // resolved + cur_value == 0 → already lost, skip from view (shown in TX history)
-  const resolved = positions.filter(p => p.hours_left != null && p.hours_left <= 0 && (p.current_value || 0) > 0);
+  // redeemable=true → on-chain resolved, USDC redeem 가능 (실제 pending redemption)
+  const active   = positions.filter(p => !p.redeemable);
+  const resolved = positions.filter(p => p.redeemable && (p.current_value || 0) > 0);
 
   // Active positions
   const tbody = document.getElementById('positions-tbody');
@@ -338,7 +337,9 @@ function renderPositions(positions) {
         : '—';
       const sideClass = (p.outcome || '').toUpperCase() === 'YES' ? 'badge-yes' : 'badge-no';
       const hl = p.hours_left;
-      const timeStr = hl == null ? '—'
+      const timeStr = hl != null && hl <= 0
+        ? `<span style="color:var(--yellow)">Awaiting</span>`
+        : hl == null ? '—'
         : hl < 1  ? `<span class="red">${(hl * 60).toFixed(0)}m</span>`
         : hl < 6  ? `<span style="color:var(--yellow)">${hl.toFixed(1)}h</span>`
         :           `${hl.toFixed(1)}h`;
