@@ -1,0 +1,26 @@
+strategy_id: btc_oi_accel_breakout
+strategy_name: BTC OI Acceleration Breakout
+
+timeframes:
+  all:
+    - 1h
+    - 4h
+  entry_tf: 1h
+
+signal:
+  range_atr_ratio: 0.8
+  oi_roc_lookback: 3
+  oi_accel_threshold: 0.5
+  cvd_lookback: 16
+  sl_lookback: 10
+  htf_ema_tf: "4h"
+  htf_ema_period: 100
+
+tpsl:
+  trail_mode: fixed_rr
+  trail_atr_mult: 3.5
+  be_trigger_r: 1
+  max_tp_r: 0
+  rr_ratio: 3.5
+  sl_max_pct: 3.5
+  slippage_pct: 0.05

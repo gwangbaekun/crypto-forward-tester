@@ -134,8 +134,44 @@ oi_cvd_surge:
     module: features.strategy.oi_cvd_surge.realtime_feed
     fn: get_state
 
-spot_perp_cvd:
+btc_liq_sweep_reversal:
   enabled: true
+  monitoring: false
+  symbol: "BTCUSDT"
+  tick_interval: 60
+  timeframes: ["1h"]
+  entry_tf: "1h"
+  strategy_tag: btc_liq_sweep_reversal
+  label: "BTC Liq Sweep Reversal"
+  emoji: "🌊"
+  telegram_alerts: false
+  discord_alerts: false
+  binance_live: false
+  binance_leverage: 3
+  tick:
+    module: features.strategy.btc_liq_sweep_reversal.realtime_feed
+    fn: get_state
+
+btc_oi_accel_breakout:
+  enabled: true
+  monitoring: false
+  symbol: "BTCUSDT"
+  tick_interval: 60
+  timeframes: ["1h", "4h"]
+  entry_tf: "1h"
+  strategy_tag: btc_oi_accel_breakout
+  label: "BTC OI Accel Breakout"
+  emoji: "🚀"
+  telegram_alerts: false
+  discord_alerts: false
+  binance_live: false
+  binance_leverage: 3
+  tick:
+    module: features.strategy.btc_oi_accel_breakout.realtime_feed
+    fn: get_state
+
+spot_perp_cvd:
+  enabled: false
   monitoring: true
   symbol: "SOLUSDT"
   tick_interval: 10

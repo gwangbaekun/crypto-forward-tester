@@ -1,0 +1,24 @@
+strategy_id: btc_liq_sweep_reversal
+strategy_name: BTC Liquidity Sweep Reversal
+
+timeframes:
+  all:
+    - 1h
+  entry_tf: 1h
+
+signal:
+  daily_lookback: 12
+  cvd_lookback: 3
+  enable_cvd_filter: false
+  oi_regime_max_pct: 1.5
+  htf_ema_period: 200
+  require_oi_drop: true
+  min_oi_drop_pct: 0.1
+  require_vol_spike: true
+  min_vol_ratio: 1.5
+
+tpsl:
+  sl_buffer_pct: 0.15
+  slippage_pct: 0.05
+  trail_atr_mult: 8.0
+  trail_mode: trailing
