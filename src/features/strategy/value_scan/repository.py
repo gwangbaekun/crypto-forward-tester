@@ -508,3 +508,34 @@ def load_latest_scan_json(market: str) -> Optional[dict]:
         "source": "json",
     }
 
+
+def _scan_row_count(data: Optional[dict]) -> int:
+    if not data:
+        return 0
+    return len(data.get("rows") or [])
+
+
+def load_latest_scan_result(market: str) -> dict:
+    """스캔 결과 — DB·JSON 중 rows가 더 많은 쪽 선택 (빈 DB가 JSON을 가리지 않게)."""
+    db_data: Optional[dict] = None
+    try:
+        db_data = load_latest_snapshot_from_db(market)
+    except Exception:
+        logger.exception("[ValueScan] load_latest_snapshot_from_db failed market=%s", market)
+
+    json_data = load_latest_scan_json(market)
+    db_n = _scan_row_count(db_data)
+    json_n = _scan_row_count(json_data)
+
+    if json_n > db_n:
+        best = json_data
+    elif db_n > 0:
+        best = db_data
+        best["source"] = "db"
+    elif json_n > 0:
+        best = json_data
+    else:
+        return {"rows": [], "date": None, "market": market, "source": "none"}
+
+    return best
+

@@ -234,30 +234,19 @@ async def scan_results(market: str = Query("nasdaq", description="kospi | nasdaq
     from features.strategy.value_scan.cache import vs_cache
 
     def _load():
-        import json as _json
         from features.strategy.value_scan.famous import position_is_famous
+        from features.strategy.value_scan.repository import load_latest_scan_result
 
-        # 1) DB에서 최신 스냅샷 조회
-        try:
-            from features.strategy.value_scan.repository import load_latest_snapshot_from_db
-            data = load_latest_snapshot_from_db(market)
-        except Exception:
-            data = None
-
-        # 2) DB miss → JSON 폴백 (시장별 dir + 레거시 scans/*_{market}.json)
-        if data is None:
-            from features.strategy.value_scan.repository import load_latest_scan_json
-            data = load_latest_scan_json(market)
-            if data is None:
-                return {"rows": [], "date": None, "market": market, "source": "none"}
-        else:
-            data["source"] = "db"
-
-        for r in data["rows"]:
+        data = load_latest_scan_result(market)
+        for r in data.get("rows") or []:
             r["is_famous"] = position_is_famous(r)
         return data
 
-    return JSONResponse(vs_cache.get(f"scan_results_{market}", 86400, _load))
+    data = _load()
+    # 빈 결과는 캐시하지 않음 (스캔 직후 DB/JSON 반영 전 24h 고정 방지)
+    if data.get("rows"):
+        data = vs_cache.get(f"scan_results_{market}", 86400, lambda: data)
+    return JSONResponse(data)
 
 
 @router.get("/benchmark", response_class=JSONResponse)

@@ -707,8 +707,10 @@ def save_snapshot(today: str, market: str, rows: list[dict]) -> None:
 
     # DB upsert (영속)
     try:
+        from features.strategy.value_scan.cache import vs_cache
         from features.strategy.value_scan.repository import save_snapshot_to_db
         save_snapshot_to_db(today, market, clean)
+        vs_cache.invalidate(f"scan_results_{market}")
     except Exception as e:
         import logging
         logging.getLogger(__name__).warning("save_snapshot DB upsert failed: %s", e)
