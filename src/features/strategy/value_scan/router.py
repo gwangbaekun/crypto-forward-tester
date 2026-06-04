@@ -17,6 +17,12 @@ async def dashboard():
     return render_template("value_scan_dashboard.html")
 
 
+@router.get("/mobile/dashboard", response_class=HTMLResponse)
+async def mobile_dashboard():
+    """스캔 결과 전용 모바일 뷰."""
+    return render_template("value_scan_mobile.html")
+
+
 @router.get("/positions", response_class=JSONResponse)
 async def positions():
     try:
