@@ -22,7 +22,8 @@ from features.strategy.value_scan.paths import (
     HISTORY_FILE,
     LAST_ACTIVITY_FILE,
     POSITIONS_FILE,
-    SCANS_DIR,
+    SCANS_KOSPI_DIR,
+    SCANS_NASDAQ_DIR,
 )
 
 UNIT_USD = 1.0
@@ -114,10 +115,12 @@ def reset_value_scan_data(*, wipe_files: bool = True) -> dict[str, Any]:
             for p in DATA_DIR.glob(pattern):
                 p.unlink(missing_ok=True)
                 removed_files.append(str(p))
-        if SCANS_DIR.exists():
-            for p in SCANS_DIR.glob("*.json"):
-                p.unlink(missing_ok=True)
-                removed_files.append(str(p))
+        # 시장별 경로: scans/{market}/{date}.json
+        for market_dir in (SCANS_NASDAQ_DIR, SCANS_KOSPI_DIR):
+            if market_dir.exists():
+                for p in market_dir.glob("*.json"):
+                    p.unlink(missing_ok=True)
+                    removed_files.append(str(p))
 
     logger.info("[ValueScan] reset DB lots=%s pos=%s closed=%s meta=%s", n_lots, n_pos, n_closed, n_meta)
     return {
@@ -303,6 +306,8 @@ def migrate_json_files_to_db(*, archive: bool = True) -> dict[str, Any]:
             "positions": str(POSITIONS_FILE),
             "history": str(HISTORY_FILE),
             "scans_dir": str(DATA_DIR / "scans"),
+            "scans_nasdaq_dir": str(SCANS_NASDAQ_DIR),
+            "scans_kospi_dir": str(SCANS_KOSPI_DIR),
             "last_activity": str(DATA_DIR / "last_activity.json"),
         },
     }

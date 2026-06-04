@@ -14,16 +14,13 @@ import math
 import urllib.request as _urllib_req
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import UTC, datetime, timedelta
-from pathlib import Path
 from statistics import median
 from typing import Any, Optional
 
 from features.strategy.value_scan.paths import (
     DATA_DIR,
-    HISTORY_FILE,
     LAST_ACTIVITY_FILE,
-    POSITIONS_FILE,
-    SCANS_DIR,
+    get_scan_dir,
 )
 
 UNIT_USD = 1.0  # $1 per BUY signal
@@ -692,9 +689,10 @@ def update_positions(
 def save_snapshot(today: str, market: str, rows: list[dict]) -> None:
     clean = [_clean_row(r) for r in rows]
 
-    # JSON 백업 (기존)
-    SCANS_DIR.mkdir(parents=True, exist_ok=True)
-    path = SCANS_DIR / f"{today}_{market}.json"
+    # JSON 백업 (시장별 분리 저장)
+    scan_dir = get_scan_dir(market)
+    scan_dir.mkdir(parents=True, exist_ok=True)
+    path = scan_dir / f"{today}.json"
     path.write_text(json.dumps(
         {"date": today, "market": market, "rows": clean},
         ensure_ascii=False, indent=2,

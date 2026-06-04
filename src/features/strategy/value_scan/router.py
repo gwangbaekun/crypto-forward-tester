@@ -97,7 +97,8 @@ async def storage_info():
         HISTORY_FILE,
         LAST_ACTIVITY_FILE,
         POSITIONS_FILE,
-        SCANS_DIR,
+        SCANS_KOSPI_DIR,
+        SCANS_NASDAQ_DIR,
     )
     from features.strategy.value_scan.repository import db_counts
 
@@ -115,7 +116,8 @@ async def storage_info():
             "positions_exists": POSITIONS_FILE.exists(),
             "history": str(HISTORY_FILE),
             "history_exists": HISTORY_FILE.exists(),
-            "scans_dir": str(SCANS_DIR),
+            "scans_nasdaq_dir": str(SCANS_NASDAQ_DIR),
+            "scans_kospi_dir": str(SCANS_KOSPI_DIR),
             "last_activity": str(LAST_ACTIVITY_FILE),
         },
     })
@@ -244,8 +246,8 @@ async def scan_results(market: str = Query("nasdaq", description="kospi | nasdaq
 
         # 2) DB miss → JSON 폴백
         if data is None:
-            from features.strategy.value_scan.paths import SCANS_DIR
-            files = sorted(SCANS_DIR.glob(f"*_{market}.json"))
+            from features.strategy.value_scan.paths import get_scan_dir
+            files = sorted(get_scan_dir(market).glob("*.json"))
             if not files:
                 return {"rows": [], "date": None, "market": market, "source": "none"}
             raw = _json.loads(files[-1].read_text())
