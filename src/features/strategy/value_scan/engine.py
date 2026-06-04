@@ -530,7 +530,11 @@ def run_scan(market: str, max_workers: int = 10) -> list[dict]:
     for r in rows:
         r["sector_median"] = sec_med.get(r["sector"], math.nan)
         r.update(_score_stock(r, sec_med))
-        r["rating"] = _rate_nasdaq_by_score(r)
+        # KOSPI: 섹터 PER 상대 판정 / NASDAQ: 5-factor composite 판정
+        if market == "kospi":
+            r["rating"] = _rate(r, sec_med)
+        else:
+            r["rating"] = _rate_nasdaq_by_score(r)
     return rows
 
 
@@ -608,81 +612,84 @@ def update_positions(
     - ``markets``: 이번에 실제로 스캔한 시장만 전달 (KOSPI 스캔 시 NASDAQ 포지션은 건드리지 않음).
     - 청산: rating == SELL 인 경우만. 스캔 결과에 없거나 HOLD/BUY 면 오픈 유지.
     """
-    positions = load_positions()
-    history   = load_history()
+    from features.strategy.value_scan.lock import value_scan_portfolio_lock
+    from features.strategy.value_scan.repository import append_closed_trades
 
     if markets is None:
         markets = sorted({r["market"] for r in all_rows if r.get("market")})
     markets_set = set(markets)
 
-    rating_map = {_pos_key(r["market"], r["symbol"]): r for r in all_rows}
-    sell_keys  = {
-        _pos_key(r["market"], r["symbol"])
-        for r in all_rows if r["rating"] == "SELL"
-    }
+    with value_scan_portfolio_lock():
+        positions = load_positions()
 
-    new_entries: list[dict] = []
-    new_exits:   list[dict] = []
-
-    # ── SELL → 청산 (이번에 스캔한 시장의 포지션만) ───────────────────────────
-    for key, pos in list(positions.items()):
-        if pos.get("market") not in markets_set:
-            continue
-        if key not in sell_keys:
-            continue
-        cur = rating_map.get(key)
-        exit_price = _fetch_price(pos["market"], pos["symbol"])
-        lots       = pos.get("lots", [])
-        avg_pnl_pct, pnl_usd = _calc_pnl(lots, exit_price)
-        record = {
-            **pos,
-            "exit_date":   today,
-            "exit_price":  None if math.isnan(exit_price) else exit_price,
-            "exit_reason": (cur or {}).get("rating") or "SELL",
-            "pnl_pct":     avg_pnl_pct,
-            "pnl_usd":     pnl_usd,
-            "hold_days":   (
-                datetime.strptime(today, "%Y-%m-%d")
-                - datetime.strptime(pos["first_entry_date"], "%Y-%m-%d")
-            ).days,
+        rating_map = {_pos_key(r["market"], r["symbol"]): r for r in all_rows}
+        sell_keys  = {
+            _pos_key(r["market"], r["symbol"])
+            for r in all_rows if r["rating"] == "SELL"
         }
-        history.append(record)
-        del positions[key]
-        new_exits.append(record)
 
-    # ── BUY → $1 lot 추가 (신규 or 기존 포지션) ─────────────────────────────
-    for r in all_rows:
-        if r["rating"] != "BUY":
-            continue
-        key   = _pos_key(r["market"], r["symbol"])
-        price = _fetch_price(r["market"], r["symbol"])
-        lot   = {"date": today, "price": None if math.isnan(price) else price}
+        new_entries: list[dict] = []
+        new_exits:   list[dict] = []
 
-        if key in positions:
-            positions[key]["lots"].append(lot)
-            positions[key]["invested_usd"] = round(
-                positions[key].get("invested_usd", 0) + UNIT_USD, 4
-            )
-        else:
-            entry = _clean_row({
-                "symbol":           r["symbol"],
-                "name":             r["name"],
-                "market":           r["market"],
-                "sector":           r["sector"],
-                "first_entry_date": today,
-                "lots":             [lot],
-                "invested_usd":     UNIT_USD,
-                "per":              r["per"],
-                "sector_median":    r.get("sector_median", math.nan),
-                "eps":              r["eps"],
-                "fwd_eps":          r["forward_eps"],
-                "pbr":              r["pbr"],
-            })
-            positions[key] = entry
-            new_entries.append(entry)
+        # ── SELL → 청산 (이번에 스캔한 시장의 포지션만) ───────────────────────
+        for key, pos in list(positions.items()):
+            if pos.get("market") not in markets_set:
+                continue
+            if key not in sell_keys:
+                continue
+            cur = rating_map.get(key)
+            exit_price = _fetch_price(pos["market"], pos["symbol"])
+            lots       = pos.get("lots", [])
+            avg_pnl_pct, pnl_usd = _calc_pnl(lots, exit_price)
+            record = {
+                **pos,
+                "exit_date":   today,
+                "exit_price":  None if math.isnan(exit_price) else exit_price,
+                "exit_reason": (cur or {}).get("rating") or "SELL",
+                "pnl_pct":     avg_pnl_pct,
+                "pnl_usd":     pnl_usd,
+                "hold_days":   (
+                    datetime.strptime(today, "%Y-%m-%d")
+                    - datetime.strptime(pos["first_entry_date"], "%Y-%m-%d")
+                ).days,
+            }
+            del positions[key]
+            new_exits.append(record)
 
-    _save_positions(positions)
-    _save_history(history)
+        # ── BUY → $1 lot 추가 (신규 or 기존 포지션) ───────────────────────────
+        for r in all_rows:
+            if r["rating"] != "BUY":
+                continue
+            key   = _pos_key(r["market"], r["symbol"])
+            price = _fetch_price(r["market"], r["symbol"])
+            lot   = {"date": today, "price": None if math.isnan(price) else price}
+
+            if key in positions:
+                positions[key]["lots"].append(lot)
+                positions[key]["invested_usd"] = round(
+                    positions[key].get("invested_usd", 0) + UNIT_USD, 4
+                )
+            else:
+                entry = _clean_row({
+                    "symbol":           r["symbol"],
+                    "name":             r["name"],
+                    "market":           r["market"],
+                    "sector":           r["sector"],
+                    "first_entry_date": today,
+                    "lots":             [lot],
+                    "invested_usd":     UNIT_USD,
+                    "per":              r["per"],
+                    "sector_median":    r.get("sector_median", math.nan),
+                    "eps":              r["eps"],
+                    "fwd_eps":          r["forward_eps"],
+                    "pbr":              r["pbr"],
+                })
+                positions[key] = entry
+                new_entries.append(entry)
+
+        _save_positions(positions)
+        append_closed_trades(new_exits)
+
     return {"new_entries": new_entries, "new_exits": new_exits, "open": positions}
 
 
@@ -710,6 +717,8 @@ def save_snapshot(today: str, market: str, rows: list[dict]) -> None:
 # ── 엔트리포인트 ──────────────────────────────────────────────────────────────
 
 def run_daily(markets: list[str] = None, max_workers: int = 10) -> dict:
+    from features.strategy.value_scan.lock import ValueScanBusy
+
     global _scan_running, _last_scan_at
     if _scan_running:
         return {"error": "scan already running"}
@@ -733,7 +742,14 @@ def run_daily(markets: list[str] = None, max_workers: int = 10) -> dict:
             m_sell = sum(1 for r in rows if r["rating"] == "SELL")
             per_market_stats[m] = {"scanned": len(rows), "buy": m_buy, "sell": m_sell}
 
-        result        = update_positions(all_rows, today, markets=markets)
+        try:
+            result = update_positions(all_rows, today, markets=markets)
+        except ValueScanBusy:
+            import logging
+            logging.getLogger(__name__).warning(
+                "[ValueScan] skipped position update — lock held by another process"
+            )
+            return {"error": "scan already running", "skipped": True}
         _last_scan_at = datetime.now(UTC).isoformat()
 
         buy_n  = sum(1 for r in all_rows if r["rating"] == "BUY")

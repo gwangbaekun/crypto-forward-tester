@@ -244,15 +244,12 @@ async def scan_results(market: str = Query("nasdaq", description="kospi | nasdaq
         except Exception:
             data = None
 
-        # 2) DB miss → JSON 폴백
+        # 2) DB miss → JSON 폴백 (시장별 dir + 레거시 scans/*_{market}.json)
         if data is None:
-            from features.strategy.value_scan.paths import get_scan_dir
-            files = sorted(get_scan_dir(market).glob("*.json"))
-            if not files:
+            from features.strategy.value_scan.repository import load_latest_scan_json
+            data = load_latest_scan_json(market)
+            if data is None:
                 return {"rows": [], "date": None, "market": market, "source": "none"}
-            raw = _json.loads(files[-1].read_text())
-            data = {"rows": raw.get("rows", []), "date": raw.get("date"), "market": market}
-            data["source"] = "json"
         else:
             data["source"] = "db"
 

@@ -176,25 +176,101 @@ def load_history_from_db() -> list[dict]:
 
 
 def save_positions_to_db(positions: dict[str, dict]) -> None:
+    """Upsert open positions — avoids wipe-all race when scans overlap."""
     session = get_session()
     try:
-        session.query(ValueScanLot).delete(synchronize_session=False)
-        session.query(ValueScanPosition).delete(synchronize_session=False)
-        session.flush()
+        existing = (
+            session.query(ValueScanPosition)
+            .options(joinedload(ValueScanPosition.lots))
+            .all()
+        )
+        by_key = {_pos_key(p.market, p.symbol): p for p in existing}
+        incoming_keys: set[str] = set()
 
         for data in positions.values():
-            pos = ValueScanPosition(
-                market=data["market"],
-                symbol=data["symbol"],
-            )
+            key = _pos_key(data["market"], data["symbol"])
+            incoming_keys.add(key)
+            pos = by_key.get(key)
+            if pos is None:
+                pos = ValueScanPosition(
+                    market=data["market"],
+                    symbol=data["symbol"],
+                )
+                session.add(pos)
+                by_key[key] = pos
             _apply_position_fields(pos, data)
-            session.add(pos)
+            session.flush()
+
+            for lot in list(pos.lots):
+                session.delete(lot)
             session.flush()
             for lot in data.get("lots") or []:
                 session.add(
                     ValueScanLot(
                         position_id=pos.id,
                         lot_date=lot.get("date") or data.get("first_entry_date") or "",
+                        price=lot.get("price"),
+                        unit_usd=UNIT_USD,
+                    )
+                )
+
+        for key, pos in list(by_key.items()):
+            if key not in incoming_keys:
+                session.delete(pos)
+
+        session.commit()
+    except Exception:
+        session.rollback()
+        raise
+    finally:
+        session.close()
+
+
+def append_closed_trades(records: list[dict]) -> None:
+    """Append new closed trades only (no full-table delete)."""
+    if not records:
+        return
+    session = get_session()
+    try:
+        for data in records:
+            exists = (
+                session.query(ValueScanClosedTrade.id)
+                .filter_by(
+                    market=data["market"],
+                    symbol=data["symbol"],
+                    exit_date=data.get("exit_date") or "",
+                    first_entry_date=data.get("first_entry_date") or "",
+                )
+                .first()
+            )
+            if exists:
+                continue
+            trade = ValueScanClosedTrade(
+                market=data["market"],
+                symbol=data["symbol"],
+                name=data.get("name") or data["symbol"],
+                sector=data.get("sector"),
+                first_entry_date=data.get("first_entry_date") or "",
+                exit_date=data.get("exit_date") or "",
+                exit_price=data.get("exit_price"),
+                exit_reason=data.get("exit_reason"),
+                invested_usd=data.get("invested_usd"),
+                pnl_pct=data.get("pnl_pct"),
+                pnl_usd=data.get("pnl_usd"),
+                hold_days=data.get("hold_days"),
+                per=data.get("per"),
+                sector_median=data.get("sector_median"),
+                eps=data.get("eps"),
+                fwd_eps=data.get("fwd_eps"),
+                pbr=data.get("pbr"),
+            )
+            session.add(trade)
+            session.flush()
+            for lot in data.get("lots") or []:
+                session.add(
+                    ValueScanClosedLot(
+                        trade_id=trade.id,
+                        lot_date=lot.get("date") or "",
                         price=lot.get("price"),
                         unit_usd=UNIT_USD,
                     )
@@ -346,8 +422,11 @@ def restore_mistaken_exits(
         kept.append(rec)
 
     if restored:
-        save_positions_to_db(positions)
-        save_history_to_db(kept)
+        from features.strategy.value_scan.lock import value_scan_portfolio_lock
+
+        with value_scan_portfolio_lock():
+            save_positions_to_db(positions)
+            save_history_to_db(kept)
 
     return {
         "ok": True,
@@ -376,22 +455,30 @@ def ensure_migrated_from_json_if_needed() -> Optional[dict]:
 def save_snapshot_to_db(date: str, market: str, rows: list[dict]) -> None:
     """스캔 결과를 DB에 upsert (date+market 기준)."""
     from datetime import datetime as _dt
+
     rows_json = json.dumps(rows, ensure_ascii=False)
-    with get_session() as s:
-        existing = s.query(ValueScanSnapshot).filter_by(date=date, market=market).first()
+    session = get_session()
+    try:
+        existing = session.query(ValueScanSnapshot).filter_by(date=date, market=market).first()
         if existing:
             existing.rows_json = rows_json
-            existing.saved_at  = _dt.utcnow()
+            existing.saved_at = _dt.utcnow()
         else:
-            s.add(ValueScanSnapshot(date=date, market=market, rows_json=rows_json))
-        s.commit()
+            session.add(ValueScanSnapshot(date=date, market=market, rows_json=rows_json))
+        session.commit()
+    except Exception:
+        session.rollback()
+        raise
+    finally:
+        session.close()
 
 
 def load_latest_snapshot_from_db(market: str) -> Optional[dict]:
     """DB에서 해당 market의 최신 스캔 결과 반환. 없으면 None."""
-    with get_session() as s:
+    session = get_session()
+    try:
         row = (
-            s.query(ValueScanSnapshot)
+            session.query(ValueScanSnapshot)
             .filter_by(market=market)
             .order_by(ValueScanSnapshot.date.desc(), ValueScanSnapshot.saved_at.desc())
             .first()
@@ -399,3 +486,25 @@ def load_latest_snapshot_from_db(market: str) -> Optional[dict]:
         if row is None:
             return None
         return {"date": row.date, "market": market, "rows": json.loads(row.rows_json)}
+    finally:
+        session.close()
+
+
+def load_latest_scan_json(market: str) -> Optional[dict]:
+    """시장별 JSON 스냅샷 + 레거시 scans/{date}_{market}.json 폴백."""
+    scan_dir = SCANS_NASDAQ_DIR if market == "nasdaq" else SCANS_KOSPI_DIR
+    files = sorted(scan_dir.glob("*.json")) if scan_dir.exists() else []
+    if not files:
+        legacy_dir = DATA_DIR / "scans"
+        if legacy_dir.exists():
+            files = sorted(legacy_dir.glob(f"*_{market}.json"))
+    if not files:
+        return None
+    raw = json.loads(files[-1].read_text(encoding="utf-8"))
+    return {
+        "rows": raw.get("rows", []),
+        "date": raw.get("date"),
+        "market": market,
+        "source": "json",
+    }
+
