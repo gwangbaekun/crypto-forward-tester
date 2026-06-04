@@ -56,11 +56,34 @@ def get_signal_params() -> Dict[str, Any]:
     for k in ("lookback", "spot_cvd_threshold", "perp_cvd_threshold", "confidence_threshold"):
         if k not in sig:
             raise ValueError(f"config.yaml: signal.{k} is required")
+    spot = float(sig["spot_cvd_threshold"])
+    perp = float(sig["perp_cvd_threshold"])
     return {
+        "mode":                 str(sig.get("mode", "divergence")).strip().lower(),
         "lookback":             int(sig["lookback"]),
-        "spot_cvd_threshold":   float(sig["spot_cvd_threshold"]),
-        "perp_cvd_threshold":   float(sig["perp_cvd_threshold"]),
+        "spot_cvd_threshold":   spot,
+        "perp_cvd_threshold":   perp,
+        "spread_threshold":     float(sig.get("spread_threshold", 5.0)),
+        "combined_threshold":   float(sig.get("combined_threshold", 4.0)),
         "confidence_threshold": int(sig["confidence_threshold"]),
+        # 롱/숏 별도 threshold (미설정 시 spot/perp_cvd_threshold 값 사용)
+        "long_spot_threshold":  float(sig["long_spot_threshold"])  if sig.get("long_spot_threshold")  is not None else spot,
+        "long_perp_threshold":  float(sig["long_perp_threshold"])  if sig.get("long_perp_threshold")  is not None else perp,
+        "short_spot_threshold": float(sig["short_spot_threshold"]) if sig.get("short_spot_threshold") is not None else spot,
+        "short_perp_threshold": float(sig["short_perp_threshold"]) if sig.get("short_perp_threshold") is not None else perp,
+        # ── 레짐 필터 (0 = disabled) ──────────────────────────────────────────
+        "atr_period":           int(sig.get("atr_period", 14)) or 14,
+        "atr_min_pct":          float(sig.get("atr_min_pct", 0.0)),
+        "ema_period":           int(sig.get("ema_period", 0)),
+        "volume_ratio_min":     float(sig.get("volume_ratio_min", 0.0)),
+        "vol_lookback":         int(sig.get("vol_lookback", 0)),
+        "adx_min":              float(sig.get("adx_min", 0.0)),
+        "adx_period":           int(sig.get("adx_period", 14)) or 14,
+        "cvd_mom_lookback":     int(sig.get("cvd_mom_lookback", 0)),
+        "invert_signal":        bool(sig.get("invert_signal", False)),
+        # ── z-score mode ──────────────────────────────────────────────────────
+        "z_threshold":          float(sig.get("z_threshold", 1.5)),
+        "z_period":             int(sig.get("z_period", 0)),
     }
 
 
@@ -79,6 +102,9 @@ def get_tpsl_params() -> Dict[str, Any]:
         "mode":         "cvd_exit",
         "sl_pct":       sl_pct,
         "slippage_pct": slippage_pct,
+        "tp_ratio":     float(tp.get("tp_ratio", 0.0)),    # 0 = no TP
+        "trail_pct":    float(tp.get("trail_pct", 0.0)),   # 0 = no trailing
+        "min_hold_bars": int(tp.get("min_hold_bars", 0)),  # 0 = no min hold
     }
 
 

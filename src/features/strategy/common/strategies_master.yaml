@@ -171,19 +171,19 @@ btc_oi_accel_breakout:
     fn: get_state
 
 spot_perp_cvd:
-  enabled: false
-  monitoring: false
-  symbol: "SOLUSDT"
+  enabled: true
+  monitoring: true
+  symbol: "ETHUSDT"
   tick_interval: 10
   exit_tick_interval: 1.0
   timeframes: ["1h"]
   entry_tf: "1h"
   strategy_tag: spot_perp_cvd
-  label: "Spot-Perp CVD SOL 1h"
+  label: "Spot-Perp CVD ETH 1h"
   emoji: "⚡"
-  telegram_alerts: false
-  discord_alerts: false
-  binance_live: false
+  telegram_alerts: true
+  discord_alerts: true
+  binance_live: true
   binance_leverage: 3
   ctrader_live: false
   ctrader_account_id: 47198415  # FTMO live

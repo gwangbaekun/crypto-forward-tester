@@ -2,9 +2,11 @@
 Spot-Perp CVD Divergence — Forward Test Engine.
 
 backtest engine.py 와 동일한 구조:
-  - exit: 봉 마감 시 SL(OHLC 기준) 또는 CVD 수렴 판정
+  - exit: 봉 마감 시 SL(OHLC 기준) / TP / Trailing SL / CVD 수렴 판정
   - entry: 봉 마감 tick에서만 (intrabar tick 진입 금지)
-  - TP 없음 — CVD exit 전략
+  - hold_bars: 봉 마감 시마다 +1 — min_hold_bars 구현용
+  - hwm: high/low water mark — trailing stop 구현용
+  - sl_block: SL 손절 후 CVD 중립 복귀 전까지 같은 방향 재진입 차단
 """
 from __future__ import annotations
 
@@ -73,7 +75,11 @@ class SpotPerpCvdForwardTest(BaseForwardTest):
 
         events: List[Dict[str, Any]] = []
 
-        # ── 1. 청산 체크 ───────────────────────────────────────────────────────
+        # ── 1. 포지션 보유 중: hold_bars 증가 (봉 마감 tick에서만) ────────────
+        if self._position is not None and not intrabar:
+            self._position["hold_bars"] = int(self._position.get("hold_bars", 0)) + 1
+
+        # ── 2. 청산 체크 ──────────────────────────────────────────────────────
         if self._position is not None:
             result = self._check_exit_signal(
                 self._position, current_price, sig,
@@ -85,7 +91,7 @@ class SpotPerpCvdForwardTest(BaseForwardTest):
                 side = self._position["side"]
                 trade = self._close(exit_price, reason, self._position, close_note)
                 events.append({"event": "close", "trade": trade})
-                # SL 손절 후 같은 방향 재진입 차단 (CVD 중립 복귀 전까지)
+                # SL 손절 후 같은 방향 재진입 차단 (CVD 중립 복귀까지)
                 if reason == "closed_sl_loss":
                     if side == "long":
                         self._sl_block_long  = True
@@ -93,17 +99,18 @@ class SpotPerpCvdForwardTest(BaseForwardTest):
                         self._sl_block_short = True
                 self._position = None
 
-        # ── 2. SL 차단 해제 — CVD가 중립(0선) 통과하면 해제 ────────────────
+        # ── 3. SL 차단 해제 — CVD가 중립(0선) 통과하면 해제 ─────────────────
         if sc is not None and pc is not None:
             if self._sl_block_long  and (sc <= 0.0 or pc >= 0.0):
                 self._sl_block_long  = False
             if self._sl_block_short and (sc >= 0.0 or pc <= 0.0):
                 self._sl_block_short = False
 
-        # ── 3. 진입 체크 (봉 마감 tick에서만, intrabar 진입 금지) ─────────────
+        # ── 4. 진입 체크 (봉 마감 tick에서만, intrabar 진입 금지) ─────────────
         if self._position is None and not intrabar:
             direction = sig.get("signal")
             sl = _f(sig.get("sl") or 0)
+            tp = sig.get("tp")   # None 허용
 
             # sl_block 중이면 진입 금지
             if direction == "long"  and self._sl_block_long:
@@ -118,8 +125,10 @@ class SpotPerpCvdForwardTest(BaseForwardTest):
                     "entry_time":    time.time(),
                     "entry_tf":      sig.get("entry_tf") or state.get("entry_tf"),
                     "confidence":    sig.get("confidence", 0),
-                    "tp":            None,
+                    "tp":            float(tp) if tp is not None else None,
                     "sl":            sl,
+                    "hold_bars":     0,      # 봉 마감마다 +1 (min_hold_bars 용)
+                    "hwm":           current_price,  # high/low water mark (trailing 용)
                     "entry_state":   str(sig.get("reasons", [])),
                     "level_map":     [],
                     "reasons":       list(sig.get("reasons") or []),
