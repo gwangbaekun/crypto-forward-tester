@@ -500,13 +500,12 @@ async function loadPendingOrders() {
     const oid = s.poly_order_id || '—';
     const oidShort = oid !== '—' ? oid.slice(0, 12) + '…' : '—';
     const err = s.order_error || '';
-    const errShort = err.length > 40 ? err.slice(0, 40) + '…' : err;
     return `<tr>
       <td><span class="q-text" title="${s.question}">${s.question}</span></td>
       <td><span class="badge ${sideClass}">${s.side || '—'}</span></td>
       <td>${price ? (price * 100).toFixed(1) + '¢' : '—'}</td>
       <td style="font-size:.75rem;font-weight:600;color:${osColor}">${os}</td>
-      <td style="font-size:.65rem;color:var(--red);max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${err}">${errShort || '—'}</td>
+      <td style="font-size:.65rem;color:var(--red);word-break:break-all;">${err || '—'}</td>
       <td style="font-size:.65rem;color:var(--muted);font-family:monospace" title="${oid}">${oidShort}</td>
       <td style="color:var(--muted);font-size:.68rem">${ts}</td>
     </tr>`;
