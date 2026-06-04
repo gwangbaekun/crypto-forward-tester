@@ -136,7 +136,7 @@ oi_cvd_surge:
 
 btc_liq_sweep_reversal:
   enabled: true
-  monitoring: false
+  monitoring: true
   symbol: "BTCUSDT"
   tick_interval: 60
   timeframes: ["1h"]
@@ -144,9 +144,9 @@ btc_liq_sweep_reversal:
   strategy_tag: btc_liq_sweep_reversal
   label: "BTC Liq Sweep Reversal"
   emoji: "🌊"
-  telegram_alerts: false
-  discord_alerts: false
-  binance_live: false
+  telegram_alerts: true
+  discord_alerts: true
+  binance_live: true
   binance_leverage: 3
   tick:
     module: features.strategy.btc_liq_sweep_reversal.realtime_feed
@@ -154,7 +154,7 @@ btc_liq_sweep_reversal:
 
 btc_oi_accel_breakout:
   enabled: true
-  monitoring: false
+  monitoring: true
   symbol: "BTCUSDT"
   tick_interval: 60
   timeframes: ["1h", "4h"]
@@ -162,9 +162,9 @@ btc_oi_accel_breakout:
   strategy_tag: btc_oi_accel_breakout
   label: "BTC OI Accel Breakout"
   emoji: "🚀"
-  telegram_alerts: false
-  discord_alerts: false
-  binance_live: false
+  telegram_alerts: true
+  discord_alerts: true
+  binance_live: true
   binance_leverage: 3
   tick:
     module: features.strategy.btc_oi_accel_breakout.realtime_feed
