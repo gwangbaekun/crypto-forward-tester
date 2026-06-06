@@ -1,0 +1,29 @@
+# OI Acceleration Breakout v2 — Forward Test config
+# btc_backtest/src/strategies/crypto/oi_accel_breakout_v2/snapshot.json 의 live 파라미터와 동일하게 유지.
+# 파라미터명은 backtest 와 1:1 — 백테스트 대시보드 SAVE&APPLY 동기화 호환.
+
+strategy_id: oi_accel_breakout_v2
+strategy_name: OI Accel Breakout v2
+
+timeframes:
+  all:
+    - 15m
+  entry_tf: 15m
+
+signal:
+  accel_lookback: 3
+  accel_z_threshold: 2.5
+  z_period: 50
+  cvd_lookback: 10
+  cvd_threshold: 1.5
+  atr_squeeze_pct: 0.5
+  atr_period: 14
+  ema_period: 100
+  tp_ratio: 3.0
+  sides: both            # both | long | short
+  confidence_threshold: 1
+
+tpsl:
+  mode: tp_sl            # 순수 TP/SL (exit_mode=tp_sl)
+  sl_pct: 1.5
+  slippage_pct: 0.05

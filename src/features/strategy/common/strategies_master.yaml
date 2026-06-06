@@ -153,8 +153,8 @@ btc_liq_sweep_reversal:
     fn: get_state
 
 btc_oi_accel_breakout:
-  enabled: true
-  monitoring: true
+  enabled: false
+  monitoring: false
   symbol: "BTCUSDT"
   tick_interval: 60
   timeframes: ["1h", "4h"]
@@ -162,8 +162,8 @@ btc_oi_accel_breakout:
   strategy_tag: btc_oi_accel_breakout
   label: "BTC OI Accel Breakout"
   emoji: "🚀"
-  telegram_alerts: true
-  discord_alerts: true
+  telegram_alerts: false
+  discord_alerts: false
   binance_live: false
   binance_leverage: 3
   tick:
@@ -191,4 +191,22 @@ spot_perp_cvd:
   ctrader_symbol_id: 323        # ETHUSD on FTMO live
   tick:
     module: features.strategy.spot_perp_cvd.forward_test_runner
+    fn: get_state
+
+oi_accel_breakout_v2:
+  enabled: true
+  monitoring: true
+  symbol: "BTCUSDT"
+  tick_interval: 60
+  timeframes: ["15m"]
+  entry_tf: "15m"
+  strategy_tag: oi_accel_breakout_v2
+  label: "OI Accel Breakout v2 BTC 15m"
+  emoji: "🚀"
+  telegram_alerts: true
+  discord_alerts: true
+  binance_live: false
+  binance_leverage: 3
+  tick:
+    module: features.strategy.oi_accel_breakout_v2.realtime_feed
     fn: get_state
