@@ -33,7 +33,7 @@
 
   <h2>합산 (계좌 기준)</h2>
   <div class="cards">
-    <div class="card"><div class="label">실시간 블렌디드 손익</div><div class="val" id="blended">–</div><div class="note">Σ 개별 누적손익 × 명목비중</div></div>
+    <div class="card"><div class="label">블렌디드 손익</div><div class="val" id="blended">–</div><div class="note">Σ 합체 멤버손익 × 명목비중</div></div>
     <div class="card"><div class="label">확정 누적손익</div><div class="val" id="comp">–</div><div class="note">합체 체결 기록</div></div>
     <div class="card"><div class="label">합산 MDD</div><div class="val neg" id="mdd">–</div></div>
     <div class="card"><div class="label">합산 트레이드</div><div class="val" id="n">–</div></div>
@@ -43,7 +43,7 @@
 
   <h2>멤버 전략 (개별 실시간)</h2>
   <table>
-    <thead><tr><th>전략</th><th>심볼</th><th>비중</th><th>포지션</th><th>미실현</th><th>개별 누적손익</th><th>트레이드</th><th>승률</th></tr></thead>
+    <thead><tr><th>전략</th><th>심볼</th><th>비중</th><th>포지션</th><th>합체 누적손익</th><th>트레이드</th><th>승률</th></tr></thead>
     <tbody id="members"></tbody>
   </table>
 
@@ -80,7 +80,6 @@ async function load(){
     rows += `<tr>
       <td>${mem.strategy}</td><td>${mem.symbol??"–"}</td><td>${nr}x</td>
       <td>${pill}${entry}</td>
-      <td class="flat">–</td>
       <td class="${cls(totalPnl)}">${fmt(totalPnl)}</td>
       <td>${mem.closed_trades}</td>
       <td>${mem.win_rate}%</td>

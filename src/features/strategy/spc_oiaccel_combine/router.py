@@ -28,49 +28,61 @@ async def stats() -> JSONResponse:
 
 @router.get("/members", response_class=JSONResponse)
 async def members() -> JSONResponse:
-    """멤버 전략별 개별 성적 (개별 페이퍼 ForwardTrade 기준)."""
+    """멤버 전략별 성적 — 합체 시작 이후 기록만 (strategy=spc_oiaccel_combine을
+    position_meta.src_strategy로 분해). 개별 전략의 과거 페이퍼 기록은 섞지 않는다."""
+    import json
     from features.strategy.common.config_loader import get_master_config
     from db.session import get_session
     from db.models import ForwardTrade
 
     master = get_master_config() or {}
-    out = []
+    meta = {}
+    order = []
+    for sid, cfg in master.items():
+        if isinstance(cfg, dict) and cfg.get("combine_group") == COMBINE_TAG:
+            meta[sid] = {"symbol": cfg.get("symbol"), "notional_ratio": cfg.get("notional_ratio")}
+            order.append(sid)
+
+    agg = {sid: {"closed": [], "open": None} for sid in order}
     session = get_session()
     try:
-        for sid, cfg in master.items():
-            if not isinstance(cfg, dict) or cfg.get("combine_group") != COMBINE_TAG:
+        rows = (session.query(ForwardTrade)
+                .filter(ForwardTrade.strategy == COMBINE_TAG)
+                .order_by(ForwardTrade.opened_at.asc()).all())
+        for r in rows:
+            src = None
+            if r.position_meta:
+                try:
+                    src = json.loads(r.position_meta).get("src_strategy")
+                except Exception:
+                    pass
+            if src not in agg:
                 continue
-            # 닫힌 트레이드 — strategy 태그로 직접 조회 (symbol 필터 없음 → 누락 방지)
-            closed = (session.query(ForwardTrade)
-                      .filter(ForwardTrade.strategy == sid,
-                              ForwardTrade.status != "open")
-                      .order_by(ForwardTrade.opened_at.asc()).all())
-            n = len(closed)
-            wins = sum(1 for r in closed if (r.pnl_pct or 0) > 0)
-            # 개별 누적손익 — pnl_pct_net 복리 (포지션 명목 기준, 비중 미적용)
-            eq = 100.0
-            for r in closed:
-                eq *= (1 + (r.pnl_pct_net if r.pnl_pct_net is not None else (r.pnl_pct or 0)) / 100.0)
-            total_pnl = round(eq - 100.0, 4)
-            # 현재 오픈 포지션
-            op = (session.query(ForwardTrade)
-                  .filter(ForwardTrade.strategy == sid,
-                          ForwardTrade.status == "open")
-                  .order_by(ForwardTrade.opened_at.desc()).first())
-            position = None
-            if op:
-                position = {"side": op.side, "entry_price": op.entry_price}
-            out.append({
-                "strategy": sid,
-                "symbol": cfg.get("symbol"),
-                "notional_ratio": cfg.get("notional_ratio"),
-                "closed_trades": n,
-                "win_rate": round(wins / n * 100, 1) if n else 0,
-                "total_pnl_pct": total_pnl,
-                "position": position,
-            })
+            if r.status == "open":
+                agg[src]["open"] = r
+            else:
+                agg[src]["closed"].append(r)
     finally:
         session.close()
+
+    out = []
+    for sid in order:
+        closed = agg[sid]["closed"]
+        n = len(closed)
+        wins = sum(1 for r in closed if (r.pnl_pct or 0) > 0)
+        eq = 100.0
+        for r in closed:
+            eq *= (1 + (r.pnl_pct_net if r.pnl_pct_net is not None else (r.pnl_pct or 0)) / 100.0)
+        op = agg[sid]["open"]
+        out.append({
+            "strategy": sid,
+            "symbol": meta[sid]["symbol"],
+            "notional_ratio": meta[sid]["notional_ratio"],
+            "closed_trades": n,
+            "win_rate": round(wins / n * 100, 1) if n else 0,
+            "total_pnl_pct": round(eq - 100.0, 4),
+            "position": {"side": op.side, "entry_price": op.entry_price} if op else None,
+        })
     return JSONResponse({"ok": True, "members": out})
 
 
