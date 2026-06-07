@@ -198,6 +198,7 @@ class BinanceExecutor:
         side: str,              # "long" | "short"
         current_price: float = 0,
         leverage: Optional[int] = None,
+        notional_ratio: Optional[float] = None,
     ) -> Optional[Dict]:
         """
         시장가 진입.
@@ -231,7 +232,13 @@ class BinanceExecutor:
             return None
 
         step = await self.get_step_size(symbol)
-        margin   = balance * BALANCE_RATIO  # 증거금으로 사용할 금액
+        # notional_ratio 지정 시: 총자산(포지션 마진 포함) 기준으로 명목 계산.
+        # 한 전략이 이미 포지션을 잡아 availableBalance가 줄어도 다른 전략 사이징이 흔들리지 않게 함.
+        if notional_ratio is not None:
+            equity = await self.get_total_equity()
+            margin   = equity * float(notional_ratio)
+        else:
+            margin   = balance * BALANCE_RATIO  # 기존 동작 (하위 호환)
         notional = margin * lev             # 레버리지 적용 명목가치
         raw_qty  = notional / exchange_price
         qty      = self._round_qty(raw_qty, step)
