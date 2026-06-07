@@ -18,7 +18,7 @@ signal:
   cvd_threshold: 1.5
   atr_squeeze_pct: 0.5
   atr_period: 14
-  ema_period: 100
+  ema_period: 120
   tp_ratio: 3.0
   sides: both            # both | long | short
   confidence_threshold: 1
