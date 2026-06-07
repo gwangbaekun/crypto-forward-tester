@@ -214,10 +214,6 @@ oi_accel_breakout_v2:
     fn: get_state
 
 spc_oiaccel_combine:
-  enabled: false          # tick 없음 — 멤버 전략 이벤트에 올라타는 실행 레이어
-  monitoring: false
-  label: "SPC + OI-Accel Combine"
-  emoji: "🧩"
-  telegram_alerts: false
-  discord_alerts: false
-  binance_live: false     # 실주문은 coordinator.handle 내부에서 직접 수행
+  # tick 없음 — 멤버 이벤트에 올라타는 실행 레이어. enabled:false로 tick 루프 제외.
+  # 라우터는 router_registry가 enabled 무관하게 자동 등록. 실주문/사이징은 config.yaml(venues).
+  enabled: false

@@ -78,17 +78,10 @@ def get_strategies_config() -> Dict[str, Any]:
 
 
 def get_combine_group(strategy_id: str) -> Optional[str]:
-    """전략이 속한 합체 그룹 태그. 없으면 None."""
+    """전략이 속한 합체 그룹 태그. 없으면 None. (combine 라우팅 판단용)"""
     strat = (get_master_config() or {}).get(strategy_id, {})
     val = strat.get("combine_group")
     return str(val) if val else None
-
-
-def get_notional_ratio(strategy_id: str) -> Optional[float]:
-    """전략의 명목 사이징 비율. 미설정 시 None."""
-    strat = (get_master_config() or {}).get(strategy_id, {})
-    val = strat.get("notional_ratio")
-    return float(val) if val is not None else None
 
 
 def get_enabled_strategies() -> Dict[str, Any]:
