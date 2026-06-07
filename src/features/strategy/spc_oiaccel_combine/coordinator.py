@@ -148,3 +148,34 @@ def _persist_close(symbol, side, exit_price, trade, notional_ratio) -> None:
         session.rollback(); print(f"[{COMBINE_TAG}] persist close err: {e}")
     finally:
         session.close()
+
+
+def get_combined_stats() -> Dict[str, Any]:
+    """strategy='spc_oiaccel_combine' 체결 기록으로 합산 equity/MDD/일일손실."""
+    from db.models import ForwardTrade
+    session = _db()
+    try:
+        rows = (session.query(ForwardTrade)
+                .filter(ForwardTrade.strategy == COMBINE_TAG,
+                        ForwardTrade.status != "open")
+                .order_by(ForwardTrade.opened_at.asc()).all())
+        trades = []
+        import json
+        for r in rows:
+            nr = 1.0
+            if r.position_meta:
+                try:
+                    nr = float(json.loads(r.position_meta).get("notional_ratio", 1.0))
+                except Exception:
+                    pass
+            trades.append({"pnl_pct": r.pnl_pct or 0.0, "notional_ratio": nr})
+        comp, mdd = combined_equity_mdd(trades)
+        wins = sum(1 for t in trades if account_contribution_pct(t["pnl_pct"], t["notional_ratio"]) > 0)
+        n = len(trades)
+        return {
+            "strategy": COMBINE_TAG, "closed_trades": n,
+            "win_rate": round(wins / n * 100, 1) if n else 0,
+            "compound_pct": comp, "mdd_pct": mdd,
+        }
+    finally:
+        session.close()
