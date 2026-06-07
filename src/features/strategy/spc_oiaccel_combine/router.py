@@ -40,17 +40,34 @@ async def members() -> JSONResponse:
         for sid, cfg in master.items():
             if not isinstance(cfg, dict) or cfg.get("combine_group") != COMBINE_TAG:
                 continue
-            rows = (session.query(ForwardTrade)
-                    .filter(ForwardTrade.strategy == sid,
-                            ForwardTrade.status != "open").all())
-            n = len(rows)
-            wins = sum(1 for r in rows if (r.pnl_pct or 0) > 0)
+            # 닫힌 트레이드 — strategy 태그로 직접 조회 (symbol 필터 없음 → 누락 방지)
+            closed = (session.query(ForwardTrade)
+                      .filter(ForwardTrade.strategy == sid,
+                              ForwardTrade.status != "open")
+                      .order_by(ForwardTrade.opened_at.asc()).all())
+            n = len(closed)
+            wins = sum(1 for r in closed if (r.pnl_pct or 0) > 0)
+            # 개별 누적손익 — pnl_pct_net 복리 (포지션 명목 기준, 비중 미적용)
+            eq = 100.0
+            for r in closed:
+                eq *= (1 + (r.pnl_pct_net if r.pnl_pct_net is not None else (r.pnl_pct or 0)) / 100.0)
+            total_pnl = round(eq - 100.0, 4)
+            # 현재 오픈 포지션
+            op = (session.query(ForwardTrade)
+                  .filter(ForwardTrade.strategy == sid,
+                          ForwardTrade.status == "open")
+                  .order_by(ForwardTrade.opened_at.desc()).first())
+            position = None
+            if op:
+                position = {"side": op.side, "entry_price": op.entry_price}
             out.append({
                 "strategy": sid,
                 "symbol": cfg.get("symbol"),
                 "notional_ratio": cfg.get("notional_ratio"),
                 "closed_trades": n,
                 "win_rate": round(wins / n * 100, 1) if n else 0,
+                "total_pnl_pct": total_pnl,
+                "position": position,
             })
     finally:
         session.close()

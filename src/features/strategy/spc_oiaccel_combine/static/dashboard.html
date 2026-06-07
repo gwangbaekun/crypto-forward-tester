@@ -65,16 +65,14 @@ async function load(){
     document.getElementById("mddbar").style.width=Math.min((s.mdd_pct??0)/10*100,100)+"%";
   }
 
-  // 2) 멤버 목록 + 개별 실시간 stats 끌어와 합산
+  // 2) 멤버 목록 — DB strategy 태그 기준 (symbol 필터 없음, 누락 방지)
   const m = await jget(PREFIX+"/members");
   if(!m || !m.ok){ return; }
   let blended = 0, rows = "";
   for(const mem of m.members){
-    const st = await jget(`/quant/${mem.strategy}/forward_test/stats`);
-    const pos = st && st.current_position;
+    const pos = mem.position;
     const side = pos ? pos.side : null;
-    const unreal = pos && pos.unrealized_pnl_pct!=null ? pos.unrealized_pnl_pct : null;
-    const totalPnl = st ? (st.total_pnl_pct_net ?? st.total_pnl_pct ?? 0) : 0;
+    const totalPnl = mem.total_pnl_pct ?? 0;
     const nr = mem.notional_ratio ?? 1.0;
     blended += totalPnl * nr;  // 계좌 기여
     const pill = side ? `<span class="pill ${side}">${side.toUpperCase()}</span>` : `<span class="pill none">FLAT</span>`;
@@ -82,10 +80,10 @@ async function load(){
     rows += `<tr>
       <td>${mem.strategy}</td><td>${mem.symbol??"–"}</td><td>${nr}x</td>
       <td>${pill}${entry}</td>
-      <td class="${cls(unreal??0)}">${unreal!=null?fmt(unreal):"–"}</td>
+      <td class="flat">–</td>
       <td class="${cls(totalPnl)}">${fmt(totalPnl)}</td>
-      <td>${st?st.closed_trades_count:0}</td>
-      <td>${st?(st.win_rate??0):0}%</td>
+      <td>${mem.closed_trades}</td>
+      <td>${mem.win_rate}%</td>
     </tr>`;
   }
   document.getElementById("members").innerHTML = rows;
