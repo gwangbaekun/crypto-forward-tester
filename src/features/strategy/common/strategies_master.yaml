@@ -135,7 +135,7 @@ oi_cvd_surge:
     fn: get_state
 
 btc_liq_sweep_reversal:
-  enabled: true
+  enabled: false
   monitoring: true
   symbol: "BTCUSDT"
   tick_interval: 60
