@@ -7,67 +7,93 @@
 <style>
   body { background:#0d1117; color:#e6edf3; font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif; margin:0; padding:24px; }
   h1 { font-size:20px; margin:0 0 4px; }
+  h2 { font-size:15px; margin:28px 0 10px; color:#c9d1d9; }
   .sub { color:#8b949e; font-size:13px; margin-bottom:20px; }
-  .cards { display:flex; gap:16px; flex-wrap:wrap; margin-bottom:24px; }
-  .card { background:#161b22; border:1px solid #30363d; border-radius:10px; padding:16px 20px; min-width:140px; }
+  .cards { display:flex; gap:14px; flex-wrap:wrap; margin-bottom:8px; }
+  .card { background:#161b22; border:1px solid #30363d; border-radius:10px; padding:14px 18px; min-width:130px; }
   .card .label { color:#8b949e; font-size:12px; }
-  .card .val { font-size:26px; font-weight:700; margin-top:4px; }
-  .pos { color:#3fb950; } .neg { color:#f85149; }
+  .card .val { font-size:24px; font-weight:700; margin-top:4px; }
+  .card .note { color:#6e7681; font-size:11px; margin-top:2px; }
+  .pos { color:#3fb950; } .neg { color:#f85149; } .flat { color:#8b949e; }
   table { width:100%; border-collapse:collapse; background:#161b22; border:1px solid #30363d; border-radius:10px; overflow:hidden; }
-  th,td { text-align:left; padding:10px 14px; font-size:13px; border-bottom:1px solid #21262d; }
+  th,td { text-align:left; padding:10px 14px; font-size:13px; border-bottom:1px solid #21262d; white-space:nowrap; }
   th { color:#8b949e; font-weight:600; }
-  .ftmo { margin-top:18px; font-size:13px; color:#8b949e; }
-  .bar { height:8px; background:#21262d; border-radius:4px; overflow:hidden; margin-top:6px; }
-  .bar > div { height:100%; background:#f85149; }
-  button { background:#238636; color:#fff; border:0; border-radius:6px; padding:8px 14px; cursor:pointer; font-size:13px; }
+  .ftmo { margin:14px 0 4px; font-size:12px; color:#8b949e; }
+  .bar { height:8px; background:#21262d; border-radius:4px; overflow:hidden; margin-top:6px; max-width:420px; }
+  .bar > div { height:100%; background:#f85149; transition:width .3s; }
+  .pill { display:inline-block; padding:2px 8px; border-radius:10px; font-size:11px; font-weight:600; }
+  .pill.long { background:#0d3a24; color:#3fb950; } .pill.short { background:#3d1418; color:#f85149; } .pill.none { background:#21262d; color:#8b949e; }
+  button { background:#21262d; color:#c9d1d9; border:1px solid #30363d; border-radius:6px; padding:6px 12px; cursor:pointer; font-size:12px; }
+  #ts { color:#6e7681; font-size:11px; margin-left:8px; }
 </style>
 </head>
 <body>
-  <h1>SPC + OI-Accel 합체 운용 <span style="font-size:13px;color:#8b949e">단일계좌 · 비중 0.5x / 0.75x</span></h1>
-  <div class="sub">합산 백테스트 기준: MDD 8.4% · +173%/2yr (fee 0.065%) · <button onclick="load()">새로고침</button></div>
+  <h1>🧩 SPC + OI-Accel 합체 운용 <span style="font-size:13px;color:#8b949e">단일계좌 · oi 0.5x / spc 0.75x</span></h1>
+  <div class="sub">합산 백테스트 기준: MDD 8.4% · +173%/2yr (fee 0.065%) <button onclick="load()">새로고침</button><span id="ts"></span></div>
 
+  <h2>합산 (계좌 기준)</h2>
   <div class="cards">
+    <div class="card"><div class="label">실시간 블렌디드 손익</div><div class="val" id="blended">–</div><div class="note">Σ 개별 누적손익 × 명목비중</div></div>
+    <div class="card"><div class="label">확정 누적손익</div><div class="val" id="comp">–</div><div class="note">합체 체결 기록</div></div>
+    <div class="card"><div class="label">합산 MDD</div><div class="val neg" id="mdd">–</div></div>
     <div class="card"><div class="label">합산 트레이드</div><div class="val" id="n">–</div></div>
-    <div class="card"><div class="label">승률</div><div class="val" id="wr">–</div></div>
-    <div class="card"><div class="label">누적 손익</div><div class="val" id="comp">–</div></div>
-    <div class="card"><div class="label">MDD</div><div class="val" id="mdd">–</div></div>
+    <div class="card"><div class="label">합산 승률</div><div class="val" id="wr">–</div></div>
   </div>
+  <div class="ftmo">FTMO 전체 손실 한도(10%) 대비 현재 MDD<div class="bar"><div id="mddbar" style="width:0%"></div></div></div>
 
-  <div class="ftmo">FTMO 전체 손실 한도(10%) 대비 현재 MDD
-    <div class="bar"><div id="mddbar" style="width:0%"></div></div>
-  </div>
-
-  <h1 style="font-size:16px;margin:28px 0 10px">멤버 전략 (개별 페이퍼)</h1>
+  <h2>멤버 전략 (개별 실시간)</h2>
   <table>
-    <thead><tr><th>전략</th><th>심볼</th><th>명목비중</th><th>트레이드</th><th>승률</th></tr></thead>
+    <thead><tr><th>전략</th><th>심볼</th><th>비중</th><th>포지션</th><th>미실현</th><th>개별 누적손익</th><th>트레이드</th><th>승률</th></tr></thead>
     <tbody id="members"></tbody>
   </table>
 
 <script>
 const PREFIX = "/quant/spc_oiaccel_combine";
-function fmtPct(v){ if(v===null||v===undefined) return "–"; const s=(v>=0?"+":"")+v.toFixed(1)+"%"; return s; }
-function cls(v){ return v>=0?"pos":"neg"; }
+const fmt = v => (v===null||v===undefined) ? "–" : (v>=0?"+":"")+v.toFixed(2)+"%";
+const cls = v => v>0?"pos":(v<0?"neg":"flat");
+
+async function jget(url){ try{ return await (await fetch(url)).json(); }catch(e){ return null; } }
 
 async function load(){
-  try{
-    const s = await (await fetch(PREFIX+"/stats")).json();
-    if(s.ok){
-      document.getElementById("n").textContent = s.closed_trades;
-      document.getElementById("wr").textContent = (s.win_rate??0).toFixed(1)+"%";
-      const comp=document.getElementById("comp"); comp.textContent=fmtPct(s.compound_pct); comp.className="val "+cls(s.compound_pct);
-      const mdd=document.getElementById("mdd"); mdd.textContent=(s.mdd_pct??0).toFixed(1)+"%"; mdd.className="val neg";
-      document.getElementById("mddbar").style.width = Math.min((s.mdd_pct??0)/10*100,100)+"%";
-    }
-    const m = await (await fetch(PREFIX+"/members")).json();
-    if(m.ok){
-      document.getElementById("members").innerHTML = m.members.map(x=>
-        `<tr><td>${x.strategy}</td><td>${x.symbol??"–"}</td><td>${x.notional_ratio??"–"}x</td><td>${x.closed_trades}</td><td>${x.win_rate}%</td></tr>`
-      ).join("");
-    }
-  }catch(e){ console.error(e); }
+  // 1) 합체 확정 기록 (계좌 가중 MDD/누적)
+  const s = await jget(PREFIX+"/stats");
+  if(s && s.ok){
+    document.getElementById("n").textContent = s.closed_trades;
+    document.getElementById("wr").textContent = (s.win_rate??0).toFixed(1)+"%";
+    const comp=document.getElementById("comp"); comp.textContent=fmt(s.compound_pct); comp.className="val "+cls(s.compound_pct);
+    document.getElementById("mdd").textContent=(s.mdd_pct??0).toFixed(1)+"%";
+    document.getElementById("mddbar").style.width=Math.min((s.mdd_pct??0)/10*100,100)+"%";
+  }
+
+  // 2) 멤버 목록 + 개별 실시간 stats 끌어와 합산
+  const m = await jget(PREFIX+"/members");
+  if(!m || !m.ok){ return; }
+  let blended = 0, rows = "";
+  for(const mem of m.members){
+    const st = await jget(`/quant/${mem.strategy}/forward_test/stats`);
+    const pos = st && st.current_position;
+    const side = pos ? pos.side : null;
+    const unreal = pos && pos.unrealized_pnl_pct!=null ? pos.unrealized_pnl_pct : null;
+    const totalPnl = st ? (st.total_pnl_pct_net ?? st.total_pnl_pct ?? 0) : 0;
+    const nr = mem.notional_ratio ?? 1.0;
+    blended += totalPnl * nr;  // 계좌 기여
+    const pill = side ? `<span class="pill ${side}">${side.toUpperCase()}</span>` : `<span class="pill none">FLAT</span>`;
+    const entry = pos ? ` <span style="color:#6e7681">@${(pos.entry_price||0).toLocaleString()}</span>` : "";
+    rows += `<tr>
+      <td>${mem.strategy}</td><td>${mem.symbol??"–"}</td><td>${nr}x</td>
+      <td>${pill}${entry}</td>
+      <td class="${cls(unreal??0)}">${unreal!=null?fmt(unreal):"–"}</td>
+      <td class="${cls(totalPnl)}">${fmt(totalPnl)}</td>
+      <td>${st?st.closed_trades_count:0}</td>
+      <td>${st?(st.win_rate??0):0}%</td>
+    </tr>`;
+  }
+  document.getElementById("members").innerHTML = rows;
+  const b=document.getElementById("blended"); b.textContent=fmt(blended); b.className="val "+cls(blended);
+  document.getElementById("ts").textContent = "업데이트 "+new Date().toLocaleTimeString();
 }
 load();
-setInterval(load, 30000);
+setInterval(load, 15000);
 </script>
 </body>
 </html>
