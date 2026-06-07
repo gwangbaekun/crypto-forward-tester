@@ -183,8 +183,10 @@ spot_perp_cvd:
   emoji: "⚡"
   telegram_alerts: true
   discord_alerts: true
-  binance_live: true
+  binance_live: false           # 합체 모듈이 대신 주문 — 개별 실주문 OFF
   binance_leverage: 3
+  notional_ratio: 0.75
+  combine_group: spc_oiaccel_combine
   ctrader_live: false
   ctrader_account_id: 47198415  # FTMO live
   ctrader_env: live
@@ -207,6 +209,8 @@ oi_accel_breakout_v2:
   discord_alerts: true
   binance_live: false
   binance_leverage: 3
+  notional_ratio: 0.5
+  combine_group: spc_oiaccel_combine
   tick:
     module: features.strategy.oi_accel_breakout_v2.realtime_feed
     fn: get_state
