@@ -6,3 +6,5 @@ data/
 logs/signal_logs/**/*.jsonl
 
 portfolio/
+# Claude Code worktrees
+.claude/worktrees/

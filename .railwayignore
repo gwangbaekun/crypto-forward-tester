@@ -1,0 +1,6 @@
+.claude/
+.git/
+docker-compose.yml
+logs/
+data/
+docs/
