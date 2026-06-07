@@ -185,7 +185,6 @@ spot_perp_cvd:
   discord_alerts: true
   binance_live: false           # 합체 모듈이 대신 주문 — 개별 실주문 OFF
   binance_leverage: 3
-  combine_group: spc_oiaccel_combine   # 사이징은 combine config(venue×member)에서
   ctrader_live: false
   ctrader_account_id: 47198415  # FTMO live
   ctrader_env: live
@@ -208,12 +207,15 @@ oi_accel_breakout_v2:
   discord_alerts: true
   binance_live: false
   binance_leverage: 3
-  combine_group: spc_oiaccel_combine   # 사이징은 combine config(venue×member)에서
   tick:
     module: features.strategy.oi_accel_breakout_v2.realtime_feed
     fn: get_state
 
 spc_oiaccel_combine:
-  # tick 없음 — 멤버 이벤트에 올라타는 실행 레이어. enabled:false로 tick 루프 제외.
-  # 라우터는 router_registry가 enabled 무관하게 자동 등록. 실주문/사이징은 config.yaml(venues).
-  enabled: false
+  # combine 운영 스위치. tick 블록이 없어 strategy_loop는 자동 제외(tick 안 함).
+  # enabled=true → 멤버 이벤트를 받아 주문 fan-out. false → 주문 스킵(끄기).
+  # members = 어떤 전략이 묶였는지(단일 출처). venue별 사이징은 config.yaml(venues).
+  enabled: true
+  members:
+    - spot_perp_cvd
+    - oi_accel_breakout_v2

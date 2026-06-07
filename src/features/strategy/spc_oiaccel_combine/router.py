@@ -18,12 +18,11 @@ _STATIC = pathlib.Path(__file__).parent / "static"
 
 
 def _member_symbols() -> dict:
-    """멤버 전략 → 심볼 (strategies_master)."""
-    from features.strategy.common.config_loader import get_master_config
+    """멤버 전략 → 심볼. combine 엔트리의 members 목록(단일 출처) 기준."""
+    from features.strategy.common.config_loader import get_master_config, get_combine_members
     master = get_master_config() or {}
-    return {sid: cfg.get("symbol")
-            for sid, cfg in master.items()
-            if isinstance(cfg, dict) and cfg.get("combine_group") == COMBINE_TAG}
+    return {sid: (master.get(sid, {}) or {}).get("symbol")
+            for sid in get_combine_members(COMBINE_TAG)}
 
 
 @router.get("/config", response_class=JSONResponse)

@@ -46,6 +46,9 @@ async def handle(
     current_price: Optional[float],
 ) -> None:
     """멤버 이벤트를 enabled venue마다 venue별 사이징으로 주문 fan-out. 기록 없음."""
+    from features.strategy.common.config_loader import is_combine_enabled
+    if not is_combine_enabled(COMBINE_TAG):
+        return  # 운영 스위치 OFF — 주문 스킵
     venues = (load_combine_config().get("venues") or {})
     for venue, vcfg in venues.items():
         if not isinstance(vcfg, dict) or not vcfg.get("enabled"):

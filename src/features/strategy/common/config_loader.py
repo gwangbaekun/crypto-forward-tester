@@ -78,10 +78,24 @@ def get_strategies_config() -> Dict[str, Any]:
 
 
 def get_combine_group(strategy_id: str) -> Optional[str]:
-    """전략이 속한 합체 그룹 태그. 없으면 None. (combine 라우팅 판단용)"""
-    strat = (get_master_config() or {}).get(strategy_id, {})
-    val = strat.get("combine_group")
-    return str(val) if val else None
+    """전략이 어느 combine 그룹의 members에 속하는지 역참조. 없으면 None.
+    (combine 엔트리의 members 목록이 단일 출처 — 멤버 블록엔 표시 안 함)"""
+    for key, cfg in (get_master_config() or {}).items():
+        if isinstance(cfg, dict) and strategy_id in (cfg.get("members") or []):
+            return key
+    return None
+
+
+def is_combine_enabled(combine_tag: str) -> bool:
+    """combine 운영 스위치. enabled=false면 주문 fan-out 안 함."""
+    cfg = (get_master_config() or {}).get(combine_tag, {})
+    return bool(isinstance(cfg, dict) and cfg.get("enabled", False))
+
+
+def get_combine_members(combine_tag: str) -> list:
+    """combine 그룹에 묶인 멤버 전략 id 목록."""
+    cfg = (get_master_config() or {}).get(combine_tag, {})
+    return list(cfg.get("members") or []) if isinstance(cfg, dict) else []
 
 
 def get_enabled_strategies() -> Dict[str, Any]:
