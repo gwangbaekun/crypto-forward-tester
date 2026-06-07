@@ -305,6 +305,22 @@ async def _execute_verify_notify(
     )
     _binance_leverage = int((get_master_config() or {}).get(strategy_key, {}).get("binance_leverage") or 1)
 
+    # 합체 그룹 라우팅: 멤버 전략이면 coordinator로 위임해 단일 계좌에 비중 주문 + 합산 기록.
+    # 멤버는 binance_live=false 라 아래 개별 binance 주문 블록은 자동 스킵된다(executor None).
+    from features.strategy.common.config_loader import get_combine_group, get_notional_ratio
+    _combine_group = get_combine_group(strategy_key)
+    if _combine_group:
+        _notional_ratio = get_notional_ratio(strategy_key)
+        try:
+            from features.strategy.spc_oiaccel_combine.coordinator import handle as _combine_handle
+            await _combine_handle(
+                strategy_key, events, symbol, current_price,
+                notional_ratio=_notional_ratio if _notional_ratio is not None else 1.0,
+                leverage=_binance_leverage,
+            )
+        except Exception as e:
+            print(f"[{strategy_key}] 합체 핸들 오류: {e}")
+
     binance_executor = None
     if is_binance_live_enabled(strategy_key):
         try:
