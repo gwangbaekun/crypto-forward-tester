@@ -30,7 +30,6 @@ log = logging.getLogger("polymarket.executor")
 _TICK_SIZE    = os.environ.get("POLYMARKET_TICK_SIZE", "0.01")
 _LIVE_ENABLED = os.environ.get("POLYMARKET_LIVE", "false").strip().lower() == "true"
 
-# 항상 절대 최솟값으로 시도. Polymarket 이 거절하면 에러에서 minimum 파싱 후 재시도.
 _MIN_USD_MARGIN = 1.02
 
 _MIN_SIZE_RE = re.compile(r"minimum:\s*([0-9]+(?:\.[0-9]+)?)", re.IGNORECASE)

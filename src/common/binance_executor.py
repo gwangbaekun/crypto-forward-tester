@@ -134,6 +134,11 @@ class BinanceExecutor:
                 return float(asset.get("availableBalance", 0))
         return 0.0
 
+    async def get_total_equity(self) -> float:
+        """총 자산 (포지션 마진 포함) — 멀티전략 사이징 기준."""
+        data = await self._get("/fapi/v2/account")
+        return float((data or {}).get("totalMarginBalance", 0))
+
     async def get_position(self, symbol: str) -> Optional[Dict]:
         """현재 Binance 상 오픈 포지션 (없으면 None)."""
         data = await self._get("/fapi/v2/positionRisk", {"symbol": symbol})
