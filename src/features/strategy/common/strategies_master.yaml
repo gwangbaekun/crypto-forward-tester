@@ -214,3 +214,12 @@ oi_accel_breakout_v2:
   tick:
     module: features.strategy.oi_accel_breakout_v2.realtime_feed
     fn: get_state
+
+spc_oiaccel_combine:
+  enabled: false          # tick 없음 — 멤버 전략 이벤트에 올라타는 실행 레이어
+  monitoring: false
+  label: "SPC + OI-Accel Combine"
+  emoji: "🧩"
+  telegram_alerts: false
+  discord_alerts: false
+  binance_live: false     # 실주문은 coordinator.handle 내부에서 직접 수행

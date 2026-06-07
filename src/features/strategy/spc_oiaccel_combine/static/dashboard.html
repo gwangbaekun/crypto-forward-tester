@@ -1,0 +1,73 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1"/>
+<title>SPC + OI-Accel 합체 운용</title>
+<style>
+  body { background:#0d1117; color:#e6edf3; font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif; margin:0; padding:24px; }
+  h1 { font-size:20px; margin:0 0 4px; }
+  .sub { color:#8b949e; font-size:13px; margin-bottom:20px; }
+  .cards { display:flex; gap:16px; flex-wrap:wrap; margin-bottom:24px; }
+  .card { background:#161b22; border:1px solid #30363d; border-radius:10px; padding:16px 20px; min-width:140px; }
+  .card .label { color:#8b949e; font-size:12px; }
+  .card .val { font-size:26px; font-weight:700; margin-top:4px; }
+  .pos { color:#3fb950; } .neg { color:#f85149; }
+  table { width:100%; border-collapse:collapse; background:#161b22; border:1px solid #30363d; border-radius:10px; overflow:hidden; }
+  th,td { text-align:left; padding:10px 14px; font-size:13px; border-bottom:1px solid #21262d; }
+  th { color:#8b949e; font-weight:600; }
+  .ftmo { margin-top:18px; font-size:13px; color:#8b949e; }
+  .bar { height:8px; background:#21262d; border-radius:4px; overflow:hidden; margin-top:6px; }
+  .bar > div { height:100%; background:#f85149; }
+  button { background:#238636; color:#fff; border:0; border-radius:6px; padding:8px 14px; cursor:pointer; font-size:13px; }
+</style>
+</head>
+<body>
+  <h1>SPC + OI-Accel 합체 운용 <span style="font-size:13px;color:#8b949e">단일계좌 · 비중 0.5x / 0.75x</span></h1>
+  <div class="sub">합산 백테스트 기준: MDD 8.4% · +173%/2yr (fee 0.065%) · <button onclick="load()">새로고침</button></div>
+
+  <div class="cards">
+    <div class="card"><div class="label">합산 트레이드</div><div class="val" id="n">–</div></div>
+    <div class="card"><div class="label">승률</div><div class="val" id="wr">–</div></div>
+    <div class="card"><div class="label">누적 손익</div><div class="val" id="comp">–</div></div>
+    <div class="card"><div class="label">MDD</div><div class="val" id="mdd">–</div></div>
+  </div>
+
+  <div class="ftmo">FTMO 전체 손실 한도(10%) 대비 현재 MDD
+    <div class="bar"><div id="mddbar" style="width:0%"></div></div>
+  </div>
+
+  <h1 style="font-size:16px;margin:28px 0 10px">멤버 전략 (개별 페이퍼)</h1>
+  <table>
+    <thead><tr><th>전략</th><th>심볼</th><th>명목비중</th><th>트레이드</th><th>승률</th></tr></thead>
+    <tbody id="members"></tbody>
+  </table>
+
+<script>
+const PREFIX = "/quant/spc_oiaccel_combine";
+function fmtPct(v){ if(v===null||v===undefined) return "–"; const s=(v>=0?"+":"")+v.toFixed(1)+"%"; return s; }
+function cls(v){ return v>=0?"pos":"neg"; }
+
+async function load(){
+  try{
+    const s = await (await fetch(PREFIX+"/stats")).json();
+    if(s.ok){
+      document.getElementById("n").textContent = s.closed_trades;
+      document.getElementById("wr").textContent = (s.win_rate??0).toFixed(1)+"%";
+      const comp=document.getElementById("comp"); comp.textContent=fmtPct(s.compound_pct); comp.className="val "+cls(s.compound_pct);
+      const mdd=document.getElementById("mdd"); mdd.textContent=(s.mdd_pct??0).toFixed(1)+"%"; mdd.className="val neg";
+      document.getElementById("mddbar").style.width = Math.min((s.mdd_pct??0)/10*100,100)+"%";
+    }
+    const m = await (await fetch(PREFIX+"/members")).json();
+    if(m.ok){
+      document.getElementById("members").innerHTML = m.members.map(x=>
+        `<tr><td>${x.strategy}</td><td>${x.symbol??"–"}</td><td>${x.notional_ratio??"–"}x</td><td>${x.closed_trades}</td><td>${x.win_rate}%</td></tr>`
+      ).join("");
+    }
+  }catch(e){ console.error(e); }
+}
+load();
+setInterval(load, 30000);
+</script>
+</body>
+</html>
