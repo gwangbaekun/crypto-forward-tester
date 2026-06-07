@@ -23,7 +23,6 @@ logging.getLogger("uvicorn.access").addFilter(_AccessLogFilter())
 from common.binance_price_ws import BinancePriceWS
 from db.session import init_db
 from features.ctrader.router import router as ctrader_auth_router
-from features.home.router import router as home_router
 from features.strategy.router_registry import include_strategy_routers
 from features.strategy.router import router as strategy_router
 from features.strategy.polymarket.router import router as polymarket_router
@@ -198,7 +197,6 @@ async def health() -> dict:
     return {"ok": True}
 
 
-app.include_router(home_router)
 app.include_router(ctrader_auth_router)
 app.include_router(strategy_router)
 app.include_router(polymarket_router)
