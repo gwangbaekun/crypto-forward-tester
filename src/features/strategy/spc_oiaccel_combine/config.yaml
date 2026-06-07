@@ -1,11 +1,19 @@
 strategy_id: spc_oiaccel_combine
-strategy_name: SPC + OI-Accel Combine (단일계좌 합산운용)
-members:
-  - strategy: oi_accel_breakout_v2
-    symbol: BTCUSDT
-    notional_ratio: 0.5
-  - strategy: spot_perp_cvd
-    symbol: ETHUSDT
-    notional_ratio: 0.75
-# 합산 백테스트 기준: MDD 8.4%, +173%/2yr (fee 0.065%)
-# 실행: 개별 엔진 이벤트를 coordinator.handle() 이 단일 계좌로 사이징 주문
+strategy_name: SPC + OI-Accel Combine (venue별 사이징 운용)
+
+# combine은 신호를 모른다. 멤버 전략 이벤트를 받아 venue별 notional_ratio·leverage로 주문만 한다.
+# MDD는 notional_ratio가 결정(레버리지 아님). 백테스트 기준선 oi 0.5/spc 0.75 → MDD 8.36%.
+venues:
+  binance:
+    enabled: true
+    leverage: 9
+    members:
+      oi_accel_breakout_v2: { notional_ratio: 2.0 }   # 합산 MDD ~30% (4x 스케일)
+      spot_perp_cvd:        { notional_ratio: 3.0 }
+  ctrader:
+    enabled: false        # 1차는 binance만. 동적 lot 사이징은 다음 사이클.
+    leverage: 3
+    account_id: 47198415  # FTMO live
+    members:
+      oi_accel_breakout_v2: { notional_ratio: 0.42 }  # 합산 MDD ~7%
+      spot_perp_cvd:        { notional_ratio: 0.62 }

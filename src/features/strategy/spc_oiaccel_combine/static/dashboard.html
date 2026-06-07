@@ -7,82 +7,74 @@
 <style>
   body { background:#0d1117; color:#e6edf3; font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif; margin:0; padding:24px; }
   h1 { font-size:20px; margin:0 0 4px; }
-  h2 { font-size:15px; margin:28px 0 10px; color:#c9d1d9; }
-  .sub { color:#8b949e; font-size:13px; margin-bottom:20px; }
-  .cards { display:flex; gap:14px; flex-wrap:wrap; margin-bottom:8px; }
-  .card { background:#161b22; border:1px solid #30363d; border-radius:10px; padding:14px 18px; min-width:130px; }
+  h2 { font-size:15px; margin:26px 0 10px; color:#c9d1d9; }
+  .sub { color:#8b949e; font-size:13px; margin-bottom:18px; }
+  .cards { display:flex; gap:14px; flex-wrap:wrap; }
+  .card { background:#161b22; border:1px solid #30363d; border-radius:10px; padding:14px 18px; min-width:150px; }
   .card .label { color:#8b949e; font-size:12px; }
   .card .val { font-size:24px; font-weight:700; margin-top:4px; }
   .card .note { color:#6e7681; font-size:11px; margin-top:2px; }
   .pos { color:#3fb950; } .neg { color:#f85149; } .flat { color:#8b949e; }
-  table { width:100%; border-collapse:collapse; background:#161b22; border:1px solid #30363d; border-radius:10px; overflow:hidden; }
+  table { width:100%; border-collapse:collapse; background:#161b22; border:1px solid #30363d; border-radius:10px; overflow:hidden; margin-top:6px; }
   th,td { text-align:left; padding:10px 14px; font-size:13px; border-bottom:1px solid #21262d; white-space:nowrap; }
   th { color:#8b949e; font-weight:600; }
-  .ftmo { margin:14px 0 4px; font-size:12px; color:#8b949e; }
-  .bar { height:8px; background:#21262d; border-radius:4px; overflow:hidden; margin-top:6px; max-width:420px; }
-  .bar > div { height:100%; background:#f85149; transition:width .3s; }
   .pill { display:inline-block; padding:2px 8px; border-radius:10px; font-size:11px; font-weight:600; }
   .pill.long { background:#0d3a24; color:#3fb950; } .pill.short { background:#3d1418; color:#f85149; } .pill.none { background:#21262d; color:#8b949e; }
   button { background:#21262d; color:#c9d1d9; border:1px solid #30363d; border-radius:6px; padding:6px 12px; cursor:pointer; font-size:12px; }
   #ts { color:#6e7681; font-size:11px; margin-left:8px; }
+  .venuebadge { font-size:11px; color:#8b949e; background:#21262d; padding:2px 7px; border-radius:6px; margin-right:4px; }
 </style>
 </head>
 <body>
-  <h1>🧩 SPC + OI-Accel 합체 운용 <span style="font-size:13px;color:#8b949e">단일계좌 · oi 0.5x / spc 0.75x</span></h1>
-  <div class="sub">합산 백테스트 기준: MDD 8.4% · +173%/2yr (fee 0.065%) <button onclick="load()">새로고침</button><span id="ts"></span></div>
+  <h1>🧩 SPC + OI-Accel 합체 운용 <span style="font-size:13px;color:#8b949e" id="venuelbl"></span></h1>
+  <div class="sub">combine은 venue별 사이징·레버리지로 주문만 fan-out — 성적은 멤버 개별 기록 기준 <button onclick="load()">새로고침</button><span id="ts"></span></div>
 
-  <h2>합산 (계좌 기준)</h2>
+  <h2>합체 계좌 투영 (binance 사이징 기준)</h2>
   <div class="cards">
-    <div class="card"><div class="label">블렌디드 손익</div><div class="val" id="blended">–</div><div class="note">Σ 합체 멤버손익 × 명목비중</div></div>
-    <div class="card"><div class="label">확정 누적손익</div><div class="val" id="comp">–</div><div class="note">합체 체결 기록</div></div>
-    <div class="card"><div class="label">합산 MDD</div><div class="val neg" id="mdd">–</div></div>
-    <div class="card"><div class="label">합산 트레이드</div><div class="val" id="n">–</div></div>
-    <div class="card"><div class="label">합산 승률</div><div class="val" id="wr">–</div></div>
+    <div class="card"><div class="label">블렌디드 누적손익</div><div class="val" id="blended">–</div><div class="note">Σ 멤버손익 × binance 명목비중</div></div>
+    <div class="card"><div class="label">목표 MDD</div><div class="val" id="tmdd">~30%</div><div class="note">binance — 한도 내 공격적</div></div>
   </div>
-  <div class="ftmo">FTMO 전체 손실 한도(10%) 대비 현재 MDD<div class="bar"><div id="mddbar" style="width:0%"></div></div></div>
 
-  <h2>멤버 전략 (개별 실시간)</h2>
+  <h2>멤버 전략 (개별 forward test)</h2>
   <table>
-    <thead><tr><th>전략</th><th>심볼</th><th>비중</th><th>포지션</th><th>합체 누적손익</th><th>트레이드</th><th>승률</th></tr></thead>
+    <thead><tr><th>전략</th><th>심볼</th><th>binance 사이징</th><th>포지션</th><th>개별 누적손익</th><th>트레이드</th><th>승률</th></tr></thead>
     <tbody id="members"></tbody>
   </table>
+  <div class="sub" style="margin-top:10px">실거래 시 실제 손익/MDD의 ground-truth는 바이낸스 계좌 잔고. 위 투영은 개별 페이퍼 기록 × 명목비중 추정치.</div>
 
 <script>
 const PREFIX = "/quant/spc_oiaccel_combine";
 const fmt = v => (v===null||v===undefined) ? "–" : (v>=0?"+":"")+v.toFixed(2)+"%";
 const cls = v => v>0?"pos":(v<0?"neg":"flat");
-
-async function jget(url){ try{ return await (await fetch(url)).json(); }catch(e){ return null; } }
+async function jget(u){ try{ return await (await fetch(u)).json(); }catch(e){ return null; } }
 
 async function load(){
-  // 1) 합체 확정 기록 (계좌 가중 MDD/누적)
-  const s = await jget(PREFIX+"/stats");
-  if(s && s.ok){
-    document.getElementById("n").textContent = s.closed_trades;
-    document.getElementById("wr").textContent = (s.win_rate??0).toFixed(1)+"%";
-    const comp=document.getElementById("comp"); comp.textContent=fmt(s.compound_pct); comp.className="val "+cls(s.compound_pct);
-    document.getElementById("mdd").textContent=(s.mdd_pct??0).toFixed(1)+"%";
-    document.getElementById("mddbar").style.width=Math.min((s.mdd_pct??0)/10*100,100)+"%";
+  const cfg = await jget(PREFIX+"/config");
+  let binLev = null;
+  if(cfg && cfg.ok && cfg.venues && cfg.venues.binance){
+    binLev = cfg.venues.binance.leverage;
+    document.getElementById("venuelbl").textContent =
+      `binance ${cfg.venues.binance.enabled?"ON":"OFF"} ·lev ${binLev}x` +
+      (cfg.venues.ctrader ? ` / ctrader ${cfg.venues.ctrader.enabled?"ON":"OFF"}·lev ${cfg.venues.ctrader.leverage}x` : "");
   }
 
-  // 2) 멤버 목록 — DB strategy 태그 기준 (symbol 필터 없음, 누락 방지)
   const m = await jget(PREFIX+"/members");
   if(!m || !m.ok){ return; }
   let blended = 0, rows = "";
   for(const mem of m.members){
-    const pos = mem.position;
-    const side = pos ? pos.side : null;
+    const pos = mem.position, side = pos ? pos.side : null;
     const totalPnl = mem.total_pnl_pct ?? 0;
-    const nr = mem.notional_ratio ?? 1.0;
-    blended += totalPnl * nr;  // 계좌 기여
+    const bsz = (mem.sizing && mem.sizing.binance) ? mem.sizing.binance : null;
+    const nr = bsz ? bsz.notional_ratio : 0;
+    blended += totalPnl * nr;
     const pill = side ? `<span class="pill ${side}">${side.toUpperCase()}</span>` : `<span class="pill none">FLAT</span>`;
     const entry = pos ? ` <span style="color:#6e7681">@${(pos.entry_price||0).toLocaleString()}</span>` : "";
+    const sztxt = bsz ? `${nr}x <span style="color:#6e7681">·lev ${bsz.leverage}</span>` : "–";
     rows += `<tr>
-      <td>${mem.strategy}</td><td>${mem.symbol??"–"}</td><td>${nr}x</td>
+      <td>${mem.strategy}</td><td>${mem.symbol??"–"}</td><td>${sztxt}</td>
       <td>${pill}${entry}</td>
       <td class="${cls(totalPnl)}">${fmt(totalPnl)}</td>
-      <td>${mem.closed_trades}</td>
-      <td>${mem.win_rate}%</td>
+      <td>${mem.closed_trades}</td><td>${mem.win_rate}%</td>
     </tr>`;
   }
   document.getElementById("members").innerHTML = rows;
