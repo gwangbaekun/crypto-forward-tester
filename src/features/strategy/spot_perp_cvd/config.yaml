@@ -25,7 +25,7 @@ signal:
   long_spot_threshold: ~
   long_perp_threshold: ~
   short_spot_threshold: ~
-  short_perp_threshold: 2.0      # 숏 진입 시 perp CVD threshold (선택적 강화)
+  short_perp_threshold: 1.0      # 숏 진입 시 perp CVD threshold (backtest snapshot 동기화)
 
   # ── 레짐 필터 (0 = disabled) ───────────────────────────────────────────────
   atr_min_pct: 1.0               # ATR% >= 1.0% 봉에만 진입 (변동성 필터)
