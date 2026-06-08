@@ -74,8 +74,10 @@ async def handle(
                 if not side or not current_price:
                     continue
                 try:
-                    await ex.open_position(symbol, side, current_price,
-                                           leverage=lev, notional_ratio=nr)
+                    result = await ex.open_position(symbol, side, current_price,
+                                                    leverage=lev, notional_ratio=nr)
+                    if result is None:
+                        continue
                     tp, sl = pos.get("tp"), pos.get("sl")
                     if tp or sl:
                         await ex.place_tp_sl(symbol, side, tp=tp, sl=sl)
