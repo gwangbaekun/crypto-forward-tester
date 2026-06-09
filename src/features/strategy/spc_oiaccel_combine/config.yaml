@@ -8,8 +8,8 @@ venues:
     enabled: true
     leverage: 9
     members:
-      oi_accel_breakout_v2: { notional_ratio: 0.40 }  # $30 margin on $75 equity (9x → $270 notional)
-      spot_perp_cvd:        { notional_ratio: 0.55 }  # $41 margin on $75 equity, 동시 진입 시 합산 $71 ≤ balance
+      oi_accel_breakout_v2: { notional_ratio: 2.0 }   # 노출 2× equity, 9x → 증거금 0.22 equity. 합산 MDD ~30%
+      spot_perp_cvd:        { notional_ratio: 3.0 }   # 노출 3× equity, 9x → 증거금 0.33 equity
   ctrader:
     enabled: false        # 1차는 binance만. 동적 lot 사이징은 다음 사이클.
     leverage: 3
