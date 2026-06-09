@@ -232,14 +232,15 @@ class BinanceExecutor:
             return None
 
         step = await self.get_step_size(symbol)
-        # notional_ratio 지정 시: 총자산(포지션 마진 포함) 기준으로 명목 계산.
-        # 한 전략이 이미 포지션을 잡아 availableBalance가 줄어도 다른 전략 사이징이 흔들리지 않게 함.
+        # notional_ratio 지정 시: 노출(명목가치) = 가용잔고 × notional_ratio. 레버리지는 곱하지 않는다.
+        #   레버리지는 노출이 아니라 묶이는 증거금만 결정 (margin = notional / lev, Binance가 자동 잠금).
+        #   예) balance $75, notional_ratio 2.0 → notional $150, 9x → 증거금 $16.7 (= 자본의 0.22).
+        #   MDD는 notional_ratio가 결정 (레버리지 아님).
+        #   totalMarginBalance(get_total_equity)는 기존 포지션 미실현 손익 포함이라 sizing 기준 부적절 → balance 사용.
         if notional_ratio is not None:
-            equity = await self.get_total_equity()
-            margin   = equity * float(notional_ratio)
+            notional = balance * float(notional_ratio)
         else:
-            margin   = balance * BALANCE_RATIO  # 기존 동작 (하위 호환)
-        notional = margin * lev             # 레버리지 적용 명목가치
+            notional = balance * BALANCE_RATIO * lev   # 기존 동작 (하위 호환)
         raw_qty  = notional / exchange_price
         qty      = self._round_qty(raw_qty, step)
 
