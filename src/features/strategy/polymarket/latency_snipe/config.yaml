@@ -1,0 +1,30 @@
+# Latency Snipe — strategy B (sell-before-settle) forward 수집 설정
+# paper 단계: 주문 없음. 진입 ask / 탈출 bid / depth 를 PolymarketSignal 로 기록.
+
+enabled: false               # 폐기 (2026-06-24): favorite-buying 엣지 없음(크립토 n=90 +0.3%p≈0).
+poll_interval_sec: 20        # 스캔 주기 (창이 초·분 단위라 빠르게 틱틱)
+
+# 유니버스 (저유동 = 기관이 size 작아 무시하는 사냥터, research #01)
+# 저유동(<50k) 필터가 BTC 등 퀀트가 노리는 고유동 시장을 자동 배제 → 키워드 없이도 안전.
+max_scan_hours: 24.0         # 종료까지 N시간 이내 (창 포착 확률↑)
+max_volume_usd: 50000        # 이 미만 = 저유동 타겟 (contested 마켓 자동 제외)
+min_volume_usd: 200          # 너무 죽은 마켓 제외
+
+# 진입 (favorite 매수). 0.85로 낮춤 — 본전 바를 85%로 내려 양의 EV 교차점 탐색(#05).
+entry_min_ask: 0.85          # 이 이상 = favorite
+entry_max_ask: 0.985         # 이 이하 = 완전수렴 전
+
+# 탈출 (B 핵심: 정산 전 되팔 bid)
+exit_min_bid: 0.96           # 이 이상 bid 에 되팔 수 있으면 회전 성립
+min_size_usd: 5              # $5 체결 가능해야 의미
+
+# 사이징 (고정 소액 기조). 가까운 것부터 현금 소진까지 진입 → 정산 회수 → 반복.
+seed_usd: 100.0              # 시드 기준 (paper 시뮬레이션)
+position_size_usd: 2.0       # 포지션당 고정 소액 (저유동이라 소액 체결 가정)
+min_cash_floor: 4.0          # 현금이 이 미만이면 신규 진입 중단 (파산 방어)
+max_order_usd: 2.0           # 실주문 캡 (LIVE) — position_size 와 동일하게
+
+# 키워드 화이트리스트 제거 — 저유동+가격밴드만으로 필터.
+# (저유동 필터가 이미 BTC/메이저 등 고유동 효율시장을 배제하므로 키워드 불필요.)
+# 다시 좁히려면 여기에 키워드를 채우면 됨 (빈 리스트 = 전체 허용).
+allow_keywords: []

@@ -1,0 +1,219 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Latency Snipe — Forward Test</title>
+<link rel="stylesheet" href="/static/css/dashboard_common.css">
+<style>
+  body { padding: 10px 12px 40px; }
+  .shell { max-width: 1280px; margin: 0 auto; display: flex; flex-direction: column; gap: 10px; }
+  .topbar {
+    display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 8px;
+    padding: 10px 14px; background: var(--card); border: 1px solid var(--border); border-radius: 8px;
+  }
+  .topbar-title { font-size: 1rem; font-weight: 700; color: var(--text); }
+  .topbar-sub   { font-size: 0.75rem; color: var(--muted); }
+  .cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 8px; }
+  .card { background: var(--card); border: 1px solid var(--border); border-radius: 8px; padding: 10px 14px; }
+  .card .label { font-size: 0.72rem; color: var(--muted); }
+  .card .value { font-size: 1.25rem; font-weight: 700; color: var(--text); margin-top: 2px; }
+  table { width: 100%; border-collapse: collapse; background: var(--card);
+          border: 1px solid var(--border); border-radius: 8px; overflow: hidden; font-size: 0.78rem; }
+  th, td { padding: 6px 9px; text-align: right; border-bottom: 1px solid var(--border); white-space: nowrap; }
+  th { color: var(--muted); font-weight: 600; font-size: 0.72rem; position: sticky; top: 0; background: var(--card); }
+  td.q, th.q { text-align: left; max-width: 320px; overflow: hidden; text-overflow: ellipsis; }
+  .pos { color: var(--green); } .neg { color: var(--red); }
+  .pill { padding: 1px 7px; border-radius: 10px; font-size: 0.68rem; border: 1px solid var(--border); }
+  .pill.sell { color: var(--green); border-color: var(--green); }
+  .pill.hold { color: var(--muted); }
+  .pill.paper { color: var(--blue); border-color: var(--blue); }
+  .muted { color: var(--muted); }
+  .section-title { font-size: 0.82rem; font-weight: 700; color: var(--text); margin: 4px 2px -2px; }
+  .feed { background: var(--card); border: 1px solid var(--border); border-radius: 8px;
+          max-height: 360px; overflow-y: auto; font-size: 0.74rem; }
+  .feed table { border: none; }
+  .v-SIGNAL { color: var(--green); font-weight: 700; }
+  .v-signal-hold { color: #d6a700; }
+  .v-reject { color: var(--muted); }
+  .blink { animation: bk 0.6s ease-out; }
+  @keyframes bk { from { background: rgba(80,160,255,0.18); } to { background: transparent; } }
+  .feed-head { display:flex; justify-content:space-between; align-items:center; padding:6px 12px;
+               border-bottom:1px solid var(--border); }
+  .dot { width:7px; height:7px; border-radius:50%; background:var(--green); display:inline-block;
+         margin-right:5px; animation: pulse 1s infinite; }
+  @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.3} }
+</style>
+</head>
+<body>
+<div class="shell">
+  <div class="topbar">
+    <div>
+      <div class="topbar-title">⚡ Latency Snipe — Forward Test</div>
+      <div class="topbar-sub">저유동 결정-임박 마켓 · 진입 ask / 탈출 bid / sellable 수집 (paper)</div>
+    </div>
+    <div class="topbar-sub last-updated" id="updated">—</div>
+  </div>
+
+  <div class="section-title">💰 Paper portfolio — $100 시드 · 고정 $2 · 가까운 것부터 회전</div>
+  <div class="cards" id="pf-cards"></div>
+
+  <div class="section-title">🎯 진입가 버킷별 엣지 (edge = 승률 − 진입가, 초록 = 양의 EV)</div>
+  <table>
+    <thead><tr><th class="q">진입가 밴드</th><th>n</th><th>승</th><th>승률</th>
+      <th>평균진입</th><th>EDGE</th><th>PnL/$1</th></tr></thead>
+    <tbody id="bucket-rows"><tr><td class="q muted" colspan="7">정산 데이터 누적 중…</td></tr></tbody>
+  </table>
+
+  <div class="cards" id="cards"></div>
+
+  <div class="section-title">🔴 Live scan feed — 무엇을 try 했나 (why pass/reject)</div>
+  <div class="feed">
+    <div class="feed-head">
+      <span><span class="dot"></span><span id="feed-stat">스캔 대기…</span></span>
+      <span class="muted" id="feed-updated">—</span>
+    </div>
+    <table>
+      <thead><tr>
+        <th class="q">Market</th><th>YES ask/bid</th><th>NO ask/bid</th>
+        <th>Vol $</th><th>h→end</th><th class="q">Verdict / reason</th><th>at</th>
+      </tr></thead>
+      <tbody id="feed-rows"><tr><td class="q muted" colspan="7">대기 중…</td></tr></tbody>
+    </table>
+  </div>
+
+  <div class="section-title">✅ Signals (passed)</div>
+  <table>
+    <thead><tr>
+      <th class="q">Question</th><th>Side</th><th>Entry ask</th><th>Exit bid</th>
+      <th>Spread</th><th>Sellable</th><th>h→end</th><th>Vol $</th>
+      <th>Status</th><th>Outcome</th><th>PnL</th><th>Created</th>
+    </tr></thead>
+    <tbody id="rows"><tr><td class="q muted" colspan="12">로딩…</td></tr></tbody>
+  </table>
+</div>
+
+<script>
+const API = "/quant/polymarket/signals?strategy=latency_snipe&limit=40";
+const fmt = (v, d=3) => (v === null || v === undefined) ? "—" : Number(v).toFixed(d);
+const pct = v => (v*100).toFixed(0) + "%";
+
+async function load() {
+  let j;
+  try { j = await (await fetch(API)).json(); }
+  catch (e) { document.getElementById("rows").innerHTML =
+    `<tr><td class="q neg" colspan="12">fetch 실패: ${e}</td></tr>`; return; }
+
+  const s = j.signals || [];
+  // summary
+  const sellable = s.filter(r => (r.signal_type||"").includes("sellable")).length;
+  const resolved = s.filter(r => r.is_resolved === 1 && r.actual_pnl !== null);
+  const wins = resolved.filter(r => r.actual_pnl > 0).length;
+  const pnl = resolved.reduce((a, r) => a + (r.actual_pnl || 0), 0);
+  const wr = resolved.length ? wins / resolved.length : null;
+  const cards = [
+    ["Signals", s.length],
+    ["Sellable (B가능)", `${sellable} (${s.length ? pct(sellable/s.length) : "0%"})`],
+    ["Resolved", resolved.length],
+    ["Win rate", wr === null ? "—" : pct(wr)],
+    ["Σ PnL (per $1)", pnl.toFixed(3)],
+  ];
+  document.getElementById("cards").innerHTML = cards.map(([l, v]) =>
+    `<div class="card"><div class="label">${l}</div><div class="value">${v}</div></div>`).join("");
+
+  // rows
+  document.getElementById("rows").innerHTML = s.length ? s.map(r => {
+    const entry = r.yes_price ?? r.no_price;
+    const sell = (r.signal_type||"").includes("sellable");
+    const pnlC = r.actual_pnl == null ? "" : (r.actual_pnl >= 0 ? "pos" : "neg");
+    const stPill = r.order_status === "paper" ? "paper" : "";
+    return `<tr>
+      <td class="q" title="${r.question||""}">${r.question||"—"}</td>
+      <td>${r.side||"—"}</td>
+      <td>${fmt(entry)}</td>
+      <td>${fmt(r.pair_cost)}</td>
+      <td>${fmt(r.divergence)}</td>
+      <td><span class="pill ${sell?'sell':'hold'}">${sell?'YES':'hold'}</span></td>
+      <td>${fmt(r.hours_to_end,1)}</td>
+      <td>${r.volume_usd ? Math.round(r.volume_usd) : "—"}</td>
+      <td><span class="pill ${stPill}">${r.order_status||"—"}</span></td>
+      <td>${r.actual_outcome||"—"}</td>
+      <td class="${pnlC}">${r.actual_pnl==null?"—":fmt(r.actual_pnl)}</td>
+      <td class="muted">${r.created_at ? r.created_at.slice(5,16).replace("T"," ") : "—"}</td>
+    </tr>`;
+  }).join("") : `<tr><td class="q muted" colspan="12">아직 신호 없음 — 루프가 창을 잡으면 표시됩니다.</td></tr>`;
+
+  document.getElementById("updated").textContent = "updated " + new Date().toLocaleTimeString();
+}
+load();
+setInterval(load, 30000);
+
+// ── Live scan feed (fast tick) ──
+const FEED = "/quant/polymarket/latency/scan-feed";
+const ab = (a, b) => `${a==null?"—":Number(a).toFixed(3)} / ${b==null?"—":Number(b).toFixed(3)}`;
+let lastTopTs = 0;
+async function loadFeed() {
+  let j;
+  try { j = await (await fetch(FEED)).json(); }
+  catch (e) { document.getElementById("feed-stat").textContent = "feed 오류: " + e; return; }
+  const at = j.attempts || [], st = j.stats || {};
+  const ls = st.last_scan_ts ? new Date(st.last_scan_ts*1000).toLocaleTimeString() : "—";
+  document.getElementById("feed-stat").textContent =
+    `cycles=${st.cycles||0} · last scan ${ls} · candidates=${st.last_candidates||0} · 시도 ${at.length}건 버퍼`;
+  document.getElementById("feed-updated").textContent = new Date().toLocaleTimeString();
+  const newTop = at.length ? at[0].ts : 0;
+  document.getElementById("feed-rows").innerHTML = at.length ? at.map((a, i) => {
+    const cls = "v-" + a.verdict;
+    const blink = (i === 0 && a.ts !== lastTopTs) ? "blink" : "";
+    const t = new Date(a.ts*1000).toLocaleTimeString();
+    return `<tr class="${blink}">
+      <td class="q" title="${a.question||""}">${a.question||"—"}</td>
+      <td>${ab(a.yes_ask,a.yes_bid)}</td>
+      <td>${ab(a.no_ask,a.no_bid)}</td>
+      <td>${a.volume_usd?Math.round(a.volume_usd):"—"}</td>
+      <td>${a.hours_to_end==null?"—":Number(a.hours_to_end).toFixed(1)}</td>
+      <td class="q ${cls}">${a.verdict} — ${a.reason||""}</td>
+      <td class="muted">${t}</td>
+    </tr>`;
+  }).join("") : `<tr><td class="q muted" colspan="7">아직 스캔 기록 없음 — 앱 기동 후 첫 스캔(~10초)이면 채워집니다.</td></tr>`;
+  lastTopTs = newTop;
+}
+loadFeed();
+setInterval(loadFeed, 2000);
+
+// ── Paper portfolio ($100 시드 시뮬) ──
+async function loadPortfolio() {
+  let p;
+  try { p = await (await fetch("/quant/polymarket/latency/portfolio")).json(); }
+  catch (e) { return; }
+  if (p.error) { document.getElementById("pf-cards").innerHTML =
+    `<div class="card"><div class="label">portfolio</div><div class="value neg">err</div></div>`; return; }
+  const roiCls = p.roi_pct >= 0 ? "pos" : "neg";
+  const cards = [
+    ["Equity", `$${p.equity}`, roiCls],
+    ["ROI", `${p.roi_pct>=0?"+":""}${p.roi_pct}%`, roiCls],
+    ["현금 (가용)", `$${p.cash}`, ""],
+    ["투입중 (open)", `$${p.deployed} · ${p.open_positions}건`, ""],
+    ["실현 PnL", `$${p.realized_pnl}`, p.realized_pnl>=0?"pos":"neg"],
+    ["진입/현금부족", `${p.entered} / ${p.skipped_no_cash}`, ""],
+    ["정산 승/패", `${p.resolved_wins} / ${p.resolved_losses}`, ""],
+  ];
+  document.getElementById("pf-cards").innerHTML = cards.map(([l,v,c]) =>
+    `<div class="card"><div class="label">${l}</div><div class="value ${c||''}">${v}</div></div>`).join("");
+
+  const b = p.buckets || [];
+  document.getElementById("bucket-rows").innerHTML = b.length ? b.map(x => {
+    const ec = x.edge > 0 ? "pos" : "neg";
+    return `<tr>
+      <td class="q">${x.band}</td><td>${x.n}</td><td>${x.wins}</td>
+      <td>${(x.win_rate*100).toFixed(0)}%</td><td>${x.avg_entry.toFixed(3)}</td>
+      <td class="${ec}">${x.edge>=0?'+':''}${(x.edge*100).toFixed(1)}%p</td>
+      <td class="${x.pnl_per1>=0?'pos':'neg'}">${x.pnl_per1>=0?'+':''}${x.pnl_per1}</td>
+    </tr>`;
+  }).join("") : `<tr><td class="q muted" colspan="7">정산 데이터 누적 중…</td></tr>`;
+}
+loadPortfolio();
+setInterval(loadPortfolio, 10000);
+</script>
+</body>
+</html>

@@ -19,6 +19,7 @@ from features.strategy.polymarket._data.ws_client import CLOBWSClient
 from features.strategy.polymarket.late_convergence import engine as lc_engine
 from features.strategy.polymarket.pair_hedge       import engine as ph_engine
 from features.strategy.polymarket.bayesian_fomc    import engine as bf_engine
+from features.strategy.polymarket.latency_snipe     import engine as ls_engine
 from features.strategy.polymarket.log_config import configure_polymarket_logging
 from features.strategy.polymarket._data.executor import redeem_positions, redeem_all_pending
 
@@ -141,14 +142,38 @@ def _apply_resolution(sig, outcome: str) -> None:
             won = (side == "YES" and outcome == "YES") or (side == "NO" and outcome == "NO")
             sig.actual_pnl = (1.0 - entry) / entry if won else -1.0
 
+    elif strategy == "latency_snipe":
+        entry = sig.yes_price if side == "YES" else sig.no_price
+        if entry and entry > 0:
+            won = (side == "YES" and outcome == "YES") or (side == "NO" and outcome == "NO")
+            sig.actual_pnl = (1.0 - entry) / entry if won else -1.0
+
+
+def _any_strategy_enabled() -> bool:
+    """polymarket 전략 config 중 하나라도 enabled:true 면 True (= master 스위치)."""
+    import yaml
+    from pathlib import Path
+    base = Path(__file__).parent
+    for name in ("late_convergence", "pair_hedge", "bayesian_fomc", "latency_snipe"):
+        try:
+            cfg = yaml.safe_load((base / name / "config.yaml").read_text())
+            if cfg and cfg.get("enabled"):
+                return True
+        except Exception:
+            continue
+    return False
+
 
 async def run_polymarket() -> None:
     configure_polymarket_logging()
     from features.strategy.polymarket._data.executor import is_live_mode
-    if not is_live_mode():
-        log.warning("POLYMARKET_LIVE 비활성 — run_polymarket 전체 루프 skip")
+    # 마스터 스위치 = 각 전략 config 의 enabled. 하나라도 켜져 있으면 runner 기동.
+    # (env 플래그 불필요. 주문 여부는 별개로 POLYMARKET_LIVE 가 결정.)
+    if not is_live_mode() and not _any_strategy_enabled():
+        log.warning("polymarket 전략 전부 disabled + LIVE 아님 — run_polymarket skip")
         return
-    log.debug("runner started (LC + PH + BF + Resolver)")
+    log.debug("runner started (%s) — 주문은 LIVE에서만",
+              "LIVE" if is_live_mode() else "scan-only")
 
     ws_client = CLOBWSClient()
 
@@ -157,6 +182,7 @@ async def run_polymarket() -> None:
         lc_engine.run(ws_client),
         ph_engine.run(ws_client),
         bf_engine.run(),
+        ls_engine.run(ws_client),
         _resolve_signals(ws_client),
         return_exceptions=True,
     )

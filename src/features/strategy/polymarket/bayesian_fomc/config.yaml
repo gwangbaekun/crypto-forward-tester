@@ -1,4 +1,4 @@
-enabled: true
+enabled: false
 
 poll_interval_sec: 3600     # 1시간마다 REST 스캔 (이벤트 기반 전략이라 빠를 필요 없음)
 fred_start_year: 2010

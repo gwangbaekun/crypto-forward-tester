@@ -157,13 +157,9 @@ async def lifespan(_app: FastAPI):
         strategy_task = None
 
     try:
-        from features.strategy.polymarket._data.executor import is_live_mode
-        if is_live_mode():
-            from features.strategy.polymarket.runner import run_polymarket
-            polymarket_task = asyncio.create_task(run_polymarket())
-        else:
-            print("[Polymarket] POLYMARKET_LIVE 비활성 — runner 시작 안 함")
-            polymarket_task = None
+        # 항상 시작 — run_polymarket 가 내부에서 게이트(enabled 전략 있거나 LIVE면 가동).
+        from features.strategy.polymarket.runner import run_polymarket
+        polymarket_task = asyncio.create_task(run_polymarket())
     except Exception as exc:
         print(f"[Polymarket] startup skipped: {exc}")
         polymarket_task = None

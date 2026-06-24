@@ -54,6 +54,115 @@ async def analytics_dashboard():
     return render_template("polymarket_analytics.html")
 
 
+@router.get("/latency/dashboard", response_class=HTMLResponse)
+async def latency_dashboard():
+    return render_template("latency_snipe_dashboard.html")
+
+
+@router.get("/latency/portfolio")
+async def latency_portfolio() -> JSONResponse:
+    """$100 시드 고정소액 파이프라인 paper 시뮬레이션.
+
+    latency_snipe 신호를 시간순으로 재생: 가까운 것부터 position_size 씩 진입(현금 floor까지),
+    정산되면 size*(1+pnl) 회수 → 다음 진입에 재투입. 실주문 없이 회전·분산을 검증.
+    """
+    try:
+        import yaml
+        from pathlib import Path
+        from db.session import get_session
+        from db.models import PolymarketSignal
+        from sqlalchemy import select, asc
+
+        cfg = yaml.safe_load(
+            (Path(__file__).parent / "latency_snipe" / "config.yaml").read_text())
+        seed = float(cfg.get("seed_usd", 100.0))
+        size = float(cfg.get("position_size_usd", 2.0))
+        floor = float(cfg.get("min_cash_floor", 0.0))
+
+        db = get_session()
+        try:
+            rows = db.execute(
+                select(PolymarketSignal)
+                .where(PolymarketSignal.strategy == "latency_snipe")
+                .order_by(asc(PolymarketSignal.created_at))
+            ).scalars().all()
+        finally:
+            db.close()
+
+        # 이벤트 타임라인: 진입(created_at) + 정산(resolved_at) 병합
+        events = []
+        for r in rows:
+            entry = r.yes_price if r.side == "YES" else r.no_price
+            if not entry or entry <= 0:
+                continue
+            events.append((r.created_at, "entry", r.id, entry, r.actual_pnl))
+            if r.is_resolved and r.resolved_at and r.actual_pnl is not None:
+                events.append((r.resolved_at, "settle", r.id, entry, r.actual_pnl))
+        events.sort(key=lambda e: e[0])
+
+        cash, deployed, realized = seed, 0.0, 0.0
+        open_ids, entered, skipped, wins, losses = set(), 0, 0, 0, 0
+        for _, kind, sid, entry, pnl in events:
+            if kind == "entry":
+                if cash >= size + floor:
+                    cash -= size; deployed += size; open_ids.add(sid); entered += 1
+                else:
+                    skipped += 1
+            elif sid in open_ids:
+                ret = size * (1.0 + (pnl or 0.0))   # 승: size*(1+roi), 패: 0
+                cash += ret; deployed -= size; realized += size * (pnl or 0.0)
+                open_ids.discard(sid)
+                if (pnl or 0) > 0: wins += 1
+                else: losses += 1
+
+        # 진입가 버킷별 승률 vs 진입가 (양의 EV 교차점 탐색 — #05)
+        bspec = [("<0.88", 0.0, 0.88), ("0.88-0.91", 0.88, 0.91),
+                 ("0.91-0.94", 0.91, 0.94), ("0.94-0.97", 0.94, 0.97),
+                 ("0.97+", 0.97, 1.01)]
+        buckets = []
+        for label, lo, hi in bspec:
+            grp = [r for r in rows
+                   if r.is_resolved and r.actual_pnl is not None
+                   and lo <= ((r.yes_price if r.side == "YES" else r.no_price) or 0) < hi]
+            n = len(grp)
+            if not n:
+                continue
+            wins = sum(1 for r in grp if r.actual_pnl > 0)
+            avg_e = sum((r.yes_price if r.side == "YES" else r.no_price) for r in grp) / n
+            wr = wins / n
+            buckets.append({
+                "band": label, "n": n, "wins": wins,
+                "win_rate": round(wr, 3), "avg_entry": round(avg_e, 3),
+                "edge": round(wr - avg_e, 3),                       # >0 면 양의 EV
+                "pnl_per1": round(sum(r.actual_pnl for r in grp) / n, 4),
+            })
+
+        equity = cash + deployed   # 미정산은 원금가치로 보수적 계상
+        return JSONResponse({
+            "buckets": buckets,
+            "seed": seed, "position_size": size, "floor": floor,
+            "cash": round(cash, 2), "deployed": round(deployed, 2),
+            "open_positions": len(open_ids), "equity": round(equity, 2),
+            "realized_pnl": round(realized, 2),
+            "entered": entered, "skipped_no_cash": skipped,
+            "resolved_wins": wins, "resolved_losses": losses,
+            "roi_pct": round((equity / seed - 1) * 100, 2) if seed else 0,
+        })
+    except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+
+@router.get("/latency/scan-feed")
+async def latency_scan_feed() -> JSONResponse:
+    """라이브 스캔 시도 피드 (인메모리). 무엇을 try했고 왜 됐/안됐는지."""
+    try:
+        from features.strategy.polymarket.latency_snipe import engine as ls_engine
+        return JSONResponse({"stats": ls_engine.get_scan_stats(),
+                             "attempts": ls_engine.get_scan_log()})
+    except Exception as e:
+        return JSONResponse({"error": str(e), "attempts": [], "stats": {}}, status_code=500)
+
+
 @router.get("/markets")
 async def markets() -> JSONResponse:
     """현재 모니터링 중인 마켓 목록 — DB에서 읽음 (GCP 엔진이 upsert)."""

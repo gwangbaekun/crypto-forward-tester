@@ -144,6 +144,33 @@ async def fetch_prices(token_id: str, interval: str = "1h") -> list[dict[str, An
     return [{"ts": int(p["t"]), "price": float(p["p"])} for p in history if "t" in p and "p" in p]
 
 
+async def fetch_book(token_id: str) -> dict[str, Any] | None:
+    """CLOB 오더북. best_ask(최저 ask), best_bid(최고 bid)와 각 size 반환.
+
+    {"best_ask": float|None, "ask_size": float, "best_bid": float|None,
+     "bid_size": float, "tick": float} 형태. 호출 실패/빈 book 이면 None.
+    """
+    async with httpx.AsyncClient(timeout=TIMEOUT) as cli:
+        r = await cli.get(f"{CLOB_BASE}/book", params={"token_id": token_id},
+                          headers={"User-Agent": "Mozilla/5.0"})
+        if r.status_code != 200:
+            return None
+        d = r.json()
+    if not isinstance(d, dict) or "asks" not in d:
+        return None
+    asks = d.get("asks") or []
+    bids = d.get("bids") or []
+    best_ask = min(asks, key=lambda a: float(a["price"])) if asks else None
+    best_bid = max(bids, key=lambda b: float(b["price"])) if bids else None
+    return {
+        "best_ask": float(best_ask["price"]) if best_ask else None,
+        "ask_size": float(best_ask["size"]) if best_ask else 0.0,
+        "best_bid": float(best_bid["price"]) if best_bid else None,
+        "bid_size": float(best_bid["size"]) if best_bid else 0.0,
+        "tick":     float(d.get("tick_size") or 0.01),
+    }
+
+
 async def fetch_current_price(token_id: str) -> float | None:
     """토큰 현재가. 없으면 None."""
     hist = await fetch_prices(token_id, interval="1h")
@@ -181,6 +208,9 @@ async def fetch_by_expiry(
                 "active": "true",
             }
             r = await cli.get(f"{GAMMA_BASE}/events", params=params)
+            if r.status_code == 422:
+                # gamma offset 한도(~2000) 도달 — 더 깊은 페이지 없음. 안전 종료.
+                break
             r.raise_for_status()
             events = r.json()
             if not isinstance(events, list):
