@@ -130,8 +130,9 @@ async def latency_portfolio() -> JSONResponse:
             wins = sum(1 for r in grp if r.actual_pnl > 0)
             avg_e = sum((r.yes_price if r.side == "YES" else r.no_price) for r in grp) / n
             wr = wins / n
+            indep = len({r.event_end_ts for r in grp if r.event_end_ts})
             buckets.append({
-                "band": label, "n": n, "wins": wins,
+                "band": label, "n": n, "indep": indep, "wins": wins,
                 "win_rate": round(wr, 3), "avg_entry": round(avg_e, 3),
                 "edge": round(wr - avg_e, 3),                       # >0 면 양의 EV
                 "pnl_per1": round(sum(r.actual_pnl for r in grp) / n, 4),

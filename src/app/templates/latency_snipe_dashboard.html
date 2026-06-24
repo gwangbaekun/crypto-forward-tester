@@ -60,9 +60,9 @@
 
   <div class="section-title">🎯 진입가 버킷별 엣지 (edge = 승률 − 진입가, 초록 = 양의 EV)</div>
   <table>
-    <thead><tr><th class="q">진입가 밴드</th><th>n</th><th>승</th><th>승률</th>
+    <thead><tr><th class="q">진입가 밴드</th><th>n</th><th>독립</th><th>승</th><th>승률</th>
       <th>평균진입</th><th>EDGE</th><th>PnL/$1</th></tr></thead>
-    <tbody id="bucket-rows"><tr><td class="q muted" colspan="7">정산 데이터 누적 중…</td></tr></tbody>
+    <tbody id="bucket-rows"><tr><td class="q muted" colspan="8">정산 데이터 누적 중…</td></tr></tbody>
   </table>
 
   <div class="cards" id="cards"></div>
@@ -205,12 +205,12 @@ async function loadPortfolio() {
   document.getElementById("bucket-rows").innerHTML = b.length ? b.map(x => {
     const ec = x.edge > 0 ? "pos" : "neg";
     return `<tr>
-      <td class="q">${x.band}</td><td>${x.n}</td><td>${x.wins}</td>
+      <td class="q">${x.band}</td><td>${x.n}</td><td class="muted">${x.indep ?? '—'}</td><td>${x.wins}</td>
       <td>${(x.win_rate*100).toFixed(0)}%</td><td>${x.avg_entry.toFixed(3)}</td>
       <td class="${ec}">${x.edge>=0?'+':''}${(x.edge*100).toFixed(1)}%p</td>
       <td class="${x.pnl_per1>=0?'pos':'neg'}">${x.pnl_per1>=0?'+':''}${x.pnl_per1}</td>
     </tr>`;
-  }).join("") : `<tr><td class="q muted" colspan="7">정산 데이터 누적 중…</td></tr>`;
+  }).join("") : `<tr><td class="q muted" colspan="8">정산 데이터 누적 중…</td></tr>`;
 }
 loadPortfolio();
 setInterval(loadPortfolio, 10000);
