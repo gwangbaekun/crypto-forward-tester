@@ -185,7 +185,7 @@ spot_perp_cvd:
   discord_alerts: true
   binance_live: false           
   binance_leverage: 3
-  ctrader_live: true
+  ctrader_live: false
   ctrader_account_id: 47729078  
   ctrader_env: live
   ctrader_symbol_id: 323       

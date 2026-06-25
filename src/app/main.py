@@ -26,6 +26,7 @@ from features.ctrader.router import router as ctrader_auth_router
 from features.strategy.router_registry import include_strategy_routers
 from features.strategy.router import router as strategy_router
 from features.strategy.polymarket.router import router as polymarket_router
+from features.strategy.common.master_dashboard_router import router as master_dashboard_router
 
 
 async def startup_binance_price_ws() -> None:
@@ -193,6 +194,7 @@ async def health() -> dict:
     return {"ok": True}
 
 
+app.include_router(master_dashboard_router)
 app.include_router(ctrader_auth_router)
 app.include_router(strategy_router)
 app.include_router(polymarket_router)
