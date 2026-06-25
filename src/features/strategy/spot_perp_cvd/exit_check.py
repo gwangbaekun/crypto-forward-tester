@@ -69,6 +69,7 @@ def check_exit(
     tp_p          = get_tpsl_params()
     trail_pct     = float(tp_p.get("trail_pct", 0.0))
     min_hold_bars = int(tp_p.get("min_hold_bars", 0))
+    cvd_exit_thr  = float(tp_p.get("cvd_exit_threshold", 0.0))  # 0 = 0선 교차
 
     side = position.get("side")
     sl   = _f(position.get("sl"))
@@ -133,11 +134,13 @@ def check_exit(
     if not math.isfinite(sc) or not math.isfinite(pc):
         return None
 
+    # cvd_exit_thr > 0 이면 0선이 아니라 ±thr 까지 반전해야 청산 (완화 → 더 오래 보유)
+    # backtest engine.py 와 동일.
     cvd_resolved = False
     if side == "long":
-        cvd_resolved = (sc <= 0.0) or (pc >= 0.0)
+        cvd_resolved = (sc <= -cvd_exit_thr) or (pc >= cvd_exit_thr)
     elif side == "short":
-        cvd_resolved = (sc >= 0.0) or (pc <= 0.0)
+        cvd_resolved = (sc >= cvd_exit_thr) or (pc <= -cvd_exit_thr)
 
     if cvd_resolved:
         return (

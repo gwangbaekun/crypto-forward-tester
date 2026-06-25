@@ -53,6 +53,7 @@ tpsl:
   tp_ratio: 3.0                  # TP = SL거리 x 3 (= 9%) / 0 = 비활성
   trail_pct: 0.0                 # Trailing Stop % / 0 = 비활성
   min_hold_bars: 4               # CVD exit 최소 홀딩 봉 수 (노이즈 청산 방지)
+  cvd_exit_threshold: 0.0        # CVD 수렴 청산: 0=0선 교차, >0=±thr 오버슈트까지 보유 (backtest engine.py 동일). 운용값=0.0
   slippage_pct: 0.05
 
 exit: {}

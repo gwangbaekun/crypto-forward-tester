@@ -105,6 +105,7 @@ def get_tpsl_params() -> Dict[str, Any]:
         "tp_ratio":     float(tp.get("tp_ratio", 0.0)),    # 0 = no TP
         "trail_pct":    float(tp.get("trail_pct", 0.0)),   # 0 = no trailing
         "min_hold_bars": int(tp.get("min_hold_bars", 0)),  # 0 = no min hold
+        "cvd_exit_threshold": float(tp.get("cvd_exit_threshold", 0.0)),  # 0 = 0선 교차
     }
 
 
