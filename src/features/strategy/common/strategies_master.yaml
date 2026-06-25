@@ -186,7 +186,7 @@ spot_perp_cvd:
   binance_live: false           # 합체 모듈이 대신 주문 — 개별 실주문 OFF
   binance_leverage: 3
   ctrader_live: false
-  ctrader_account_id: 47198415  # FTMO live
+  ctrader_account_id: 47729078  # FTMO live
   ctrader_env: live
   ctrader_symbol_id: 323        # ETHUSD on FTMO live
   tick:
