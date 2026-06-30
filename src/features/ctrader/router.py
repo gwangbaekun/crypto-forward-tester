@@ -17,7 +17,7 @@ router = APIRouter(prefix="/auth/ctrader", tags=["ctrader-auth"])
 
 def _get_or_bootstrap_executors() -> dict:
     """
-    실행 중인 executor가 없으면 strategies_master.yaml의 ctrader_live 전략을 읽어서
+    실행 중인 executor가 없으면 ctrader_accounts.yaml의 enabled 계좌를 읽어서
     executor를 직접 생성한다. positions/close API가 전략 루프 시작 전에도 동작하게 한다.
     """
     from common.ctrader_executor import get_all_executors, get_executor
@@ -26,20 +26,21 @@ def _get_or_bootstrap_executors() -> dict:
         return executors
 
     try:
-        from features.strategy.common.config_loader import get_master_config, get_ctrader_config
-        master = get_master_config() or {}
-        for strategy_key, cfg in master.items():
-            if not isinstance(cfg, dict):
-                continue
-            if not cfg.get("ctrader_live"):
-                continue
-            ct = get_ctrader_config(strategy_key)
-            account_id = ct.get("ctrader_account_id")
-            env        = ct.get("ctrader_env")
-            symbol_id  = ct.get("ctrader_symbol_id")
-            lot_size   = ct.get("ctrader_lot_size")
+        from common.ctrader_account_loader import get_enabled_accounts
+        for firm_key, acfg in get_enabled_accounts().items():
+            account_id = acfg.get("account_id")
+            env        = acfg.get("env")
+            symbol_id  = acfg.get("symbol_id")
+            lot_size   = acfg.get("lot_size")
             if account_id and env and symbol_id:
-                get_executor(account_id=account_id, env=env, symbol_id=symbol_id, lot_size=lot_size)
+                get_executor(
+                    account_id=account_id,
+                    env=env,
+                    symbol_id=symbol_id,
+                    lot_size=lot_size,
+                    units_per_lot=acfg.get("units_per_lot"),
+                )
+                print(f"[ctrader/router] bootstrap: {firm_key} account={account_id}")
     except Exception as e:
         print(f"[ctrader/router] bootstrap executor 실패: {e}")
 

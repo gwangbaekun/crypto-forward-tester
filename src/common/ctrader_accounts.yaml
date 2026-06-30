@@ -1,0 +1,51 @@
+# cTrader prop firm 계좌 목록 — 단일 진실 소스
+#
+# [새 계좌 추가 순서]
+# 1. .env에 CTRADER_CLIENT_ID/SECRET/REDIRECT_URI 세팅 후 앱 기동 → GET /auth/ctrader/login 으로 OAuth 완료 (CTRADER_ACCESS_TOKEN 발급)
+# 2. python scripts/ctrader_list_symbols.py → account_id 선택 + symbol_id 확인 (.env 자동 저장)
+# 3. 아래 해당 firm 블록에 account_id·symbol_id 기입 후 enabled: true
+#
+# enabled: true  → 앱 시작 시 자동 연결 + combine fan-out 대상
+# enabled: false → 연결 안 함
+#
+# symbol_id:     브로커마다 다름. scripts/ctrader_list_symbols.py 로 확인.
+# lot_size:      prop firm 계좌 크기·룰에 맞게 조정.
+# units_per_lot: 1 lot → volume 환산 배수. 브로커·심볼마다 다름 (예: FTMO ETHUSD = 1).
+# env:           "live" 또는 "demo"
+
+accounts:
+  ftmo:
+    label: "FTMO"
+    enabled: true
+    env: live
+    account_id: 47198415
+    symbol_id: 323        # ETHUSD on FTMO live
+    lot_size: 0.05
+    units_per_lot: 1
+
+  fintokei:
+    label: "Fintokei"
+    enabled: true       
+    env: live
+    account_id: 4294671
+    symbol_id: 323          
+    lot_size: 0.05
+    units_per_lot: 1     
+
+  funding_pips:
+    label: "Funding Pips"
+    enabled: false
+    env: live
+    account_id: 0         # TODO
+    symbol_id: 323
+    lot_size: 0.05
+    units_per_lot: 1      # TODO
+
+  funded_next:
+    label: "FundedNext"
+    enabled: false
+    env: live
+    account_id: 0         # TODO
+    symbol_id: 0          # TODO
+    lot_size: 0.05
+    units_per_lot: 1      # TODO

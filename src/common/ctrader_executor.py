@@ -40,31 +40,13 @@ def _tg(msg: str) -> None:
     threading.Thread(target=_send, daemon=True).start()
 
 _CTRADER_TOKEN_URL = "https://openapi.ctrader.com/apps/token"
-def _get_units_per_lot() -> int:
-    raw = os.environ.get("CTRADER_UNITS_PER_LOT", "100").strip()
-    try:
-        units = int(raw)
-        if units > 0:
-            return units
-    except ValueError:
-        pass
-    return 100
-
-
-def _lots_to_volume(lots: float) -> int:
-    vol = max(1, int(round(float(lots) * _get_units_per_lot())))
-    cap = os.environ.get("CTRADER_MAX_VOLUME", "").strip()
-    if cap:
-        try:
-            mx = int(cap)
-            if mx > 0 and vol > mx:
-                print(
-                    f"[cTrader] 주문 부피 {vol} → maxVolume({mx})으로 클램프 "
-                    f"(CTRADER_MAX_VOLUME / 브로커 한도 확인)"
-                )
-                vol = mx
-        except ValueError:
-            pass
+def _lots_to_volume(lots: float, units_per_lot: int = 1, max_volume: Optional[int] = None) -> int:
+    vol = max(1, int(round(float(lots) * units_per_lot)))
+    if max_volume and max_volume > 0 and vol > max_volume:
+        print(
+            f"[cTrader] 주문 부피 {vol} → maxVolume({max_volume})으로 클램프"
+        )
+        vol = max_volume
     return vol
 
 
@@ -122,6 +104,7 @@ class CTraderExecutor:
         env: Optional[str] = None,
         symbol_id: Optional[int] = None,
         lot_size: Optional[float] = None,
+        units_per_lot: Optional[int] = None,
     ) -> None:
         self._client_id     = os.environ.get("CTRADER_CLIENT_ID", "").strip()
         self._client_secret = os.environ.get("CTRADER_CLIENT_SECRET", "").strip()
@@ -130,12 +113,13 @@ class CTraderExecutor:
         db_access_token, db_refresh_token = get_tokens()
         self._access_token  = env_access_token or db_access_token
         self._refresh_token = env_refresh_token or db_refresh_token
-        self._account_id    = account_id or int(os.environ.get("CTRADER_ACCOUNT_ID", "0") or "0")
+        self._account_id    = account_id or 0
         if not env:
-            raise ValueError("ctrader_executor: env('demo'|'live') 가 없습니다. strategies_master.yaml의 ctrader_mode 를 확인하세요.")
+            raise ValueError("ctrader_executor: env('demo'|'live') 가 없습니다. ctrader_accounts.yaml의 env 를 확인하세요.")
         self._env           = env.strip().lower()
-        self._symbol_id     = symbol_id or int(os.environ.get("CTRADER_SYMBOL_ID", "0") or "0")
-        self._lot_size      = lot_size or float(os.environ.get("CTRADER_LOT_SIZE", "0.01") or "0.01")
+        self._symbol_id     = symbol_id or 0
+        self._lot_size      = lot_size or 0.01
+        self._units_per_lot = units_per_lot if units_per_lot and units_per_lot > 0 else 1
         self._is_live       = self._env == "live"
 
         self._client: Any                              = None
@@ -443,7 +427,7 @@ class CTraderExecutor:
             req.symbolId            = self._symbol_id
             req.orderType           = ProtoOAOrderType.MARKET
             req.tradeSide           = ProtoOATradeSide.BUY if side == "long" else ProtoOATradeSide.SELL
-            req.volume              = _lots_to_volume(self._lot_size)
+            req.volume              = _lots_to_volume(self._lot_size, self._units_per_lot)
             return self._send_and_wait(req)
 
         result = await self._run_in_executor(_send)
@@ -464,7 +448,7 @@ class CTraderExecutor:
             req = ProtoOAClosePositionReq()
             req.ctidTraderAccountId = self._account_id
             req.positionId          = self._open_position_id
-            req.volume              = _lots_to_volume(self._lot_size)
+            req.volume              = _lots_to_volume(self._lot_size, self._units_per_lot)
             return self._send_and_wait(req)
 
         result = await self._run_in_executor(_send)
@@ -508,7 +492,7 @@ class CTraderExecutor:
             req = ProtoOAClosePositionReq()
             req.ctidTraderAccountId = self._account_id
             req.positionId          = position_id
-            req.volume              = volume if volume is not None else _lots_to_volume(self._lot_size)
+            req.volume              = volume if volume is not None else _lots_to_volume(self._lot_size, self._units_per_lot)
             return self._send_and_wait(req)
 
         result = await self._run_in_executor(_send)
@@ -579,8 +563,8 @@ def get_executor_unavailable_reason(
     if not token:
         return "CTRADER_ACCESS_TOKEN 누락"
 
-    _account_id = account_id or int(os.environ.get("CTRADER_ACCOUNT_ID", "0") or "0")
-    _symbol_id = symbol_id or int(os.environ.get("CTRADER_SYMBOL_ID", "0") or "0")
+    _account_id = account_id or 0
+    _symbol_id  = symbol_id  or 0
     if not _account_id:
         return "ctrader_account_id 미설정"
     if not _symbol_id:
@@ -593,12 +577,13 @@ def get_executor(
     env: Optional[str] = None,
     symbol_id: Optional[int] = None,
     lot_size: Optional[float] = None,
+    units_per_lot: Optional[int] = None,
 ) -> Optional[CTraderExecutor]:
     if get_executor_unavailable_reason(account_id=account_id, symbol_id=symbol_id):
         return None
 
-    _account_id = account_id or int(os.environ.get("CTRADER_ACCOUNT_ID", "0") or "0")
-    _symbol_id  = symbol_id  or int(os.environ.get("CTRADER_SYMBOL_ID",  "0") or "0")
+    _account_id = account_id or 0
+    _symbol_id  = symbol_id  or 0
 
     if _account_id not in _executors:
         _executors[_account_id] = CTraderExecutor(
@@ -606,6 +591,7 @@ def get_executor(
             env=env,
             symbol_id=_symbol_id,
             lot_size=lot_size,
+            units_per_lot=units_per_lot,
         )
         print(f"[cTrader] 새 executor 생성 — account={_account_id} env={env or 'env_default'} symbol={_symbol_id}")
     return _executors[_account_id]

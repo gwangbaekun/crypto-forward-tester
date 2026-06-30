@@ -11,9 +11,9 @@ venues:
       oi_accel_breakout_v2: { notional_ratio: 2.0 }   # 노출 2× equity, 9x → 증거금 0.22 equity. 합산 MDD ~30%
       spot_perp_cvd:        { notional_ratio: 3.0 }   # 노출 3× equity, 9x → 증거금 0.33 equity
   ctrader:
-    enabled: false        # 1차는 binance만. 동적 lot 사이징은 다음 사이클.
+    enabled: false        # true로 바꾸면 ctrader_accounts.yaml의 enabled 계좌 전체에 fan-out
     leverage: 3
-    account_id: 47198415  # FTMO live
+    # account/symbol/lot은 src/common/ctrader_accounts.yaml 에서 관리
     members:
       oi_accel_breakout_v2: { notional_ratio: 0.42 }  # 합산 MDD ~7%
       spot_perp_cvd:        { notional_ratio: 0.62 }

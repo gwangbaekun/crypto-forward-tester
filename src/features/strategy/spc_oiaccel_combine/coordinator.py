@@ -26,17 +26,25 @@ def _binance_executor():
     return get_executor()
 
 
-def _ctrader_executor(vcfg: Dict[str, Any]):
+def _get_ctrader_executors() -> Dict[str, Any]:
+    """ctrader_accounts.yaml의 enabled 계좌 전체 → {firm_key: executor}."""
+    from common.ctrader_account_loader import get_enabled_accounts
     from common.ctrader_executor import get_executor
-    return get_executor(account_id=vcfg.get("account_id"))
-
-
-def _get_executor(venue: str, vcfg: Dict[str, Any]):
-    if venue == "binance":
-        return _binance_executor()
-    if venue == "ctrader":
-        return _ctrader_executor(vcfg)
-    return None
+    result = {}
+    for firm_key, acfg in get_enabled_accounts().items():
+        try:
+            ex = get_executor(
+                account_id=acfg["account_id"],
+                env=acfg["env"],
+                symbol_id=acfg["symbol_id"],
+                lot_size=acfg.get("lot_size"),
+                units_per_lot=acfg.get("units_per_lot"),
+            )
+            if ex is not None:
+                result[firm_key] = ex
+        except Exception as e:
+            print(f"[{COMBINE_TAG}/ctrader/{firm_key}] executor 없음: {e}")
+    return result
 
 
 async def handle(
@@ -58,39 +66,43 @@ async def handle(
             continue  # 이 venue는 이 멤버를 미러하지 않음
         nr = float(member["notional_ratio"])
         lev = int(vcfg.get("leverage") or 1)
-        ex = None
-        try:
-            ex = _get_executor(venue, vcfg)
-        except Exception as e:
-            print(f"[{COMBINE_TAG}/{venue}] executor 없음: {e}")
-        if ex is None:
+
+        if venue == "binance":
+            executors = {"binance": _binance_executor()}
+        elif venue == "ctrader":
+            executors = _get_ctrader_executors()
+        else:
             continue
 
-        for ev in events:
-            kind = ev.get("event")
-            if kind == "entry":
-                pos = ev.get("position") or {}
-                side = pos.get("side")
-                if not side or not current_price:
-                    continue
-                try:
-                    result = await ex.open_position(symbol, side, current_price,
-                                                    leverage=lev, notional_ratio=nr)
-                    if result is None:
+        for firm_key, ex in executors.items():
+            if ex is None:
+                continue
+            tag = f"{venue}/{firm_key}" if venue == "ctrader" else venue
+            for ev in events:
+                kind = ev.get("event")
+                if kind == "entry":
+                    pos = ev.get("position") or {}
+                    side = pos.get("side")
+                    if not side or not current_price:
                         continue
-                    tp, sl = pos.get("tp"), pos.get("sl")
-                    if tp or sl:
-                        await ex.place_tp_sl(symbol, side, tp=tp, sl=sl)
-                    print(f"[{COMBINE_TAG}/{venue}] 진입 {side} {symbol} nr={nr} lev={lev}")
-                except Exception as e:
-                    print(f"[{COMBINE_TAG}/{venue}] 진입 오류: {e}")
-            elif kind == "close":
-                trade = ev.get("trade") or {}
-                side = trade.get("side")
-                if not side:
-                    continue
-                try:
-                    await ex.close_position(symbol, side)
-                    print(f"[{COMBINE_TAG}/{venue}] 청산 {side} {symbol}")
-                except Exception as e:
-                    print(f"[{COMBINE_TAG}/{venue}] 청산 오류: {e}")
+                    try:
+                        result = await ex.open_position(symbol, side, current_price,
+                                                        leverage=lev, notional_ratio=nr)
+                        if result is None:
+                            continue
+                        tp, sl = pos.get("tp"), pos.get("sl")
+                        if tp or sl:
+                            await ex.place_tp_sl(symbol, side, tp=tp, sl=sl)
+                        print(f"[{COMBINE_TAG}/{tag}] 진입 {side} {symbol} nr={nr} lev={lev}")
+                    except Exception as e:
+                        print(f"[{COMBINE_TAG}/{tag}] 진입 오류: {e}")
+                elif kind == "close":
+                    trade = ev.get("trade") or {}
+                    side = trade.get("side")
+                    if not side:
+                        continue
+                    try:
+                        await ex.close_position(symbol, side)
+                        print(f"[{COMBINE_TAG}/{tag}] 청산 {side} {symbol}")
+                    except Exception as e:
+                        print(f"[{COMBINE_TAG}/{tag}] 청산 오류: {e}")
