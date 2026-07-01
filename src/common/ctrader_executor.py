@@ -55,6 +55,7 @@ def _lots_to_volume(lots: float, units_per_lot: int = 1, max_volume: Optional[in
 _reactor_lock    = threading.Lock()
 _reactor_started = False
 _ctrader_tcp_isolation_patched = False
+_token_refresh_lock = threading.Lock()  # 여러 executor의 동시 refresh 충돌 방지
 
 
 def _patch_ctrader_tcp_protocol_for_multi_connection() -> None:
@@ -111,8 +112,11 @@ class CTraderExecutor:
         env_access_token = os.environ.get("CTRADER_ACCESS_TOKEN", "").strip()
         env_refresh_token = os.environ.get("CTRADER_REFRESH_TOKEN", "").strip()
         db_access_token, db_refresh_token = get_tokens()
-        self._access_token  = env_access_token or db_access_token
-        self._refresh_token = env_refresh_token or db_refresh_token
+        # DB가 우선: 런타임 refresh(_do_refresh_access_token)는 DB만 갱신하고 .env 파일은
+        # 안 건드리므로, .env를 먼저 보면 이미 rotate되어 폐기된 옛 토큰을 계속 쓰게 된다.
+        # .env는 OAuth 콜백 직후에만 값이 있는 최초 seed 용도, DB가 최신 authoritative 값.
+        self._access_token  = db_access_token or env_access_token
+        self._refresh_token = db_refresh_token or env_refresh_token
         self._account_id    = account_id or 0
         if not env:
             raise ValueError("ctrader_executor: env('demo'|'live') 가 없습니다. ctrader_accounts.yaml의 env 를 확인하세요.")
@@ -151,6 +155,10 @@ class CTraderExecutor:
     # ── Client 초기화 (reactor 스레드에서 실행) ──────────────────────────────
 
     def _setup_client(self) -> None:
+        # 매 (재)연결 시도마다 refresh 1회 허용 — 이전 refresh가 일시적 네트워크
+        # 오류 등으로 실패했어도 다음 재연결에서 다시 시도할 수 있게 한다.
+        self._refresh_attempted = False
+
         from ctrader_open_api import Client, EndPoints, Protobuf, TcpProtocol
         from ctrader_open_api.messages.OpenApiMessages_pb2 import (
             ProtoOAAccountAuthReq,
@@ -221,10 +229,10 @@ class CTraderExecutor:
             if c is not self._client:
                 return
             msg = str(getattr(reason, "value", "") or reason)
-            clean = "ConnectionDone" in msg
+            # 유휴 소켓 clean close("Connection was closed cleanly.")는 정상이므로
+            # 텔레그램 알림을 보내지 않는다. 상시 연결 특성상 재접속이 잦아 스팸이 됨.
+            # 알림은 ✅ 인증 완료만 남긴다.
             print(f"[cTrader] 연결 종료 (account={self._account_id}): {reason}")
-            if not clean:
-                _tg(f"⚠️ <b>[cTrader {self._env}]</b> 연결 끊김\naccount: <code>{self._account_id}</code>\n{msg[:120]}")
             self._authed = False
             self._ready_event.clear()
             self._reactor.callLater(3.0, self._setup_client)
@@ -235,10 +243,17 @@ class CTraderExecutor:
             if isinstance(payload, ProtoOAErrorRes):
                 desc = (getattr(payload, "description", "") or "").strip()
                 code = str(getattr(payload, "errorCode", "") or "").strip().upper()
-                denied = code == "ACCESS_DENIED" or "ACCESS_DENIED" in desc.upper()
-                if denied and not self._refresh_attempted:
+                # cTrader access token은 수명이 짧아 자주 만료된다(관측: CH_ACCESS_TOKEN_INVALID).
+                # ACCESS_DENIED만 보면 만료 케이스를 놓쳐서 refresh가 안 걸리고 계좌가 조용히 끊긴 채로 남는다.
+                token_issue = (
+                    code == "ACCESS_DENIED"
+                    or "ACCESS_DENIED" in desc.upper()
+                    or "TOKEN" in code
+                    or "TOKEN" in desc.upper()
+                )
+                if token_issue and not self._refresh_attempted:
                     self._refresh_attempted = True
-                    print(f"[cTrader] ACCESS_DENIED 감지 — 토큰 refresh 시도 (account={self._account_id})")
+                    print(f"[cTrader] 토큰 문제 감지({payload.errorCode}) — refresh 시도 (account={self._account_id})")
                     if self._refresh_access_token():
                         req = ProtoOAAccountAuthReq()
                         req.ctidTraderAccountId = self._account_id
@@ -302,6 +317,26 @@ class CTraderExecutor:
         _start_client_service()
 
     def _refresh_access_token(self) -> bool:
+        # 여러 계좌(executor)가 같은 access/refresh token을 공유하는 구조라,
+        # 토큰이 만료되면 동시에 refresh를 시도하게 된다. cTrader는 refresh_token을
+        # 사용할 때마다 새로 발급하고 이전 것을 폐기(rotate)하므로, 두 executor가
+        # 동시에 (아직 서로의 갱신 결과를 모른 채) 옛 refresh_token으로 각자 HTTP
+        # 요청을 보내면 나중 요청은 이미 폐기된 토큰이라 ACCESS_DENIED로 실패한다.
+        # lock으로 직렬화하고, 락을 얻었을 때 이미 다른 executor가 갱신해놨으면
+        # 그 값을 그대로 채택해 불필요한 중복 HTTP 요청/rotate 충돌을 피한다.
+        # DB를 기준으로 비교한다 — os.environ은 프로세스 기동 시점의 .env 스냅샷이라
+        # 런타임 refresh를 반영 못 하므로(오히려 더 낡은 값), 판단 기준으로 쓰면 안 된다.
+        with _token_refresh_lock:
+            db_access, db_refresh = get_tokens()
+            if db_access and db_access != self._access_token:
+                self._access_token = db_access
+                if db_refresh:
+                    self._refresh_token = db_refresh
+                print(f"[cTrader] 다른 executor가 이미 갱신한 토큰 채택 (account={self._account_id})")
+                return True
+            return self._do_refresh_access_token()
+
+    def _do_refresh_access_token(self) -> bool:
         if not (self._client_id and self._client_secret and self._refresh_token):
             print("[cTrader] refresh 불가: client/secret/refresh token 누락")
             return False
@@ -542,6 +577,96 @@ class CTraderExecutor:
         pass
 
 
+# ── 토큰 계좌 목록 조회 (읽기전용, OAuth 콜백 직후 진단용) ──────────────────────
+
+def fetch_account_list_by_token(
+    client_id: str,
+    client_secret: str,
+    access_token: str,
+    timeout: float = 15.0,
+) -> list:
+    """access_token 이 인증 가능한 전체 계좌 목록을 동기 조회.
+
+    공유 reactor 위에 임시 Client 를 붙였다 뗀다(상태 저장 없음, 실행 중인
+    다른 executor 연결과는 TCP isolation 패치로 큐가 섞이지 않는다).
+    반환: [{"ctidTraderAccountId": int, "traderLogin": int, "isLive": bool}, ...]
+    """
+    from ctrader_open_api import Client, EndPoints, Protobuf, TcpProtocol
+    from ctrader_open_api.messages.OpenApiMessages_pb2 import (
+        ProtoOAApplicationAuthReq,
+        ProtoOAApplicationAuthRes,
+        ProtoOAGetAccountListByAccessTokenReq,
+        ProtoOAGetAccountListByAccessTokenRes,
+        ProtoOAErrorRes,
+    )
+
+    reactor = _ensure_reactor()
+    result_future: concurrent.futures.Future = concurrent.futures.Future()
+
+    def _build():
+        client = Client(EndPoints.PROTOBUF_LIVE_HOST, EndPoints.PROTOBUF_PORT, TcpProtocol)
+
+        def _finish(value=None, error=None):
+            if not result_future.done():
+                if error is not None:
+                    result_future.set_exception(error)
+                else:
+                    result_future.set_result(value)
+            try:
+                client.stopService()
+            except Exception:
+                pass
+
+        def on_connected(c):
+            req = ProtoOAApplicationAuthReq()
+            req.clientId = client_id
+            req.clientSecret = client_secret
+            d = client.send(req)
+            if d is not None and hasattr(d, "addErrback"):
+                d.addErrback(lambda f: None)
+
+        def on_message(c, message):
+            payload = Protobuf.extract(message)
+            if isinstance(payload, ProtoOAErrorRes):
+                _finish(error=RuntimeError(f"{payload.errorCode}: {payload.description}"))
+            elif isinstance(payload, ProtoOAApplicationAuthRes):
+                req = ProtoOAGetAccountListByAccessTokenReq()
+                req.accessToken = access_token
+                d = client.send(req)
+                if d is not None and hasattr(d, "addErrback"):
+                    d.addErrback(lambda f: None)
+            elif isinstance(payload, ProtoOAGetAccountListByAccessTokenRes):
+                accounts = [
+                    {
+                        "ctidTraderAccountId": a.ctidTraderAccountId,
+                        "traderLogin": a.traderLogin,
+                        "isLive": bool(a.isLive),
+                    }
+                    for a in payload.ctidTraderAccount
+                ]
+                _finish(value=accounts)
+
+        def on_disconnected(c, reason):
+            _finish(error=RuntimeError(f"연결 종료: {reason}"))
+
+        client.setConnectedCallback(on_connected)
+        client.setDisconnectedCallback(on_disconnected)
+        client.setMessageReceivedCallback(on_message)
+        try:
+            d = client.startService()
+            if d is not None and hasattr(d, "addErrback"):
+                d.addErrback(lambda f: None)
+        except Exception as exc:
+            _finish(error=exc)
+
+    if getattr(reactor, "running", False):
+        reactor.callFromThread(_build)
+    else:
+        reactor.callWhenRunning(_build)
+
+    return result_future.result(timeout=timeout)
+
+
 # ── per-account 인스턴스 캐시 ────────────────────────────────────────────────
 
 _executors: Dict[int, CTraderExecutor] = {}
@@ -552,11 +677,31 @@ def get_all_executors() -> Dict[int, "CTraderExecutor"]:
     return _executors
 
 
+def _is_remote_environment() -> bool:
+    """Railway(원격 배포) 여부. 이 값이 없으면 로컬로 간주한다."""
+    return bool(os.environ.get("RAILWAY_ENVIRONMENT", "").strip())
+
+
+def _local_connect_allowed() -> bool:
+    """로컬에서 cTrader 인증/거래 허용 여부. 기본은 차단.
+
+    로컬과 원격이 동시에 같은 계좌에 붙으면 cTrader가 한쪽을 clean close 시키고
+    3초 재접속 루프로 서로를 끊는 문제가 있었다(어제 겪은 무한 재접속). 원격은
+    항상 붙고, 로컬은 기본 차단 — 필요할 때만 CTRADER_ALLOW_LOCAL=1 로 임시 허용.
+    """
+    if _is_remote_environment():
+        return True
+    return os.environ.get("CTRADER_ALLOW_LOCAL", "").strip().lower() in ("1", "true", "yes")
+
+
 def get_executor_unavailable_reason(
     account_id: Optional[int] = None,
     symbol_id: Optional[int] = None,
 ) -> Optional[str]:
     """executor 생성이 불가한 이유를 반환. 생성 가능하면 None."""
+    if not _local_connect_allowed():
+        return "로컬 환경 — cTrader 인증/거래 차단됨 (필요 시 CTRADER_ALLOW_LOCAL=1 로 임시 허용)"
+
     token = os.environ.get("CTRADER_ACCESS_TOKEN", "").strip()
     if not token:
         token, _ = get_tokens()

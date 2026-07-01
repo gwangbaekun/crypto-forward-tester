@@ -18,19 +18,19 @@ accounts:
     label: "FTMO"
     enabled: true
     env: live
-    account_id: 47198415
+    account_id: 47729078   # ctidTraderAccountId (traderLogin 17142070) — 기존 47198415는 이 토큰 cTID에 없는 값이었음
     symbol_id: 323        # ETHUSD on FTMO live
     lot_size: 0.05
     units_per_lot: 1
 
   fintokei:
     label: "Fintokei"
-    enabled: true       
-    env: live
-    account_id: 4294671
-    symbol_id: 323          
+    enabled: true
+    env: demo   # cTrader API 상 isLive=false로 등록된 계좌(consent 화면에도 "Demo"로 표시). traderLogin 4294671과 일치하는 실계좌.
+    account_id: 47779327   # ctidTraderAccountId (traderLogin 4294671) — 기존 4294671은 traderLogin을 잘못 넣은 값이었음
+    symbol_id: 323
     lot_size: 0.05
-    units_per_lot: 1     
+    units_per_lot: 1
 
   funding_pips:
     label: "Funding Pips"
