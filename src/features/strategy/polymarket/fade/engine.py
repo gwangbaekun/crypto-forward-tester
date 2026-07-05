@@ -24,6 +24,7 @@ from db.models import PolymarketFadeWatch, PolymarketFadePosition
 from features.strategy.polymarket._data import client as poly_client
 from features.strategy.polymarket.fade import signal as fade_signal
 from features.strategy.polymarket.fade import oracle_client
+from features.notifications.telegram_service import TelegramService
 
 log = logging.getLogger("polymarket.fade")
 
@@ -37,6 +38,15 @@ _live_status: dict[str, dict] = {}
 def get_live_status() -> dict[str, dict]:
     """condition_id → {last_scan_ts, p0, price, rel_pct, spike_now, has_position}."""
     return _live_status
+
+
+def _tg(msg: str) -> None:
+    try:
+        ok, err = TelegramService().send_message(msg)
+        if not ok and "not configured" not in err:
+            log.warning("[fade] 텔레그램 전송 실패: %s", err)
+    except Exception as e:
+        log.debug("[fade] 텔레그램 예외: %s", e)
 
 
 def _load_cfg() -> dict:
@@ -124,6 +134,13 @@ async def _scan_market(watch: PolymarketFadeWatch) -> None:
         "[fade] SIGNAL 진입 NO | %s | p0=%.4f entry=%.4f no_px=%.4f size=$%.2f target=%.4f stop=%.4f",
         sig.question[:50], sig.p0, sig.entry_px, no_price, size_usd, sig.target_px, sig.stop_px,
     )
+    _tg(
+        f"📡 <b>[Polymarket Fade] 진입 신호 감지</b>\n\n"
+        f"<b>{sig.question[:80]}</b>\n\n"
+        f"p0: <code>{sig.p0:.4f}</code>  →  entry(YES): <code>{sig.entry_px:.4f}</code>\n"
+        f"NO 매수가: <code>{no_price:.4f}</code>  |  size: <code>${size_usd:.2f}</code>\n"
+        f"target: <code>{sig.target_px:.4f}</code>  |  stop: <code>{sig.stop_px:.4f}</code>"
+    )
     result = await oracle_client.place_order(
         side="NO", action="buy", condition_id=sig.condition_id, question=sig.question,
         token_id=sig.no_token_id, price=no_price, size_usd=size_usd,
@@ -195,6 +212,14 @@ async def _check_exit(pos: PolymarketFadePosition) -> None:
     log.info(
         "[fade] SIGNAL 청산 %s | %s | exit=%.4f ret=%.2f%% shares=%s",
         reason, pos.question[:50] if pos.question else pos.condition_id[:12], exit_px, ret_pct, pos.shares,
+    )
+    pnl_e = "✅" if ret_pct >= 0 else "❌"
+    _tg(
+        f"🔔 <b>[Polymarket Fade] 청산 신호 감지</b>\n\n"
+        f"<b>{pos.question[:80] if pos.question else pos.condition_id[:12]}</b>\n\n"
+        f"사유: <code>{reason}</code>\n"
+        f"entry(YES): <code>{pos.entry_px:.4f}</code>  →  exit: <code>{exit_px:.4f}</code>\n"
+        f"PnL: {pnl_e} <code>{ret_pct:+.2f}%</code>"
     )
     # NO 매도가 = 1 - YES 청산가. 보유수량(shares) 그대로 매도.
     await oracle_client.place_order(
