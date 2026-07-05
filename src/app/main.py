@@ -48,55 +48,7 @@ async def startup_binance_price_ws() -> None:
 
 
 async def startup_ctrader() -> None:
-    try:
-        from features.strategy.common.config_loader import (
-            is_ctrader_live_enabled, get_master_config, get_ctrader_config,
-        )
-        from common import ctrader_executor as ctrader_exec
-
-        master  = get_master_config() or {}
-        enabled = [k for k in master if is_ctrader_live_enabled(k)]
-        if not enabled:
-            return
-
-        executors: dict = {}
-        for strategy_key in enabled:
-            cfg      = get_ctrader_config(strategy_key)
-            executor = ctrader_exec.get_executor(
-                account_id=cfg.get("ctrader_account_id"),
-                env=cfg.get("ctrader_env"),
-                symbol_id=cfg.get("ctrader_symbol_id"),
-                lot_size=cfg.get("ctrader_lot_size"),
-            )
-            if executor is None:
-                reason_fn = getattr(ctrader_exec, "get_executor_unavailable_reason", None)
-                if callable(reason_fn):
-                    reason = reason_fn(
-                        account_id=cfg.get("ctrader_account_id"),
-                        symbol_id=cfg.get("ctrader_symbol_id"),
-                    ) or "unknown"
-                else:
-                    reason = "executor 생성 불가(ctrader_executor 버전 불일치)"
-                print(f"[cTrader] ⚠️  {strategy_key} — executor 없음 ({reason})")
-            else:
-                executors[executor._account_id] = executor
-
-        if not executors:
-            return
-
-        print(f"[cTrader] Connecting... (strategies: {', '.join(enabled)})")
-        for _ in range(60):
-            await asyncio.sleep(0.5)
-            if all(e._authed for e in executors.values()):
-                for e in executors.values():
-                    print(f"[cTrader] ✅ Authenticated — account={e._account_id} env={e._env} symbol={e._symbol_id}")
-                return
-        # 타임아웃 시 인증된 것만 보고
-        for e in executors.values():
-            status = "✅" if e._authed else "⚠️ timeout"
-            print(f"[cTrader] {status} — account={e._account_id} env={e._env}")
-    except Exception as exc:
-        print(f"[cTrader] startup error: {exc}")
+    print("[cTrader] lazy connect 모드 — 주문(체결) 시에만 연결. startup 사전 연결 없음.")
 
 
 _VALUE_SCAN_POLL_SEC = 600  # 10분마다 catch-up 확인 (하루 1회 보장)

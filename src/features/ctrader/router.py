@@ -50,31 +50,19 @@ def _get_or_bootstrap_executors() -> dict:
 
 @router.get("/positions")
 async def ctrader_positions():
-    """현재 cTrader 계정의 오픈 포지션 조회 (ProtoOAReconcileReq 사용)."""
-    import asyncio
-    executors = _get_or_bootstrap_executors()
-    if not executors:
-        from common.ctrader_executor import get_executor_unavailable_reason
-        reason = get_executor_unavailable_reason() or "CTRADER_ACCESS_TOKEN 등 환경변수를 확인하세요."
-        return JSONResponse({"positions": [], "error": f"executor 없음 — {reason}"})
-
-    # 새로 bootstrap된 executor는 인증 완료까지 대기
-    await asyncio.sleep(1.0)
+    from common.ctrader_executor import get_all_executors
+    executors = get_all_executors()
 
     all_positions: list = []
-    errors: list = []
     for account_id, ex in executors.items():
-        try:
-            result = await ex.get_position(symbol="")
-            if result and "positions" in result:
-                all_positions.extend(result["positions"])
-        except Exception as e:
-            errors.append(f"account={account_id}: {e}")
+        cached = ex.get_cached_position()
+        if cached and "positions" in cached:
+            all_positions.extend(cached["positions"])
 
     return JSONResponse({
         "positions": all_positions,
         "account_count": len(executors),
-        **({"errors": errors} if errors else {}),
+        "note": "cTrader는 주문 시에만 연결됩니다. 포지션은 최근 주문 이후 캐시만 표시됩니다.",
     })
 
 
@@ -83,14 +71,9 @@ async def ctrader_close_position(
     position_id: int,
     volume: int = Query(default=None, description="청산 볼륨 (units). 미입력 시 executor lot_size 기본값 사용"),
 ):
-    """positionId로 cTrader 포지션 강제 청산."""
-    import asyncio
     executors = _get_or_bootstrap_executors()
     if not executors:
         raise HTTPException(status_code=503, detail="executor 없음 — CTRADER_ACCESS_TOKEN 등 환경변수를 확인하세요.")
-
-    # 새로 bootstrap된 executor는 인증 완료까지 대기
-    await asyncio.sleep(2.0)
 
     for account_id, ex in executors.items():
         result = await ex.close_position_by_id(position_id, volume=volume)

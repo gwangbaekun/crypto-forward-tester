@@ -40,6 +40,9 @@ def _tg(msg: str) -> None:
     threading.Thread(target=_send, daemon=True).start()
 
 _CTRADER_TOKEN_URL = "https://openapi.ctrader.com/apps/token"
+CTRADER_IDLE_DISCONNECT_SEC = float(os.environ.get("CTRADER_IDLE_DISCONNECT_SEC", "60"))
+
+
 def _lots_to_volume(lots: float, units_per_lot: int = 1, max_volume: Optional[int] = None) -> int:
     vol = max(1, int(round(float(lots) * units_per_lot)))
     if max_volume and max_volume > 0 and vol > max_volume:
@@ -131,20 +134,17 @@ class CTraderExecutor:
         self._ready_event                              = threading.Event()
         self._authed                                   = False
         self._lock                                     = threading.Lock()
-        self._send_lock                                = threading.Lock()  # 동시 전송 직렬화
+        self._send_lock                                = threading.Lock()
+        self._connect_lock                             = threading.Lock()
         self._pending: Optional[concurrent.futures.Future] = None
         self._open_position_id: Optional[int]          = None
         self._refresh_attempted                         = False
         self._position_cache: Optional[Dict]           = None
         self._position_cache_ts: float                 = 0.0
-        self._position_fetch_lock: Optional[asyncio.Lock] = None  # lazy init (event loop 필요)
+        self._position_fetch_lock: Optional[asyncio.Lock] = None
+        self._idle_call: Any                           = None
 
         self._reactor = _ensure_reactor()
-        # reactor가 이미 실행 중이면 thread-safe하게 setup 예약
-        if getattr(self._reactor, "running", False):
-            self._reactor.callFromThread(self._setup_client)
-        else:
-            self._reactor.callWhenRunning(self._setup_client)
 
     def _ready(self) -> bool:
         return bool(
@@ -224,18 +224,14 @@ class CTraderExecutor:
             _safe_send(req)
 
         def on_disconnected(c, reason):
-            # c가 현재 활성 client가 아니면 이미 교체된 구 client의 콜백이므로 무시한다.
-            # stopService() 호출이 on_disconnected를 재트리거해도 여기서 차단된다.
             if c is not self._client:
                 return
-            msg = str(getattr(reason, "value", "") or reason)
-            # 유휴 소켓 clean close("Connection was closed cleanly.")는 정상이므로
-            # 텔레그램 알림을 보내지 않는다. 상시 연결 특성상 재접속이 잦아 스팸이 됨.
-            # 알림은 ✅ 인증 완료만 남긴다.
             print(f"[cTrader] 연결 종료 (account={self._account_id}): {reason}")
             self._authed = False
             self._ready_event.clear()
-            self._reactor.callLater(3.0, self._setup_client)
+            if self._idle_call is not None and self._idle_call.active():
+                self._idle_call.cancel()
+                self._idle_call = None
 
         def on_message(c, message):
             payload = Protobuf.extract(message)
@@ -278,7 +274,9 @@ class CTraderExecutor:
                 self._refresh_attempted = False
                 self._ready_event.set()
                 print(f"[cTrader] ✅ 인증 완료 (account={self._account_id} env={self._env})")
-                _tg(f"✅ <b>[cTrader {self._env}]</b> 인증 완료\naccount: <code>{self._account_id}</code>")
+                # 인증은 상시 연결/재접속마다 반복 발생하는 인프라 이벤트라 텔레그램을 보내지 않는다.
+                # (재접속 루프가 돌면 계좌당 수 초마다 인증이 반복 → 문자 스팸의 직접 원인이었음)
+                # 실제 buy/sell 이벤트(체결/주문오류)만 텔레그램으로 알린다.
                 return
 
             if isinstance(payload, ProtoOAOrderErrorEvent):
@@ -315,6 +313,47 @@ class CTraderExecutor:
         client.setDisconnectedCallback(on_disconnected)
         client.setMessageReceivedCallback(on_message)
         _start_client_service()
+
+    def _ensure_connected(self, timeout: float = 10.0) -> bool:
+        if self._authed and self._client is not None:
+            self._bump_idle()
+            return True
+        with self._connect_lock:
+            if self._authed and self._client is not None:
+                self._bump_idle()
+                return True
+            self._ready_event.clear()
+            if getattr(self._reactor, "running", False):
+                self._reactor.callFromThread(self._setup_client)
+            else:
+                self._reactor.callWhenRunning(self._setup_client)
+            ok = self._ready_event.wait(timeout=timeout)
+            if ok:
+                self._bump_idle()
+            return ok
+
+    def _bump_idle(self) -> None:
+        if getattr(self._reactor, "running", False):
+            self._reactor.callFromThread(self._reschedule_idle)
+
+    def _reschedule_idle(self) -> None:
+        if self._idle_call is not None and self._idle_call.active():
+            self._idle_call.cancel()
+        self._idle_call = self._reactor.callLater(CTRADER_IDLE_DISCONNECT_SEC, self._idle_disconnect)
+
+    def _idle_disconnect(self) -> None:
+        self._idle_call = None
+        client = self._client
+        if client is None:
+            return
+        print(f"[cTrader] 유휴 {CTRADER_IDLE_DISCONNECT_SEC:.0f}s 초과 — 연결 해제 (account={self._account_id})")
+        self._client = None
+        self._authed = False
+        self._ready_event.clear()
+        try:
+            client.stopService()
+        except Exception:
+            pass
 
     def _refresh_access_token(self) -> bool:
         # 여러 계좌(executor)가 같은 access/refresh token을 공유하는 구조라,
@@ -408,11 +447,10 @@ class CTraderExecutor:
             f.set_result(result)
 
     def _send_and_wait(self, req: Any, timeout: float = 10.0) -> Optional[Dict]:
-        if not self._ready_event.wait(timeout=timeout):
-            print("[cTrader] 연결 대기 타임아웃")
+        if not self._ensure_connected(timeout=timeout):
+            print(f"[cTrader] 연결 실패 (account={self._account_id})")
             return None
 
-        # 동시에 여러 요청이 _pending 슬롯을 덮어쓰지 않도록 직렬화
         with self._send_lock:
             loop = concurrent.futures.Future()
             with self._lock:
@@ -428,12 +466,14 @@ class CTraderExecutor:
             self._reactor.callFromThread(_send_from_thread)
 
             try:
-                return loop.result(timeout=timeout)
+                result = loop.result(timeout=timeout)
             except concurrent.futures.TimeoutError:
                 print("[cTrader] 응답 타임아웃")
                 with self._lock:
                     self._pending = None
-                return None
+                result = None
+        self._bump_idle()
+        return result
 
     # ── asyncio 공개 API ─────────────────────────────────────────────────────
 
@@ -466,10 +506,41 @@ class CTraderExecutor:
             return self._send_and_wait(req)
 
         result = await self._run_in_executor(_send)
+        if result is None:
+            print(f"[cTrader] 체결 확인 타임아웃 — reconcile로 실제 진입 확인 (account={self._account_id})")
+            result = await self._reconcile_open(side)
         if result:
-            self._position_cache = None  # 진입 후 포지션 캐시 무효화
+            self._position_cache = None
             print(f"[cTrader] ✅ 진입 — side={side} lots={self._lot_size} fill={result.get('avgPrice', 0):.4f}")
         return result
+
+    async def _reconcile_open(self, side: str) -> Optional[Dict]:
+        result = await self.get_position(symbol="", cache_ttl=0.0)
+        if not result:
+            return None
+        want = "BUY" if side == "long" else "SELL"
+        for p in result.get("positions", []):
+            if p.get("symbolId") == self._symbol_id and p.get("side") == want:
+                pid = p.get("positionId")
+                if pid:
+                    self._open_position_id = pid
+                print(f"[cTrader] reconcile — 진입 확인됨 positionId={pid} (account={self._account_id})")
+                return {"avgPrice": float(p.get("price") or 0), "positionId": pid, "reconciled": True}
+        print(f"[cTrader] reconcile — 진입 안 됨 (account={self._account_id})")
+        return None
+
+    async def _reconcile_close(self, position_id: Optional[int]) -> Optional[Dict]:
+        if not position_id:
+            return None
+        result = await self.get_position(symbol="", cache_ttl=0.0)
+        if not result:
+            return None
+        still_open = any(p.get("positionId") == position_id for p in result.get("positions", []))
+        if still_open:
+            print(f"[cTrader] reconcile — 아직 청산 안 됨 positionId={position_id} (account={self._account_id})")
+            return None
+        print(f"[cTrader] reconcile — 청산 확인됨 positionId={position_id} (account={self._account_id})")
+        return {"avgPrice": 0.0, "positionId": position_id, "reconciled": True, "closed": True}
 
     async def close_position(self, symbol: str, side: str) -> Optional[Dict]:
         if not self._ready():
@@ -487,9 +558,12 @@ class CTraderExecutor:
             return self._send_and_wait(req)
 
         result = await self._run_in_executor(_send)
+        if result is None:
+            print(f"[cTrader] 청산 확인 타임아웃 — reconcile로 실제 청산 확인 (account={self._account_id})")
+            result = await self._reconcile_close(self._open_position_id)
         if result:
             self._open_position_id = None
-            self._position_cache = None  # 청산 후 포지션 캐시 무효화
+            self._position_cache = None
             print(f"[cTrader] ✅ 청산 — fill={result.get('avgPrice', 0):.4f}")
         return result
 
@@ -531,12 +605,17 @@ class CTraderExecutor:
             return self._send_and_wait(req)
 
         result = await self._run_in_executor(_send)
+        if result is None:
+            result = await self._reconcile_close(position_id)
         if result:
             if self._open_position_id == position_id:
                 self._open_position_id = None
-            self._position_cache = None  # 강제 청산 후 포지션 캐시 무효화
+            self._position_cache = None
             print(f"[cTrader] ✅ 강제 청산 — positionId={position_id} fill={result.get('avgPrice', 0):.4f}")
         return result
+
+    def get_cached_position(self) -> Optional[Dict]:
+        return self._position_cache
 
     async def get_position(self, symbol: str, cache_ttl: float = 8.0) -> Optional[Dict]:
         """오픈 포지션 조회. cache_ttl 초 이내 재요청은 캐시를 반환해 cTrader 부하를 방지.
