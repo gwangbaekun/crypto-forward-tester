@@ -49,6 +49,48 @@ async def startup_binance_price_ws() -> None:
 
 async def startup_ctrader() -> None:
     print("[cTrader] lazy connect 모드 — 주문(체결) 시에만 연결. startup 사전 연결 없음.")
+    asyncio.create_task(_ctrader_token_healthcheck())
+
+
+async def _ctrader_token_healthcheck() -> None:
+    import os
+    try:
+        from common.ctrader_token_store import get_tokens
+        from common.ctrader_executor import fetch_account_list_by_token
+        from common.ctrader_account_loader import get_enabled_accounts
+
+        client_id     = os.environ.get("CTRADER_CLIENT_ID", "").strip()
+        client_secret = os.environ.get("CTRADER_CLIENT_SECRET", "").strip()
+        db_at, _db_rt = get_tokens()
+        env_at = os.environ.get("CTRADER_ACCESS_TOKEN", "").strip()
+        access_token = db_at or env_at
+        source = "DB" if db_at else ("env" if env_at else "none")
+
+        if not (client_id and client_secret and access_token):
+            print(f"[cTrader][healthcheck] ⚠️ 자격증명 누락 — token source={source}")
+            return
+
+        loop = asyncio.get_event_loop()
+        try:
+            accounts = await loop.run_in_executor(
+                None, fetch_account_list_by_token, client_id, client_secret, access_token, 15.0,
+            )
+        except Exception as e:
+            print(f"[cTrader][healthcheck] ❌ access token 무효 (source={source}): {e}")
+            print("[cTrader][healthcheck]    → 실주문 시 executor가 refresh 시도. 계속 실패하면 재-OAuth 필요.")
+            return
+
+        granted = {a["ctidTraderAccountId"] for a in accounts}
+        print(f"[cTrader][healthcheck] ✅ access token 유효 (source={source}) — grant 계좌 {len(accounts)}개")
+        for a in accounts:
+            print(f"[cTrader][healthcheck]    ctid={a['ctidTraderAccountId']} login={a['traderLogin']} {'LIVE' if a['isLive'] else 'demo'}")
+
+        for firm, cfg in get_enabled_accounts().items():
+            acc_id = int(cfg.get("account_id") or 0)
+            mark = "✅ grant됨" if acc_id in granted else "❌ 토큰이 grant 안 함 — 인증 실패 예정 (재-OAuth 필요)"
+            print(f"[cTrader][healthcheck]    enabled '{firm}' account={acc_id} → {mark}")
+    except Exception as e:
+        print(f"[cTrader][healthcheck] 예외: {e}")
 
 
 _VALUE_SCAN_POLL_SEC = 600  # 10분마다 catch-up 확인 (하루 1회 보장)
