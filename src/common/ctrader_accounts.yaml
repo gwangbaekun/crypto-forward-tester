@@ -18,7 +18,7 @@ accounts:
     label: "FTMO"
     enabled: true
     env: live
-    account_id: 47729078   # ctidTraderAccountId (traderLogin 17142070) — 기존 47198415는 이 토큰 cTID에 없는 값이었음
+    account_id: 47821667   # ctidTraderAccountId (traderLogin 17147778) — 이전 47729078은 RET_ACCOUNT_DISABLED로 교체
     symbol_id: 323        # ETHUSD on FTMO live
     lot_size: 0.05
     units_per_lot: 1
