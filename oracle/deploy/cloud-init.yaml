@@ -1,0 +1,10 @@
+#cloud-config
+package_update: true
+packages:
+  - docker.io
+  - docker-compose-v2
+runcmd:
+  - systemctl enable --now docker
+  - usermod -aG docker ubuntu
+  - iptables -I INPUT -p tcp --dport 9090 -j ACCEPT || true
+  - netfilter-persistent save || true

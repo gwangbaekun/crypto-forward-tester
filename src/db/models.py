@@ -24,6 +24,8 @@ def create_tables(engine) -> None:
     Base.metadata.create_all(engine)
     _ensure_forward_trades_columns(engine)
     _ensure_polymarket_signals_columns(engine)
+    _ensure_polymarket_fade_watch_columns(engine)
+    _ensure_polymarket_fade_position_columns(engine)
 
 
 def _ensure_forward_trades_columns(engine) -> None:
@@ -236,6 +238,38 @@ def _ensure_polymarket_signals_columns(engine) -> None:
         ))
 
 
+def _ensure_polymarket_fade_watch_columns(engine) -> None:
+    """polymarket_fade_watch 신규 컬럼 backfill (기존 DB 호환)."""
+    insp = inspect(engine)
+    if "polymarket_fade_watch" not in insp.get_table_names():
+        return
+    existing = {c["name"] for c in insp.get_columns("polymarket_fade_watch")}
+    if "start_ts" in existing:
+        return
+    with engine.begin() as conn:
+        conn.execute(text("ALTER TABLE polymarket_fade_watch ADD COLUMN start_ts INTEGER"))
+
+
+def _ensure_polymarket_fade_position_columns(engine) -> None:
+    """polymarket_fade_positions 신규 컬럼 backfill (기존 DB 호환)."""
+    insp = inspect(engine)
+    if "polymarket_fade_positions" not in insp.get_table_names():
+        return
+    existing = {c["name"] for c in insp.get_columns("polymarket_fade_positions")}
+    required = {
+        "shares":       "ALTER TABLE polymarket_fade_positions ADD COLUMN shares FLOAT",
+        "entry_usd":    "ALTER TABLE polymarket_fade_positions ADD COLUMN entry_usd FLOAT",
+        "order_id":     "ALTER TABLE polymarket_fade_positions ADD COLUMN order_id VARCHAR(128)",
+        "order_status": "ALTER TABLE polymarket_fade_positions ADD COLUMN order_status VARCHAR(16)",
+    }
+    missing = [sql for col, sql in required.items() if col not in existing]
+    if not missing:
+        return
+    with engine.begin() as conn:
+        for sql in missing:
+            conn.execute(text(sql))
+
+
 class ValueScanSnapshot(Base):
     """스캔 결과 rows — date + market 기준으로 upsert."""
 
@@ -282,7 +316,7 @@ class PolymarketSignal(Base):
 
 
 class PolymarketJob(Base):
-    """Polymarket 비동기 작업 큐 (Railway enqueue -> GCP worker execute)."""
+    """Polymarket 비동기 작업 큐 (Railway enqueue -> worker execute)."""
 
     __tablename__ = "polymarket_jobs"
 
@@ -298,7 +332,7 @@ class PolymarketJob(Base):
 
 
 class PolymarketLiveMarket(Base):
-    """GCP 엔진이 주기적으로 upsert하는 활성 마켓 캐시."""
+    """엔진이 주기적으로 upsert하는 활성 마켓 캐시."""
 
     __tablename__ = "polymarket_live_markets"
 
@@ -313,6 +347,63 @@ class PolymarketLiveMarket(Base):
     yes_token_id: Mapped[Optional[str]]  = mapped_column(String(128), nullable=True)
     no_token_id:  Mapped[Optional[str]]  = mapped_column(String(128), nullable=True)
     updated_at:   Mapped[datetime]       = mapped_column(DateTime,     nullable=False, default=datetime.utcnow)
+
+
+class PolymarketFadeWatch(Base):
+    """fade 전략 워치리스트 — 유저가 직접 추가/삭제하는 대상 마켓 (btc_backtest news_lag 워치리스트와 동일 컨벤션)."""
+
+    __tablename__ = "polymarket_fade_watch"
+
+    condition_id: Mapped[str]            = mapped_column(String(128), primary_key=True)
+    question:     Mapped[Optional[str]]  = mapped_column(String(512), nullable=True)
+    yes_token_id: Mapped[Optional[str]]  = mapped_column(String(128), nullable=True)
+    no_token_id:  Mapped[Optional[str]]  = mapped_column(String(128), nullable=True)
+    volume_usd:   Mapped[Optional[float]] = mapped_column(Float,       nullable=True)
+    start_ts:     Mapped[Optional[int]]  = mapped_column(Integer,      nullable=True)
+    end_ts:       Mapped[Optional[int]]  = mapped_column(Integer,      nullable=True)
+    status:       Mapped[str]            = mapped_column(String(16),  nullable=False, default="included")  # included|excluded
+    added_at:     Mapped[datetime]       = mapped_column(DateTime,     nullable=False, default=datetime.utcnow)
+
+
+class PolymarketFadeCurve(Base):
+    """fade 워치리스트 종목의 전체 기간 60분봉 캐시 (add 시 최초 1회 cold fetch, 차트용)."""
+
+    __tablename__ = "polymarket_fade_curves"
+
+    condition_id: Mapped[str]      = mapped_column(String(128), primary_key=True)
+    pts_json:     Mapped[str]      = mapped_column(Text,     nullable=False)
+    fetched_at:   Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.utcnow)
+
+
+class PolymarketFadePosition(Base):
+    """fade 전략 포지션 — 스파이크 진입(NO) ~ 되돌림/타임아웃/손절 청산까지 상태 추적.
+
+    파라미터는 btc_backtest 백테스트로 검증된 값 고정: retrace=0.80, timeout=72h, stop_loss=0.20.
+    """
+
+    __tablename__ = "polymarket_fade_positions"
+
+    id:            Mapped[int]            = mapped_column(Integer, primary_key=True, autoincrement=True)
+    condition_id:  Mapped[str]            = mapped_column(String(128), nullable=False, index=True)
+    question:      Mapped[Optional[str]]  = mapped_column(String(512), nullable=True)
+    no_token_id:   Mapped[Optional[str]]  = mapped_column(String(128), nullable=True)
+    p0:            Mapped[float]          = mapped_column(Float,       nullable=False)
+    entry_px:      Mapped[float]          = mapped_column(Float,       nullable=False)  # YES 스파이크 진입가
+    target_px:     Mapped[float]          = mapped_column(Float,       nullable=False)  # 되돌림 청산 목표가
+    stop_px:       Mapped[float]          = mapped_column(Float,       nullable=False)  # 손절가
+    entry_ts:      Mapped[int]            = mapped_column(Integer,     nullable=False)
+    timeout_ts:    Mapped[int]            = mapped_column(Integer,     nullable=False)
+    status:        Mapped[str]            = mapped_column(String(16), nullable=False, default="open", index=True)  # open|closed
+    exit_px:       Mapped[Optional[float]] = mapped_column(Float,      nullable=True)
+    exit_ts:       Mapped[Optional[int]]  = mapped_column(Integer,     nullable=True)
+    exit_reason:   Mapped[Optional[str]]  = mapped_column(String(16), nullable=True)  # 되돌림|손절|타임아웃
+    ret_pct:       Mapped[Optional[float]] = mapped_column(Float,      nullable=True)
+    # 실주문 추적 (전액 사이징) — 진입 시 실제 체결 수량/금액, 오라클 주문 id
+    shares:        Mapped[Optional[float]] = mapped_column(Float,      nullable=True)
+    entry_usd:     Mapped[Optional[float]] = mapped_column(Float,      nullable=True)
+    order_id:      Mapped[Optional[str]]  = mapped_column(String(128), nullable=True)
+    order_status:  Mapped[Optional[str]]  = mapped_column(String(16), nullable=True)  # matched|live|failed|logged
+    created_at:    Mapped[datetime]       = mapped_column(DateTime,    nullable=False, default=datetime.utcnow)
 
 
 class CTraderToken(Base):

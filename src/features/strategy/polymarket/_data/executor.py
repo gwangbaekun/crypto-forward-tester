@@ -77,10 +77,14 @@ async def place_order(
     token_id: str,
     price: float,
     max_usd: float = 0.0,
+    side: str = "BUY",
+    size_shares: float | None = None,
 ) -> dict[str, Any]:
-    """GTC 지정가 매수 주문. 항상 Polymarket 이 수락하는 절대 최솟값으로 시도.
+    """GTC 지정가 주문. side="BUY"(기본)|"SELL".
 
-    max_usd > 0 이면 최솟값이 max_usd 를 초과하는 마켓은 skip (status="skipped").
+    size_shares 미지정 시 Polymarket 이 수락하는 절대 최솟값으로 시도(기존 동작).
+    size_shares 지정 시 그 수량(shares)으로 주문 — fade 처럼 시드 기반 사이징에 사용.
+    max_usd > 0 이면 주문 명목가가 max_usd 를 초과하면 skip (status="skipped").
 
     Returns:
         {"order_id": str, "status": "matched"|"live"|"delayed"|"unmatched"|"failed"|"skipped",
@@ -95,14 +99,20 @@ async def place_order(
 
     from py_clob_client_v2 import OrderArgs, OrderType, PartialCreateOrderOptions, Side
 
-    shares, effective_usd = _min_order(price)
+    _side = Side.SELL if str(side).upper() == "SELL" else Side.BUY
+
+    if size_shares is not None and size_shares > 0:
+        shares = math.ceil(size_shares * 100) / 100   # 2dp 올림
+        effective_usd = round(shares * price, 4)
+    else:
+        shares, effective_usd = _min_order(price)
 
     if max_usd > 0 and effective_usd > max_usd:
         log.info(
-            "[executor] skip (min $%.2f > max $%.2f) token=%s price=%.4f",
-            effective_usd, max_usd, token_id[:12], price,
+            "[executor] skip (order $%.2f > max $%.2f) token=%s price=%.4f side=%s",
+            effective_usd, max_usd, token_id[:12], price, _side,
         )
-        return {"order_id": "", "status": "skipped", "error": f"min_cost ${effective_usd:.2f} > max ${max_usd:.2f}"}
+        return {"order_id": "", "status": "skipped", "error": f"order_cost ${effective_usd:.2f} > max ${max_usd:.2f}"}
 
     def _sync() -> dict[str, Any]:
         client = _get_clob_client()
@@ -111,7 +121,7 @@ async def place_order(
                 token_id = token_id,
                 price    = round(price, 4),
                 size     = shares,
-                side     = Side.BUY,
+                side     = _side,
             ),
             options    = PartialCreateOrderOptions(tick_size=_TICK_SIZE),
             order_type = OrderType.GTC,
@@ -122,8 +132,8 @@ async def place_order(
         order_id = resp.get("orderID") or resp.get("orderId") or resp.get("id") or ""
         status   = resp.get("status", "live")
         log.info(
-            "[executor] BUY token=%s price=%.4f shares=%.2f usd=$%.4f order_id=%s status=%s",
-            token_id[:12], price, shares, effective_usd, order_id, status,
+            "[executor] %s token=%s price=%.4f shares=%.2f usd=$%.4f order_id=%s status=%s",
+            _side, token_id[:12], price, shares, effective_usd, order_id, status,
         )
         return {"order_id": order_id, "status": status, "raw": resp, "shares": shares, "usd": effective_usd}
     except Exception as e:
@@ -150,7 +160,7 @@ async def place_order(
                         token_id = token_id,
                         price    = round(price, 4),
                         size     = corrected_shares,
-                        side     = Side.BUY,
+                        side     = _side,
                     ),
                     options    = PartialCreateOrderOptions(tick_size=_TICK_SIZE),
                     order_type = OrderType.GTC,
@@ -161,8 +171,8 @@ async def place_order(
                 order_id = resp2.get("orderID") or resp2.get("orderId") or resp2.get("id") or ""
                 status   = resp2.get("status", "live")
                 log.info(
-                    "[executor] BUY retry(min_size=%.2f) token=%s order_id=%s status=%s",
-                    corrected_shares, token_id[:12], order_id, status,
+                    "[executor] %s retry(min_size=%.2f) token=%s order_id=%s status=%s",
+                    _side, corrected_shares, token_id[:12], order_id, status,
                 )
                 return {"order_id": order_id, "status": status, "raw": resp2, "shares": corrected_shares, "usd": corrected_usd}
             except Exception as e2:

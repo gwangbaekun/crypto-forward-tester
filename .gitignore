@@ -8,3 +8,7 @@ logs/signal_logs/**/*.jsonl
 portfolio/
 # Claude Code worktrees
 .claude/worktrees/
+
+# oracle 로컬 인프라 상태 / 릴레이 시크릿
+oracle/deploy/.state.env
+oracle/relay/.env

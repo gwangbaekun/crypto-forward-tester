@@ -116,6 +116,66 @@ async def fetch_markets(
     return results
 
 
+_CHUNK_DAYS = 14   # prices-history startTs/endTs 구간 상한 ≈15일 (btc_backtest 실측과 동일)
+
+
+async def _fetch_range(token_id: str, start_ts: int, end_ts: int, fidelity: int) -> list[dict[str, Any]]:
+    """[start_ts, end_ts]를 CHUNK_DAYS 창으로 쪼개 fetch, ts 기준 dedupe 후 concat."""
+    import time as _time
+    end_ts = min(end_ts, int(_time.time()))
+    step = _CHUNK_DAYS * 86400
+    merged: dict[int, float] = {}
+    t = start_ts
+    async with httpx.AsyncClient(timeout=TIMEOUT) as cli:
+        while t < end_ts:
+            u = min(t + step, end_ts)
+            r = await cli.get(f"{CLOB_BASE}/prices-history", params={
+                "market": token_id, "startTs": t, "endTs": u, "fidelity": fidelity,
+            })
+            if r.status_code == 200:
+                for p in (r.json() or {}).get("history", []):
+                    if "t" in p and "p" in p:
+                        merged[int(p["t"])] = float(p["p"])
+            t = u
+    return [{"ts": k, "price": merged[k]} for k in sorted(merged)]
+
+
+async def fetch_curve_full(
+    token_id: str, fidelity: int = 60,
+    start_ts: int | None = None, end_ts: int | None = None,
+) -> list[dict[str, Any]]:
+    """전 기간 60분봉 (워치리스트 add 시 최초 1회 · btc_backtest fetch_curve 와 동일 방식).
+
+    CLOB 의 interval=max 는 실측상 최근 ~720개(30일)로 캡되어 있어 오래된 마켓의
+    과거 스파이크를 놓친다. start_ts/end_ts(마켓 실제 수명)를 알면 14일 창으로 쪼개
+    전체 기간을 받고, 모르면 interval=max 로 fallback.
+    """
+    if start_ts and end_ts:
+        return await _fetch_range(token_id, start_ts, end_ts, fidelity)
+
+    async with httpx.AsyncClient(timeout=TIMEOUT) as cli:
+        r = await cli.get(f"{CLOB_BASE}/prices-history", params={
+            "market": token_id, "interval": "max", "fidelity": fidelity,
+        })
+        if r.status_code != 200:
+            return []
+        data = r.json()
+    history = data.get("history", []) if isinstance(data, dict) else []
+    return [{"ts": int(p["t"]), "price": float(p["p"])} for p in history if "t" in p and "p" in p]
+
+
+async def fetch_market_by_token(token_id: str) -> dict[str, Any] | None:
+    """clob YES/NO 토큰 ID로 마켓 메타 직접 조회 (워치리스트 수동 추가용)."""
+    async with httpx.AsyncClient(timeout=TIMEOUT) as cli:
+        r = await cli.get(f"{GAMMA_BASE}/markets", params={"clob_token_ids": token_id})
+        if r.status_code != 200:
+            return None
+        data = r.json()
+    if not isinstance(data, list) or not data:
+        return None
+    return _normalize(data[0])
+
+
 async def fetch_all_active(keywords: list[str], min_volume: float = 0) -> list[dict[str, Any]]:
     """여러 keyword 를 합쳐서 active 마켓 목록 반환. 중복 condition_id 제거."""
     seen: set[str] = set()

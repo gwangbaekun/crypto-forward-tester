@@ -59,6 +59,11 @@ async def latency_dashboard():
     return render_template("latency_snipe_dashboard.html")
 
 
+@router.get("/fade/dashboard", response_class=HTMLResponse)
+async def fade_dashboard():
+    return render_template("polymarket_fade_dashboard.html")
+
+
 @router.get("/latency/portfolio")
 async def latency_portfolio() -> JSONResponse:
     """$100 시드 고정소액 파이프라인 paper 시뮬레이션.
@@ -166,7 +171,7 @@ async def latency_scan_feed() -> JSONResponse:
 
 @router.get("/markets")
 async def markets() -> JSONResponse:
-    """현재 모니터링 중인 마켓 목록 — DB에서 읽음 (GCP 엔진이 upsert)."""
+    """현재 모니터링 중인 마켓 목록 — DB에서 읽음 (엔진이 upsert)."""
     try:
         import time
         from sqlalchemy import select
@@ -1011,7 +1016,7 @@ async def retry_failed_orders() -> JSONResponse:
                 {
                     "queued": True,
                     "job_id": job_id,
-                    "message": "POLYMARKET_LIVE 비활성 환경이므로 GCP worker 큐에 적재했습니다.",
+                    "message": "POLYMARKET_LIVE 비활성 환경이므로 worker 큐에 적재했습니다.",
                 }
             )
 
@@ -1077,3 +1082,240 @@ async def rotation_loss_sectors(
         return JSONResponse({"sectors": result})
     except Exception as e:
         return JSONResponse({"error": str(e)}, status_code=500)
+
+
+# ── fade 전략 워치리스트 (유저가 직접 add/remove) ────────────────────────────
+
+@router.get("/fade/watchlist")
+async def fade_watchlist() -> JSONResponse:
+    """현재 워치리스트(포함/제외) 전체 반환."""
+    from db.session import get_session
+    from db.models import PolymarketFadeWatch
+    from sqlalchemy import select
+
+    db = get_session()
+    try:
+        rows = db.execute(select(PolymarketFadeWatch)).scalars().all()
+    finally:
+        db.close()
+    return JSONResponse({"markets": [
+        {"condition_id": r.condition_id, "question": r.question,
+         "yes_token_id": r.yes_token_id, "no_token_id": r.no_token_id,
+         "volume_usd": r.volume_usd, "end_ts": r.end_ts, "status": r.status,
+         "added_at": r.added_at.isoformat() if r.added_at else None}
+        for r in rows
+    ]})
+
+
+@router.post("/fade/market/add")
+async def fade_market_add(token: str = Query(..., description="YES clob token id")) -> JSONResponse:
+    """clob YES 토큰 ID로 마켓 조회 후 워치리스트에 included 로 추가."""
+    from datetime import datetime
+    from db.session import get_session
+    from db.models import PolymarketFadeWatch
+    from features.strategy.polymarket._data.client import fetch_market_by_token
+
+    token = token.strip()
+    if not token:
+        return JSONResponse({"error": "empty token"}, status_code=400)
+
+    m = await fetch_market_by_token(token)
+    if not m or not m.get("condition_id"):
+        return JSONResponse({"error": "마켓 조회 실패 (잘못된 token 이거나 이미 종료된 마켓)"}, status_code=502)
+
+    db = get_session()
+    try:
+        row = db.get(PolymarketFadeWatch, m["condition_id"])
+        if row is None:
+            row = PolymarketFadeWatch(condition_id=m["condition_id"])
+            db.add(row)
+        row.question = m.get("question", "")
+        row.yes_token_id = m.get("yes_token_id")
+        row.no_token_id = m.get("no_token_id")
+        row.volume_usd = m.get("volume_usd")
+        row.start_ts = m.get("start_ts")
+        row.end_ts = m.get("end_ts")
+        row.status = "included"
+        row.added_at = datetime.utcnow()
+        db.commit()
+    except Exception as e:
+        db.rollback()
+        return JSONResponse({"error": str(e)}, status_code=500)
+    finally:
+        db.close()
+
+    n = await _refresh_curve(m["condition_id"], m.get("yes_token_id"), m.get("start_ts"), m.get("end_ts"))
+    return JSONResponse({"condition_id": m["condition_id"], "question": m.get("question", ""), "n_points": n})
+
+
+async def _refresh_curve(
+    condition_id: str, yes_token_id: str | None,
+    start_ts: int | None = None, end_ts: int | None = None,
+) -> int:
+    """전 기간 60분봉 cold fetch → 캐시 저장(차트용).
+
+    start_ts/end_ts(마켓 실제 수명)를 알면 14일 청크로 전체 기간을 받는다
+    (CLOB interval=max 는 최근 ~30일로 캡되어 오래된 마켓의 과거 스파이크를 놓침).
+    실패해도 워치리스트 추가 자체는 이미 끝난 뒤라 무시.
+    """
+    import json
+    from datetime import datetime
+    from db.session import get_session
+    from db.models import PolymarketFadeCurve
+    from features.strategy.polymarket._data.client import fetch_curve_full
+
+    if not yes_token_id:
+        return 0
+    try:
+        pts = await fetch_curve_full(yes_token_id, start_ts=start_ts, end_ts=end_ts)
+    except Exception:
+        return 0
+    if not pts:
+        return 0
+
+    db = get_session()
+    try:
+        row = db.get(PolymarketFadeCurve, condition_id)
+        if row is None:
+            row = PolymarketFadeCurve(condition_id=condition_id, pts_json="[]")
+            db.add(row)
+        row.pts_json = json.dumps(pts)
+        row.fetched_at = datetime.utcnow()
+        db.commit()
+    except Exception:
+        db.rollback()
+        return 0
+    finally:
+        db.close()
+    return len(pts)
+
+
+@router.post("/fade/market/refresh-curve")
+async def fade_market_refresh_curve(condition_id: str = Query(...)) -> JSONResponse:
+    """차트 데이터 다시 받아오기(수동)."""
+    from db.session import get_session
+    from db.models import PolymarketFadeWatch
+
+    db = get_session()
+    try:
+        row = db.get(PolymarketFadeWatch, condition_id)
+        yes_token_id = row.yes_token_id if row else None
+        start_ts = row.start_ts if row else None
+        end_ts = row.end_ts if row else None
+    finally:
+        db.close()
+    if not yes_token_id:
+        return JSONResponse({"error": "not found"}, status_code=404)
+    n = await _refresh_curve(condition_id, yes_token_id, start_ts, end_ts)
+    return JSONResponse({"condition_id": condition_id, "n_points": n})
+
+
+@router.get("/fade/curve")
+async def fade_curve(condition_id: str = Query(...)) -> JSONResponse:
+    """다운샘플된 곡선 + 스파이크 지점(빨간 점 마커용) 반환."""
+    import json
+    from db.session import get_session
+    from db.models import PolymarketFadeCurve
+    from features.strategy.polymarket.fade import signal as fade_signal
+    import yaml
+    from pathlib import Path
+
+    db = get_session()
+    try:
+        row = db.get(PolymarketFadeCurve, condition_id)
+    finally:
+        db.close()
+    if row is None:
+        return JSONResponse({"curve": [], "spikes": []})
+
+    pts = json.loads(row.pts_json)
+    cfg_path = Path(__file__).parent / "fade" / "config.yaml"
+    cfg = yaml.safe_load(cfg_path.read_text())
+    spikes = fade_signal.detect_spikes(pts, cfg)
+
+    n = 200
+    if len(pts) <= n:
+        sel = pts
+    else:
+        step = len(pts) / n
+        idx = sorted({int(i * step) for i in range(n)} | {len(pts) - 1})
+        sel = [pts[i] for i in idx]
+    curve = [[p["ts"], round(p["price"], 4)] for p in sel]
+    spike_pts = [[pts[i]["ts"], round(pts[i]["price"], 4)] for i, _, _ in spikes]
+    return JSONResponse({"curve": curve, "spikes": spike_pts, "n_spikes": len(spikes)})
+
+
+@router.post("/fade/market/status")
+async def fade_market_status(
+    condition_id: str = Query(...), status: str = Query(...),
+) -> JSONResponse:
+    if status not in ("included", "excluded"):
+        return JSONResponse({"error": "bad status"}, status_code=400)
+    from db.session import get_session
+    from db.models import PolymarketFadeWatch
+
+    db = get_session()
+    try:
+        row = db.get(PolymarketFadeWatch, condition_id)
+        if row is None:
+            return JSONResponse({"ok": False, "error": "not found"}, status_code=404)
+        row.status = status
+        db.commit()
+    finally:
+        db.close()
+    return JSONResponse({"ok": True, "condition_id": condition_id, "status": status})
+
+
+@router.delete("/fade/market")
+async def fade_market_delete(condition_id: str = Query(...)) -> JSONResponse:
+    from db.session import get_session
+    from db.models import PolymarketFadeWatch, PolymarketFadeCurve
+
+    db = get_session()
+    try:
+        row = db.get(PolymarketFadeWatch, condition_id)
+        ok = row is not None
+        if row is not None:
+            db.delete(row)
+        curve_row = db.get(PolymarketFadeCurve, condition_id)
+        if curve_row is not None:
+            db.delete(curve_row)
+        db.commit()
+    finally:
+        db.close()
+    return JSONResponse({"ok": ok, "condition_id": condition_id})
+
+
+@router.get("/fade/live-status")
+async def fade_live_status() -> JSONResponse:
+    """엔진이 매 스캔마다 기록한 마켓별 실시간 스파이크 상태 (in-memory)."""
+    from features.strategy.polymarket.fade import engine as fade_engine
+    return JSONResponse({"status": fade_engine.get_live_status()})
+
+
+@router.get("/fade/positions")
+async def fade_positions(
+    status: str | None = Query(None, description="open|closed (미지정 시 전체)"),
+) -> JSONResponse:
+    """fade 포지션(진입~청산) 목록 — 최신순."""
+    from db.session import get_session
+    from db.models import PolymarketFadePosition
+    from sqlalchemy import select
+
+    db = get_session()
+    try:
+        stmt = select(PolymarketFadePosition).order_by(PolymarketFadePosition.id.desc())
+        if status:
+            stmt = stmt.where(PolymarketFadePosition.status == status)
+        rows = db.execute(stmt).scalars().all()
+    finally:
+        db.close()
+
+    return JSONResponse({"positions": [
+        {"id": r.id, "condition_id": r.condition_id, "question": r.question,
+         "p0": r.p0, "entry_px": r.entry_px, "target_px": r.target_px, "stop_px": r.stop_px,
+         "entry_ts": r.entry_ts, "timeout_ts": r.timeout_ts, "status": r.status,
+         "exit_px": r.exit_px, "exit_ts": r.exit_ts, "exit_reason": r.exit_reason,
+         "ret_pct": r.ret_pct}
+        for r in rows
+    ]})

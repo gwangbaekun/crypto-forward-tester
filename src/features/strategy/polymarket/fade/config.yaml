@@ -1,0 +1,24 @@
+enabled: true
+
+poll_interval_sec: 300      # REST 스캔 주기 (5분)
+
+# 진입 스파이크 감지 (btc_backtest fade_study.py 와 동일, census 로 확정된 값)
+lookback_s: 3600            # 1h 내 상대/절대 변동 기준
+spike_rel: 1.5               # 1h 전 대비 +50%
+spike_abs: 0.015             # AND 절대 +1.5¢
+p0_lo: 0.005
+p0_hi: 0.5
+cooldown_hours: 12           # 같은 마켓 재진입 쿨다운
+
+# 청산 (btc_backtest 백테스트로 검증된 조합: 진입 112 · 승률 81/112 · 평균 4.04% · 최악 -20% · 합계 453%)
+retrace_pct: 0.80            # 스파이크 폭의 80% 되돌리면 청산
+timeout_hours: 72.0          # 72h 내 미도달 시 강제 청산
+stop_loss_pct: 0.20          # 손실 -20% 도달 시 즉시 손절
+
+# 사이징: full = 진입마다 가용 pUSD 전액(순차 포지션이라 한 번에 하나에만 전액 투입).
+#         fixed = order_size_usd 고정 명목.
+order_size_mode: full
+order_size_usd: 1.0          # fixed 모드 명목 / full 모드에선 무시
+balance_buffer: 0.98         # 전액의 98%만(수수료·최소단위·슬리피지 여유)
+
+# 워치리스트만 스캔 (전체 마켓 자동 스캔 아님 — 유저가 add/remove 로 직접 관리)

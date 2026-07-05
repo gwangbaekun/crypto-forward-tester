@@ -20,6 +20,7 @@ from features.strategy.polymarket.late_convergence import engine as lc_engine
 from features.strategy.polymarket.pair_hedge       import engine as ph_engine
 from features.strategy.polymarket.bayesian_fomc    import engine as bf_engine
 from features.strategy.polymarket.latency_snipe     import engine as ls_engine
+from features.strategy.polymarket.fade              import engine as fade_engine
 from features.strategy.polymarket.log_config import configure_polymarket_logging
 from features.strategy.polymarket._data.executor import redeem_positions, redeem_all_pending
 
@@ -154,7 +155,7 @@ def _any_strategy_enabled() -> bool:
     import yaml
     from pathlib import Path
     base = Path(__file__).parent
-    for name in ("late_convergence", "pair_hedge", "bayesian_fomc", "latency_snipe"):
+    for name in ("late_convergence", "pair_hedge", "bayesian_fomc", "latency_snipe", "fade"):
         try:
             cfg = yaml.safe_load((base / name / "config.yaml").read_text())
             if cfg and cfg.get("enabled"):
@@ -183,6 +184,7 @@ async def run_polymarket() -> None:
         ph_engine.run(ws_client),
         bf_engine.run(),
         ls_engine.run(ws_client),
+        fade_engine.run(),
         _resolve_signals(ws_client),
         return_exceptions=True,
     )

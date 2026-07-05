@@ -99,7 +99,7 @@ def enqueue_retry_failed_job(source: str = "api") -> int:
 
 
 async def process_pending_jobs(limit: int = 10) -> int:
-    """GCP worker에서 pending job 처리."""
+    """worker에서 pending job 처리."""
     if not is_live_mode():
         return 0
 

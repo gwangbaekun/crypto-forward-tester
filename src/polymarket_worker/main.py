@@ -1,4 +1,4 @@
-"""Polymarket 전용 워커 — GCP e2-micro 등 상시 VM에서 실행.
+"""Polymarket 전용 워커 — Oracle Cloud(오사카) 등 상시 VM에서 실행.
 
 HTTP 서버 없이 run_polymarket() 만 실행.
   PYTHONPATH=src python -m polymarket_worker.main

@@ -1,0 +1,252 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1"/>
+<title>Polymarket fade — forward test</title>
+<style>
+  :root { --bg:#0e1116; --panel:#161b22; --line:#2d333b; --fg:#e6edf3; --mut:#8b949e;
+          --up:#2ea043; --dn:#f85149; --acc:#58a6ff; --new:#d29922; }
+  * { box-sizing:border-box; }
+  body { margin:0; background:var(--bg); color:var(--fg);
+         font:14px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif; }
+  header { padding:14px 20px; border-bottom:1px solid var(--line); }
+  h1 { margin:0; font-size:16px; } .sub { color:var(--mut); font-size:12px; margin-top:4px; }
+  .controls { display:flex; gap:12px; align-items:flex-end; flex-wrap:wrap;
+              padding:12px 20px; border-bottom:1px solid var(--line); background:var(--panel); }
+  .ctl { display:flex; flex-direction:column; gap:4px; }
+  .ctl label { font-size:11px; color:var(--mut); }
+  input, button, select { background:#0d1117; color:var(--fg); border:1px solid var(--line);
+          border-radius:6px; padding:7px 9px; font-size:13px; }
+  button { background:var(--acc); color:#06121f; border:none; font-weight:600; cursor:pointer; }
+  button:disabled { opacity:.5; cursor:default; }
+  button.ghost { background:#0d1117; color:var(--fg); border:1px solid var(--line); font-weight:500; }
+  .wrap { padding:16px 20px; }
+  .summary { display:flex; gap:18px; font-size:12px; flex-wrap:wrap; }
+  .summary b { color:var(--fg); } .summary .k { color:var(--mut); }
+  .card { background:var(--panel); border:1px solid var(--line); border-radius:8px; padding:10px; }
+  .card h3 { margin:2px 6px 8px; font-size:13px; color:var(--fg); font-weight:600; }
+  .card h3 small { color:var(--mut); font-weight:400; }
+  table { width:100%; border-collapse:collapse; font-size:12.5px; }
+  th,td { padding:5px 8px; border-bottom:1px solid var(--line); text-align:right; white-space:nowrap; }
+  th { color:var(--mut); font-weight:600; position:sticky; top:0; background:var(--panel); z-index:1; }
+  td.l, th.l { text-align:left; }
+  .up { color:var(--up); } .dn { color:var(--dn); } .mut { color:var(--mut); }
+  .tablecard { margin-top:16px; }
+  .note { color:var(--mut); font-size:12px; margin:8px 2px; }
+  tr.out { opacity:.4; }
+  .spark { display:block; }
+  .seg { display:inline-flex; border:1px solid var(--line); border-radius:6px; overflow:hidden; }
+  .seg button { border:none; border-radius:0; padding:3px 9px; font-size:11px; font-weight:600;
+                background:#0d1117; color:var(--mut); }
+  .seg button.on-inc { background:var(--up); color:#06121f; }
+  .seg button.on-exc { background:var(--dn); color:#fff; }
+  .badge { font-size:10px; padding:1px 6px; border-radius:10px; border:1px solid var(--acc);
+           color:var(--acc); margin-left:6px; }
+  .del { background:none; border:none; color:var(--mut); cursor:pointer; font-size:15px; padding:0 4px; }
+  .del:hover { color:var(--dn); }
+  .qname { max-width:340px; overflow:hidden; text-overflow:ellipsis; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Polymarket <b>fade</b> — forward test</h1>
+  <div class="sub">
+    워치리스트에 넣은 종목만 실시간 스캔(5분 간격). 스파이크 감지 시 NO 진입, 되돌림 80% / 타임아웃 72h / 손절 20%로 자동 청산 — 파라미터는 btc_backtest 백테스트로 검증된 값 고정.
+    <b>실주문 없음</b>(오라클 릴레이 로그만).
+  </div>
+</header>
+
+<div class="controls">
+  <div class="ctl"><label>clob YES 토큰으로 추가</label>
+    <input id="add_token" type="text" placeholder="clob token id" style="width:280px"/></div>
+  <button id="add_btn" class="ghost">추가</button>
+  <span id="add_status" class="mut"></span>
+  <span style="flex:1"></span>
+  <div class="ctl"><label>표시</label>
+    <select id="filter"><option value="all">전체</option><option value="included">포함만</option></select></div>
+</div>
+
+<div class="wrap">
+  <div class="card">
+    <h3>워치리스트 <small>(차트 = 캐시된 60분봉 · 빨간 점 = 과거 스파이크 · <b style="color:var(--dn)">🔴 LIVE</b> = 지금 스파이크 중)</small></h3>
+    <div class="summary" id="wl_summary" style="margin:6px 2px"></div>
+    <div style="max-height:480px;overflow:auto">
+      <table id="wl_tbl">
+        <thead><tr>
+          <th class="l">차트</th><th class="l">마켓</th><th class="l">상태</th>
+          <th class="l">현재 (1h Δ)</th><th>과거 스파이크</th><th>거래량</th><th></th>
+        </tr></thead>
+        <tbody></tbody>
+      </table>
+    </div>
+  </div>
+
+  <div class="card tablecard">
+    <h3>진행중 포지션</h3>
+    <div style="max-height:300px;overflow:auto">
+      <table id="open_tbl">
+        <thead><tr>
+          <th class="l">마켓</th><th class="l">진입시각</th><th>p0</th><th>진입</th>
+          <th>목표(되돌림)</th><th>손절가</th><th class="l">타임아웃</th>
+        </tr></thead>
+        <tbody></tbody>
+      </table>
+    </div>
+  </div>
+
+  <div class="card tablecard">
+    <h3>청산 내역</h3>
+    <div class="summary" id="closed_summary" style="margin:6px 2px"></div>
+    <div style="max-height:480px;overflow:auto">
+      <table id="closed_tbl">
+        <thead><tr>
+          <th class="l">마켓</th><th class="l">진입시각</th><th>p0</th><th>진입</th><th>청산</th>
+          <th class="l">사유</th><th>수익%</th>
+        </tr></thead>
+        <tbody></tbody>
+      </table>
+    </div>
+    <div class="note">수익%=NO 기준 (진입−청산)/(1−진입). 오라클 호출 로그는 릴레이 컨테이너의 <code>docker logs</code> 로 확인.</div>
+  </div>
+</div>
+
+<script>
+const $ = s => document.querySelector(s);
+const API = '/quant/polymarket/fade';
+const fmt = n => n == null ? '' : Number(n).toLocaleString();
+const fmtTs = ts => ts ? new Date(ts * 1000).toLocaleString('ko-KR', { hour12:false }) : '';
+
+function sparkline(curve, spikes, w = 180, h = 44) {
+  if (!curve || !curve.length) return '<span class="mut">—</span>';
+  const ts = curve.map(p => p[0]), pr = curve.map(p => p[1]);
+  const t0 = Math.min(...ts), t1 = Math.max(...ts);
+  const pmin = Math.min(...pr), pmax = Math.max(...pr), pad = 3;
+  const X = t => pad + (t1 === t0 ? 0 : (t - t0) / (t1 - t0)) * (w - 2 * pad);
+  const Y = p => h - pad - (pmax === pmin ? 0 : (p - pmin) / (pmax - pmin)) * (h - 2 * pad);
+  const line = curve.map(p => `${X(p[0]).toFixed(1)},${Y(p[1]).toFixed(1)}`).join(' ');
+  const dots = (spikes || []).map(s =>
+    `<circle cx="${X(s[0]).toFixed(1)}" cy="${Y(s[1]).toFixed(1)}" r="2.4" fill="#f85149"/>`).join('');
+  return `<svg class="spark" width="${w}" height="${h}" viewBox="0 0 ${w} ${h}">
+    <polyline points="${line}" fill="none" stroke="#58a6ff" stroke-width="1"/>${dots}</svg>`;
+}
+
+let WATCH = [], CURVES = {}, LIVE = {};
+
+async function loadAll() {
+  const [w, pos, live] = await Promise.all([
+    fetch(API + '/watchlist').then(r => r.json()),
+    fetch(API + '/positions').then(r => r.json()),
+    fetch(API + '/live-status').then(r => r.json()).catch(() => ({ status: {} })),
+  ]);
+  WATCH = w.markets || [];
+  LIVE = live.status || {};
+  await Promise.all(WATCH.map(async m => {
+    if (!CURVES[m.condition_id]) {
+      try { CURVES[m.condition_id] = await (await fetch(API + '/curve?' + new URLSearchParams({ condition_id: m.condition_id }))).json(); }
+      catch (e) { CURVES[m.condition_id] = { curve: [], spikes: [] }; }
+    }
+  }));
+  drawWatchlist();
+  drawPositions(pos.positions || []);
+}
+
+function liveCell(cid) {
+  const s = LIVE[cid];
+  if (!s) return '<span class="mut">—</span>';   // 아직 스캔 전
+  const d = s.rel_pct >= 0 ? '+' : '';
+  const px = `<span class="mut">${s.price}</span> <span class="${s.rel_pct>=0?'up':'dn'}">${d}${s.rel_pct}%</span>`;
+  if (s.spike_now) return `<b style="color:var(--dn)">🔴 LIVE</b> ${px}`;
+  return px;
+}
+
+function drawWatchlist() {
+  const filt = $('#filter').value;
+  const rows = WATCH.filter(m => filt === 'all' || m.status === filt);
+  const nLive = Object.values(LIVE).filter(s => s.spike_now).length;
+  const scans = Object.values(LIVE).map(s => s.last_scan_ts).filter(Boolean);
+  const lastScan = scans.length ? fmtTs(Math.max(...scans)) : '—';
+  $('#wl_summary').innerHTML =
+    `<span><span class="k">종목</span> <b>${WATCH.length}</b></span>
+     <span><span class="k">포함</span> <b class="up">${WATCH.filter(m => m.status === 'included').length}</b></span>
+     <span><span class="k">🔴 현재 스파이크</span> <b class="${nLive?'dn':'mut'}">${nLive}</b></span>
+     <span><span class="k">마지막 스캔</span> <b class="mut">${lastScan}</b></span>`;
+  $('#wl_tbl tbody').innerHTML = rows.map(m => {
+    const inc = m.status === 'included';
+    const c = CURVES[m.condition_id] || { curve: [], spikes: [], n_spikes: 0 };
+    const spiking = LIVE[m.condition_id] && LIVE[m.condition_id].spike_now;
+    return `<tr class="${inc ? '' : 'out'}" ${spiking?'style="background:rgba(248,81,73,.10)"':''}>
+      <td class="l">${sparkline(c.curve, c.spikes)}</td>
+      <td class="l"><div class="qname" title="${m.question}">${m.question || m.condition_id.slice(0,14)+'…'}</div></td>
+      <td class="l"><span class="seg">
+        <button class="${inc ? 'on-inc' : ''}" onclick="setStatus('${m.condition_id}','included')">포함</button>
+        <button class="${!inc ? 'on-exc' : ''}" onclick="setStatus('${m.condition_id}','excluded')">제외</button>
+      </span></td>
+      <td class="l">${liveCell(m.condition_id)}</td>
+      <td>${c.n_spikes ?? 0}</td>
+      <td class="mut">${fmt(m.volume_usd)}</td>
+      <td><button class="del" title="삭제" onclick="delMarket('${m.condition_id}','${(m.question||'').replace(/'/g,'')}')">×</button></td>
+    </tr>`;
+  }).join('') || '<tr><td colspan="7" class="mut l">종목 없음 — clob YES 토큰으로 추가</td></tr>';
+}
+
+function drawPositions(positions) {
+  const open = positions.filter(p => p.status === 'open');
+  const closed = positions.filter(p => p.status === 'closed');
+
+  $('#open_tbl tbody').innerHTML = open.map(p => `<tr>
+      <td class="l"><div class="qname" title="${p.question||''}">${p.question || p.condition_id.slice(0,14)+'…'}</div></td>
+      <td class="l">${fmtTs(p.entry_ts)}</td>
+      <td class="mut">${p.p0}</td><td>${p.entry_px}</td>
+      <td class="up">${p.target_px}</td><td class="dn">${p.stop_px}</td>
+      <td class="l mut">${fmtTs(p.timeout_ts)}</td>
+    </tr>`).join('') || '<tr><td colspan="7" class="mut l">진행중 포지션 없음</td></tr>';
+
+  const rets = closed.map(p => p.ret_pct).filter(v => v != null);
+  const n = rets.length, wins = rets.filter(v => v > 0).length;
+  $('#closed_summary').innerHTML = n ?
+    `<span><span class="k">청산</span> <b>${n}</b></span>
+     <span><span class="k">승률</span> <b class="${wins/n>=0.7?'up':'dn'}">${wins}/${n}</b></span>
+     <span><span class="k">합계</span> <b class="${rets.reduce((a,b)=>a+b,0)>=0?'up':'dn'}">${rets.reduce((a,b)=>a+b,0).toFixed(2)}%</b></span>`
+    : '<span class="mut">청산 내역 없음</span>';
+
+  $('#closed_tbl tbody').innerHTML = closed.map(p => `<tr class="${p.ret_pct>0?'':'out'}">
+      <td class="l"><div class="qname" title="${p.question||''}">${p.question || p.condition_id.slice(0,14)+'…'}</div></td>
+      <td class="l">${fmtTs(p.entry_ts)}</td>
+      <td class="mut">${p.p0}</td><td>${p.entry_px}</td><td>${p.exit_px}</td>
+      <td class="l ${p.exit_reason==='되돌림'?'mut':'dn'}">${p.exit_reason||''}</td>
+      <td class="${p.ret_pct>=0?'up':'dn'}">${p.ret_pct>=0?'+':''}${p.ret_pct}%</td>
+    </tr>`).join('') || '<tr><td colspan="7" class="mut l">청산 내역 없음</td></tr>';
+}
+
+async function setStatus(condition_id, status) {
+  await fetch(API + '/market/status?' + new URLSearchParams({ condition_id, status }), { method: 'POST' });
+  await loadAll();
+}
+
+async function delMarket(condition_id, q) {
+  if (!confirm('삭제: ' + (q || condition_id) + '\n(워치리스트 + 캐시 곡선에서 제거)')) return;
+  await fetch(API + '/market?' + new URLSearchParams({ condition_id }), { method: 'DELETE' });
+  delete CURVES[condition_id];
+  await loadAll();
+}
+
+$('#add_btn').addEventListener('click', async () => {
+  const token = $('#add_token').value.trim();
+  if (!token) return;
+  $('#add_btn').disabled = true; $('#add_status').textContent = '조회 + 전체 기간 데이터 로딩 중…';
+  let d;
+  try { d = await (await fetch(API + '/market/add?' + new URLSearchParams({ token }), { method: 'POST' })).json(); }
+  catch (e) { $('#add_status').textContent = '실패'; $('#add_btn').disabled = false; return; }
+  $('#add_btn').disabled = false;
+  $('#add_status').textContent = d.question ? `추가됨: ${d.question.slice(0,30)} (${d.n_points||0}pt)` : (d.error || '실패');
+  $('#add_token').value = '';
+  await loadAll();
+});
+$('#filter').addEventListener('change', drawWatchlist);
+
+loadAll();
+setInterval(loadAll, 60000);
+</script>
+</body>
+</html>
