@@ -50,6 +50,23 @@ _price_hist: dict[str, list[tuple[int, float]]] = {}
 _yes_map: dict[str, PolymarketFadeWatch] = {}
 # 같은 마켓 재진입 쿨다운: condition_id -> 쿨다운 해제 ts
 _cooldown: dict[str, int] = {}
+# 토큰당 마지막 처리 시각(throttle) + 열린 포지션 condition_id 캐시(hot path DB 제거)
+_last_proc: dict[str, float] = {}
+_open_cids: set[str] = set()
+_THROTTLE_S = 1.0
+
+
+def _refresh_open_cache() -> None:
+    global _open_cids
+    db = get_session()
+    try:
+        rows = db.execute(
+            select(PolymarketFadePosition.condition_id)
+            .where(PolymarketFadePosition.status == "open")
+        ).scalars().all()
+        _open_cids = set(rows)
+    finally:
+        db.close()
 
 
 def get_live_status() -> dict[str, dict]:
@@ -147,7 +164,11 @@ def _record_live(condition_id: str, hist: list[tuple[int, float]], has_position:
 
 
 async def _on_update(token_id: str) -> None:
-    """WS 콜백 — 구독 토큰의 mid 가 갱신될 때마다 호출."""
+    """WS 콜백 — 구독 토큰의 mid 가 갱신될 때마다 호출.
+
+    활발한 종목은 초당 수백 건 → DB 를 hot path 에서 제거(인메모리 _open_cids) +
+    토큰당 throttle 로 이벤트 루프 포화 방지(대시보드 hang 방지).
+    """
     watch = _yes_map.get(token_id)
     if watch is None:
         return
@@ -155,22 +176,30 @@ async def _on_update(token_id: str) -> None:
     if level is None or level.mid is None:
         return
     mid = float(level.mid)
-    now = int(time.time())
+    now = time.time()
+
+    # 토큰당 throttle — 초당 수백 업데이트를 최대 1회/_THROTTLE_S 로 제한(감지/DB skip)
+    if now - _last_proc.get(token_id, 0.0) < _THROTTLE_S:
+        return
+    _last_proc[token_id] = now
+    now = int(now)
 
     hist = _price_hist.setdefault(token_id, [])
     hist.append((now, mid))
-    cutoff = now - (_cfg.get("lookback_s", 600) + 300)   # lookback + 5분 여유
-    if hist[0][0] < cutoff:
+    cutoff = now - (_cfg.get("lookback_s", 600) + 300)
+    if hist and hist[0][0] < cutoff:
         i = 0
         while i < len(hist) and hist[i][0] < cutoff:
             i += 1
-        del hist[:max(0, i - 1)]         # cutoff 직전 1개는 남겨 p0 계산 보장
+        del hist[:max(0, i - 1)]
 
-    open_pos = _open_position(watch.condition_id)
-    _record_live(watch.condition_id, hist, has_position=open_pos is not None)
+    has_pos = watch.condition_id in _open_cids
+    _record_live(watch.condition_id, hist, has_position=has_pos)
 
-    if open_pos is not None:
-        await _check_exit_price(open_pos, mid)
+    if has_pos:
+        open_pos = _open_position(watch.condition_id)   # DB 조회는 포지션 보유 종목만(≤1)
+        if open_pos is not None:
+            await _check_exit_price(open_pos, mid)
         return
 
     # 신규 진입 판정
@@ -244,6 +273,7 @@ def _open_new_position(sig: fade_signal.FadeSignal, order_result: dict) -> None:
         )
         db.add(row)
         db.commit()
+        _open_cids.add(sig.condition_id)
     except Exception as e:
         db.rollback()
         log.warning("[fade] 포지션 저장 실패: %s", e)
@@ -281,6 +311,7 @@ async def _close_position(pos: PolymarketFadePosition, exit_px: float, reason: s
     finally:
         db.close()
 
+    _open_cids.discard(pos.condition_id)
     _cooldown[pos.condition_id] = now_ts + int(_cfg.get("cooldown_hours", 12) * 3600)
 
     log.info("[fade] SIGNAL 청산 %s | %s | exit=%.4f ret=%.2f%% shares=%s",
@@ -417,12 +448,14 @@ async def run(ws_client=None) -> None:
         log.debug("[fade] disabled — skipping")
         return
 
+    _refresh_open_cache()
     await _refresh_subscriptions(ws_client)   # ws_client 무시, 시드만 사용
     log.warning("[fade] WS 엔진 시작 — 구독 %d종목", len(_yes_map))
 
     async def _sweep_loop():
         while True:
             try:
+                _refresh_open_cache()
                 await _refresh_subscriptions(ws_client)
                 await _poll_book()
                 await _timeout_sweep()
