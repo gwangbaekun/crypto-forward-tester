@@ -301,6 +301,16 @@ async def _close_position(pos: PolymarketFadePosition, exit_px: float, reason: s
     )
 
 
+async def _poll_book() -> None:
+    """WS 가 유지하는 현재 book mid 를 주기적으로 다시 읽어 live_status 갱신 + 감지.
+    조용한 종목도 대시보드가 살아있게 하고, 놓친 WS 업데이트를 커버(폴링 아님 — 로컬 book 읽기)."""
+    for tok, watch in list(_yes_map.items()):
+        level = ws.price_book.get(tok)
+        if not level or level.mid is None:
+            continue
+        await _on_update(tok)
+
+
 async def _timeout_sweep() -> None:
     """시간 기반 타임아웃 청산 — WS 업데이트가 없어도 만기 지난 포지션 강제 청산."""
     now = int(time.time())
@@ -378,15 +388,19 @@ async def _ws_loop() -> None:
                             ev = m.get("event_type")
                             if ev == "book":
                                 tid = m.get("asset_id")
-                                buys, sells = m.get("buys", []), m.get("sells", [])
-                                if tid and buys and sells:
-                                    bb = max(float(b["price"]) for b in buys if b.get("price"))
-                                    ba = min(float(s["price"]) for s in sells if s.get("price"))
+                                bids, asks = m.get("bids", []), m.get("asks", [])
+                                if tid and bids and asks:
+                                    bb = max(float(b["price"]) for b in bids if b.get("price"))
+                                    ba = min(float(a["price"]) for a in asks if a.get("price"))
                                     await _apply_book(tid, (bb + ba) / 2)
                             elif ev == "price_change":
-                                for tid in set(ws._parse_price_change(m)):
-                                    if tid in _yes_map:
-                                        await _on_update(tid)
+                                for ch in m.get("price_changes", []):
+                                    tid = ch.get("asset_id")
+                                    if tid not in _yes_map:
+                                        continue
+                                    bb, ba = ch.get("best_bid"), ch.get("best_ask")
+                                    if bb and ba:
+                                        await _apply_book(tid, (float(bb) + float(ba)) / 2)
                         # 워치리스트 변경 감지 → 재연결
                         if set(_yes_map.keys()) != subscribed:
                             log.info("[fade] 워치리스트 변경 → WS 재구독")
@@ -410,6 +424,7 @@ async def run(ws_client=None) -> None:
         while True:
             try:
                 await _refresh_subscriptions(ws_client)
+                await _poll_book()
                 await _timeout_sweep()
             except Exception as e:
                 log.warning("[fade] 주기 루프 오류: %s", e)
