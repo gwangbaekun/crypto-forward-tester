@@ -184,7 +184,7 @@ async def run_polymarket() -> None:
         ph_engine.run(ws_client),
         bf_engine.run(),
         ls_engine.run(ws_client),
-        fade_engine.run(),
+        fade_engine.run(ws_client),
         _resolve_signals(ws_client),
         return_exceptions=True,
     )
