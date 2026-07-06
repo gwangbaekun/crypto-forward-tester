@@ -26,6 +26,7 @@ def create_tables(engine) -> None:
     _ensure_polymarket_signals_columns(engine)
     _ensure_polymarket_fade_watch_columns(engine)
     _ensure_polymarket_fade_position_columns(engine)
+    _ensure_polymarket_fade_curve_columns(engine)
 
 
 def _ensure_forward_trades_columns(engine) -> None:
@@ -270,6 +271,18 @@ def _ensure_polymarket_fade_position_columns(engine) -> None:
             conn.execute(text(sql))
 
 
+def _ensure_polymarket_fade_curve_columns(engine) -> None:
+    """polymarket_fade_curves 신규 컬럼 backfill (기존 DB 호환)."""
+    insp = inspect(engine)
+    if "polymarket_fade_curves" not in insp.get_table_names():
+        return
+    existing = {c["name"] for c in insp.get_columns("polymarket_fade_curves")}
+    if "chart_json" in existing:
+        return
+    with engine.begin() as conn:
+        conn.execute(text("ALTER TABLE polymarket_fade_curves ADD COLUMN chart_json TEXT"))
+
+
 class ValueScanSnapshot(Base):
     """스캔 결과 rows — date + market 기준으로 upsert."""
 
@@ -372,6 +385,8 @@ class PolymarketFadeCurve(Base):
 
     condition_id: Mapped[str]      = mapped_column(String(128), primary_key=True)
     pts_json:     Mapped[str]      = mapped_column(Text,     nullable=False)
+    # 대시보드용 미리 계산된 차트({curve:[200pt], spikes:[], n_spikes}) — 매 요청 재계산 방지
+    chart_json:   Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     fetched_at:   Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.utcnow)
 
 

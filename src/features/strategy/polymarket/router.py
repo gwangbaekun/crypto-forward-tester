@@ -1148,6 +1148,27 @@ async def fade_market_add(token: str = Query(..., description="YES clob token id
     return JSONResponse({"condition_id": m["condition_id"], "question": m.get("question", ""), "n_points": n})
 
 
+def _compute_chart(pts: list) -> dict:
+    """전체 곡선 → 다운샘플(200pt) + 스파이크 마커. 대시보드가 바로 쓸 작은 payload."""
+    from features.strategy.polymarket.fade import signal as fade_signal
+    import yaml
+    from pathlib import Path
+    cfg = yaml.safe_load((Path(__file__).parent / "fade" / "config.yaml").read_text())
+    spikes = fade_signal.detect_spikes(pts, cfg)
+    n = 200
+    if len(pts) <= n:
+        sel = pts
+    else:
+        step = len(pts) / n
+        idx = sorted({int(i * step) for i in range(n)} | {len(pts) - 1})
+        sel = [pts[i] for i in idx]
+    return {
+        "curve": [[p["ts"], round(p["price"], 4)] for p in sel],
+        "spikes": [[pts[i]["ts"], round(pts[i]["price"], 4)] for i, _, _ in spikes],
+        "n_spikes": len(spikes),
+    }
+
+
 async def _refresh_curve(
     condition_id: str, yes_token_id: str | None,
     start_ts: int | None = None, end_ts: int | None = None,
@@ -1180,6 +1201,7 @@ async def _refresh_curve(
             row = PolymarketFadeCurve(condition_id=condition_id, pts_json="[]")
             db.add(row)
         row.pts_json = json.dumps(pts)
+        row.chart_json = json.dumps(_compute_chart(pts))   # 미리 계산해 저장
         row.fetched_at = datetime.utcnow()
         db.commit()
     except Exception:
@@ -1212,37 +1234,33 @@ async def fade_market_refresh_curve(condition_id: str = Query(...)) -> JSONRespo
 
 @router.get("/fade/curve")
 async def fade_curve(condition_id: str = Query(...)) -> JSONResponse:
-    """다운샘플된 곡선 + 스파이크 지점(빨간 점 마커용) 반환."""
+    """미리 계산된 작은 차트(200pt + 스파이크)만 반환 — 큰 pts_json 은 안 읽음(빠름).
+
+    chart_json 이 없는 기존 행은 lazy 로 1회 계산해 저장(마이그레이션).
+    """
     import json
     from db.session import get_session
     from db.models import PolymarketFadeCurve
-    from features.strategy.polymarket.fade import signal as fade_signal
-    import yaml
-    from pathlib import Path
+    from sqlalchemy import select
 
     db = get_session()
     try:
+        # 작은 chart_json 컬럼만 조회 (큰 pts_json 은 로드하지 않음)
+        chart = db.execute(
+            select(PolymarketFadeCurve.chart_json).where(PolymarketFadeCurve.condition_id == condition_id)
+        ).scalar_one_or_none()
+        if chart:
+            return JSONResponse(json.loads(chart))
+        # 없으면 lazy 계산(기존 행 마이그레이션)
         row = db.get(PolymarketFadeCurve, condition_id)
+        if row is None:
+            return JSONResponse({"curve": [], "spikes": []})
+        result = _compute_chart(json.loads(row.pts_json))
+        row.chart_json = json.dumps(result)
+        db.commit()
+        return JSONResponse(result)
     finally:
         db.close()
-    if row is None:
-        return JSONResponse({"curve": [], "spikes": []})
-
-    pts = json.loads(row.pts_json)
-    cfg_path = Path(__file__).parent / "fade" / "config.yaml"
-    cfg = yaml.safe_load(cfg_path.read_text())
-    spikes = fade_signal.detect_spikes(pts, cfg)
-
-    n = 200
-    if len(pts) <= n:
-        sel = pts
-    else:
-        step = len(pts) / n
-        idx = sorted({int(i * step) for i in range(n)} | {len(pts) - 1})
-        sel = [pts[i] for i in idx]
-    curve = [[p["ts"], round(p["price"], 4)] for p in sel]
-    spike_pts = [[pts[i]["ts"], round(pts[i]["price"], 4)] for i, _, _ in spikes]
-    return JSONResponse({"curve": curve, "spikes": spike_pts, "n_spikes": len(spikes)})
 
 
 @router.post("/fade/market/status")
