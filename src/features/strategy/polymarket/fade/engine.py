@@ -34,6 +34,10 @@ _cfg: dict = {}
 # 대시보드 실시간 표시용 — 마켓별 최근 스캔 결과(in-memory, 라우터와 같은 프로세스)
 _live_status: dict[str, dict] = {}
 
+# 병렬 스캔 동시성 제한 + 진입 직렬화(전액 사이징 이중 진입/이중 지출 방지)
+_SCAN_CONCURRENCY = 8
+_entry_lock = asyncio.Lock()
+
 
 def get_live_status() -> dict[str, dict]:
     """condition_id → {last_scan_ts, p0, price, rel_pct, spike_now, has_position}."""
@@ -59,6 +63,16 @@ def _watchlist_included() -> list[PolymarketFadeWatch]:
     try:
         stmt = select(PolymarketFadeWatch).where(PolymarketFadeWatch.status == "included")
         return list(db.execute(stmt).scalars().all())
+    finally:
+        db.close()
+
+
+def _any_open_position() -> bool:
+    """열린 포지션이 하나라도 있으면 True — 전액 순차(한 번에 하나)에서 신규 진입 차단."""
+    db = get_session()
+    try:
+        stmt = select(PolymarketFadePosition).where(PolymarketFadePosition.status == "open")
+        return db.execute(stmt).scalars().first() is not None
     finally:
         db.close()
 
@@ -120,6 +134,18 @@ async def _scan_market(watch: PolymarketFadeWatch) -> None:
         "yes_token_id": watch.yes_token_id, "no_token_id": watch.no_token_id,
     }
     sig = fade_signal.build_signal(market, p0, entry_px, entry_ts, _cfg)
+
+    # 진입은 lock 으로 직렬화 — 병렬 스캔 중 두 마켓이 동시에 스파이크나도
+    # 전액 잔액을 이중으로 쓰지 않게(한 번에 한 진입만).
+    async with _entry_lock:
+        await _enter(sig)
+
+
+async def _enter(sig: fade_signal.FadeSignal) -> None:
+    # 다른 진입이 방금 포지션을 열었다면(전액 소진) 스킵 — 순차 포지션이라 하나만.
+    if _any_open_position():
+        log.info("[fade] 이미 열린 포지션 있음 → 진입 스킵 %s", sig.condition_id[:12])
+        return
 
     # NO 매수가 = 1 - YES 진입가. 사이징: full=가용 pUSD 전액, fixed=명목.
     no_price = 1 - sig.entry_px
@@ -238,11 +264,19 @@ def _get_watch(condition_id: str) -> PolymarketFadeWatch | None:
 
 
 async def tick() -> None:
-    for watch in _watchlist_included():
-        try:
-            await _scan_market(watch)
-        except Exception as e:
-            log.debug("[fade] scan error %s: %s", watch.condition_id[:12], e)
+    """워치리스트 병렬 스캔 — 한 tick 이 몇 초에 끝나야 poll 주기(2분)가 실제로 지켜짐.
+    순차로 돌면 종목 수만큼 느려져(24종목 ≈ 135s+) 짧은 스파이크를 놓친다.
+    """
+    sem = asyncio.Semaphore(_SCAN_CONCURRENCY)
+
+    async def _one(watch: PolymarketFadeWatch) -> None:
+        async with sem:
+            try:
+                await _scan_market(watch)
+            except Exception as e:
+                log.debug("[fade] scan error %s: %s", watch.condition_id[:12], e)
+
+    await asyncio.gather(*[_one(w) for w in _watchlist_included()])
 
 
 async def run() -> None:
