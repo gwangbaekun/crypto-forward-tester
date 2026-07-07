@@ -30,9 +30,11 @@ def _included_tokens() -> list[tuple[str, str]]:
 async def main() -> None:
     from features.strategy.polymarket._data.client import fetch_market_by_token
     from features.strategy.polymarket.router import _refresh_curve
-    from db.session import get_session
+    from db.session import get_session, init_db
     from db.models import PolymarketFadeWatch
     from datetime import datetime
+
+    init_db()
 
     tokens = _included_tokens()
     print(f"btc_backtest 워치리스트(included) {len(tokens)}개 발견")

@@ -46,6 +46,24 @@
   .del { background:none; border:none; color:var(--mut); cursor:pointer; font-size:15px; padding:0 4px; }
   .del:hover { color:var(--dn); }
   .qname { max-width:340px; overflow:hidden; text-overflow:ellipsis; }
+  tr.clickable td.l .qname, tr.clickable td.spark { cursor:pointer; }
+  tr.clickable:hover { background:rgba(88,166,255,.06); }
+  /* 상세 모달 */
+  .overlay { position:fixed; inset:0; background:rgba(1,4,9,.72); display:none;
+             align-items:flex-start; justify-content:center; z-index:50; overflow:auto; padding:32px 16px; }
+  .overlay.on { display:flex; }
+  .modal { background:var(--panel); border:1px solid var(--line); border-radius:10px;
+           width:min(920px,100%); padding:0; box-shadow:0 12px 48px rgba(0,0,0,.5); }
+  .modal-hd { display:flex; align-items:flex-start; gap:12px; padding:14px 18px; border-bottom:1px solid var(--line); }
+  .modal-hd h2 { margin:0; font-size:15px; font-weight:600; flex:1; }
+  .modal-hd .x { background:none; border:none; color:var(--mut); font-size:22px; cursor:pointer; line-height:1; }
+  .modal-bd { padding:16px 18px; }
+  .chips { display:flex; gap:8px; flex-wrap:wrap; margin:2px 0 14px; }
+  .chip { background:#0d1117; border:1px solid var(--line); border-radius:6px; padding:6px 10px; font-size:12px; }
+  .chip .k { color:var(--mut); margin-right:6px; } .chip b { font-size:13px; }
+  .clean-y { color:var(--up); font-weight:700; } .clean-n { color:var(--mut); }
+  .bigchart { width:100%; height:220px; background:#0b0f14; border:1px solid var(--line); border-radius:8px; }
+  .subh { font-size:12px; color:var(--mut); margin:16px 2px 6px; font-weight:600; }
 </style>
 </head>
 <body>
@@ -108,6 +126,16 @@
       </table>
     </div>
     <div class="note">수익%=NO 기준 (진입−청산)/(1−진입). 오라클 호출 로그는 릴레이 컨테이너의 <code>docker logs</code> 로 확인.</div>
+  </div>
+</div>
+
+<div class="overlay" id="overlay">
+  <div class="modal">
+    <div class="modal-hd">
+      <h2 id="md_title">—</h2>
+      <button class="x" onclick="closeDetail()">×</button>
+    </div>
+    <div class="modal-bd" id="md_body"></div>
   </div>
 </div>
 
@@ -175,9 +203,9 @@ function drawWatchlist() {
     const inc = m.status === 'included';
     const c = CURVES[m.condition_id] || { curve: [], spikes: [], n_spikes: 0 };
     const spiking = LIVE[m.condition_id] && LIVE[m.condition_id].spike_now;
-    return `<tr class="${inc ? '' : 'out'}" ${spiking?'style="background:rgba(248,81,73,.10)"':''}>
-      <td class="l">${sparkline(c.curve, c.spikes)}</td>
-      <td class="l"><div class="qname" title="${m.question}">${m.question || m.condition_id.slice(0,14)+'…'}</div></td>
+    return `<tr class="clickable ${inc ? '' : 'out'}" ${spiking?'style="background:rgba(248,81,73,.10)"':''}>
+      <td class="l spark" onclick="openDetail('${m.condition_id}')">${sparkline(c.curve, c.spikes)}</td>
+      <td class="l" onclick="openDetail('${m.condition_id}')"><div class="qname" title="클릭 → 심층 분석">${m.question || m.condition_id.slice(0,14)+'…'}</div></td>
       <td class="l"><span class="seg">
         <button class="${inc ? 'on-inc' : ''}" onclick="setStatus('${m.condition_id}','included')">포함</button>
         <button class="${!inc ? 'on-exc' : ''}" onclick="setStatus('${m.condition_id}','excluded')">제외</button>
@@ -244,6 +272,85 @@ $('#add_btn').addEventListener('click', async () => {
   await loadAll();
 });
 $('#filter').addEventListener('change', drawWatchlist);
+
+// ── 종목 심층 분석 모달 ──────────────────────────────────────────────
+function bigChart(curve, spikes, w = 860, h = 200) {
+  if (!curve || !curve.length) return '<div class="note">곡선 데이터 없음</div>';
+  const ts = curve.map(p => p[0]), pr = curve.map(p => p[1]);
+  const t0 = Math.min(...ts), t1 = Math.max(...ts);
+  const pmin = Math.min(...pr), pmax = Math.max(...pr), pad = 24;
+  const X = t => pad + (t1 === t0 ? 0 : (t - t0) / (t1 - t0)) * (w - 2 * pad);
+  const Y = p => h - pad - (pmax === pmin ? 0 : (p - pmin) / (pmax - pmin)) * (h - 2 * pad);
+  const line = curve.map(p => `${X(p[0]).toFixed(1)},${Y(p[1]).toFixed(1)}`).join(' ');
+  // 스파이크: 진입점(빨강) + 고점(주황) 연결
+  const marks = (spikes || []).map(s => {
+    const ex = X(s.ts), ey = Y(s.entry), px = X(s.peak_ts), py = Y(s.peak);
+    const col = s.clean ? '#2ea043' : '#f85149';
+    return `<line x1="${ex.toFixed(1)}" y1="${ey.toFixed(1)}" x2="${px.toFixed(1)}" y2="${py.toFixed(1)}"
+              stroke="${col}" stroke-width="1" stroke-dasharray="2 2"/>
+            <circle cx="${px.toFixed(1)}" cy="${py.toFixed(1)}" r="3" fill="${col}"/>`;
+  }).join('');
+  const yLbl = v => `<text x="2" y="${Y(v)+3}" fill="#8b949e" font-size="10">${v.toFixed(2)}</text>`;
+  return `<svg class="bigchart" viewBox="0 0 ${w} ${h}">
+    ${yLbl(pmin)}${yLbl(pmax)}
+    <polyline points="${line}" fill="none" stroke="#58a6ff" stroke-width="1.2"/>${marks}</svg>`;
+}
+
+async function openDetail(cid) {
+  $('#md_title').textContent = '로딩 중…';
+  $('#md_body').innerHTML = '';
+  $('#overlay').classList.add('on');
+  let d;
+  try { d = await (await fetch(API + '/market/detail?' + new URLSearchParams({ condition_id: cid }))).json(); }
+  catch (e) { $('#md_body').innerHTML = '<div class="note">불러오기 실패</div>'; return; }
+  if (d.error) { $('#md_body').innerHTML = '<div class="note">' + d.error + '</div>'; return; }
+
+  $('#md_title').textContent = d.question || cid;
+  const ss = d.shape_summary, sim = d.sim, lv = d.live;
+  const liveTxt = lv ? (lv.spike_now
+      ? `<b style="color:var(--dn)">🔴 스파이크 중</b> ${lv.price} (${lv.rel_pct>=0?'+':''}${lv.rel_pct}%)`
+      : `${lv.price} (${lv.rel_pct>=0?'+':''}${lv.rel_pct}%)`) : '—';
+  const wr = sim.n ? `${sim.wins}/${sim.n} (${(sim.winrate*100).toFixed(0)}%)` : '—';
+
+  const chips = `<div class="chips">
+    <div class="chip"><span class="k">거래량</span><b>${fmt(d.volume_usd)}</b></div>
+    <div class="chip"><span class="k">만료</span><b>${fmtTs(d.end_ts).split(' ')[0]||'?'}</b> <span class="mut">(${d.runway_days??'?'}d)</span></div>
+    <div class="chip"><span class="k">현재</span>${liveTxt}</div>
+    <div class="chip"><span class="k">임펄스-감쇠</span><b class="${ss.n_clean?'clean-y':'clean-n'}">${ss.n_clean}</b>/${ss.n_big} <span class="mut">(rt ${ss.clean_ratio})</span></div>
+    <div class="chip"><span class="k">fade 시뮬 승률</span><b class="${sim.winrate>=0.7?'up':'dn'}">${wr}</b></div>
+    <div class="chip"><span class="k">평균/최악</span><b class="${sim.mean_pct>=0?'up':'dn'}">${sim.mean_pct??'—'}%</b> <span class="dn">${sim.worst_pct??'—'}%</span></div>
+  </div>`;
+
+  const spikeRows = (d.spikes || []).slice().reverse().map(s => `<tr class="${s.clean?'':'out'}">
+      <td class="l">${fmtTs(s.ts)}</td>
+      <td>${s.p0}</td><td>${s.entry}</td><td>${s.peak}</td><td>${s.amplitude}</td>
+      <td>${s.t_up_h}h</td><td>${s.t_down_h}h</td><td>${s.grad}×</td>
+      <td>${s.reverted}</td><td>${s.mono}</td>
+      <td>${s.clean?'<span class="clean-y">✔</span>':'<span class="clean-n">·</span>'}</td>
+    </tr>`).join('') || '<tr><td colspan="11" class="mut l">감지된 스파이크 없음</td></tr>';
+
+  const tradeRows = (sim.trades || []).slice().reverse().map(t => `<tr class="${t.ret_pct>0?'':'out'}">
+      <td class="l">${fmtTs(t.entry_ts)}</td><td>${t.entry}</td><td>${t.exit}</td>
+      <td class="l ${t.reason==='되돌림'?'mut':'dn'}">${t.reason}</td><td>${t.hold_h}h</td>
+      <td class="${t.ret_pct>=0?'up':'dn'}">${t.ret_pct>=0?'+':''}${t.ret_pct}%</td>
+    </tr>`).join('') || '<tr><td colspan="6" class="mut l">시뮬 진입 없음</td></tr>';
+
+  $('#md_body').innerHTML = chips
+    + bigChart(d.curve, d.spikes)
+    + `<div class="note">파란선=YES 가격 · 점=고점(초록 <b class="clean-y">clean 임펄스-감쇠</b> / 빨강 카오스) · ${d.n_points}pt · 진입조건 +${((d.cfg.spike_rel-1)*100).toFixed(0)}% AND +${(d.cfg.spike_abs*100).toFixed(1)}¢ (${Math.round(d.cfg.lookback_s/60)}분창)</div>`
+    + `<div class="subh">스파이크별 shape (clean = A≥0.03 · 되돌림≥0.6 · grad≥1.5 · 단조≥0.7)</div>`
+    + `<div style="max-height:200px;overflow:auto"><table>
+        <thead><tr><th class="l">시각</th><th>p0</th><th>진입</th><th>고점</th><th>진폭</th>
+          <th>t_up</th><th>t_down</th><th>grad</th><th>되돌림</th><th>단조</th><th>clean</th></tr></thead>
+        <tbody>${spikeRows}</tbody></table></div>`
+    + `<div class="subh">이 종목만 fade 시뮬 (retrace ${d.cfg.retrace_pct} · timeout ${d.cfg.timeout_hours}h · stop ${d.cfg.stop_loss_pct})</div>`
+    + `<div style="max-height:200px;overflow:auto"><table>
+        <thead><tr><th class="l">진입시각</th><th>진입</th><th>청산</th><th class="l">사유</th><th>보유</th><th>수익%</th></tr></thead>
+        <tbody>${tradeRows}</tbody></table></div>`;
+}
+function closeDetail() { $('#overlay').classList.remove('on'); }
+$('#overlay').addEventListener('click', e => { if (e.target.id === 'overlay') closeDetail(); });
+document.addEventListener('keydown', e => { if (e.key === 'Escape') closeDetail(); });
 
 loadAll();
 setInterval(loadAll, 60000);

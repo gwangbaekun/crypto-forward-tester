@@ -1263,6 +1263,85 @@ async def fade_curve(condition_id: str = Query(...)) -> JSONResponse:
         db.close()
 
 
+@router.get("/fade/market/detail")
+async def fade_market_detail(condition_id: str = Query(...)) -> JSONResponse:
+    """종목 하나 심층 분석 — 큰 차트 + 스파이크별 shape(임펄스-감쇠) + 그 종목만 fade 시뮬.
+
+    대시보드 행 클릭 시 모달이 호출. 저장된 전체 곡선(pts_json)에서 계산.
+    """
+    import json
+    import time
+    import yaml
+    from pathlib import Path
+    from db.session import get_session
+    from db.models import PolymarketFadeWatch, PolymarketFadeCurve
+    from features.strategy.polymarket.fade import signal as fade_signal
+
+    cfg = yaml.safe_load((Path(__file__).parent / "fade" / "config.yaml").read_text())
+
+    db = get_session()
+    try:
+        w = db.get(PolymarketFadeWatch, condition_id)
+        curve_row = db.get(PolymarketFadeCurve, condition_id)
+    finally:
+        db.close()
+    if w is None:
+        return JSONResponse({"error": "not found"}, status_code=404)
+
+    pts = json.loads(curve_row.pts_json) if (curve_row and curve_row.pts_json) else []
+
+    # 스파이크별 shape + 그 종목만 fade 시뮬
+    import bisect
+    ts_list = [p["ts"] for p in pts]
+    spikes = []
+    spike_idx: set[int] = set()          # 진입·고점 인덱스 — 다운샘플에서 절대 안 버림
+    for i, p0, _ in fade_signal.detect_spikes(pts, cfg):
+        s = fade_signal.spike_shape(pts, i, p0)
+        spikes.append(s)
+        spike_idx.add(i)
+        pk = bisect.bisect_left(ts_list, s["peak_ts"])
+        if pk < len(pts):
+            spike_idx.add(pk)
+    n_big = sum(1 for s in spikes if s["amplitude"] >= 0.03)
+    n_clean = sum(1 for s in spikes if s["clean"])
+    sim = fade_signal.fade_sim(pts, cfg)
+    live = fade_signal.latest_status(pts, cfg) if pts else None
+
+    # 차트용 다운샘플 (최대 400pt) — 스파이크 진입·고점은 강제 포함해
+    # 선이 실제 고점까지 올라가게(점이 선 위에 떠 보이는 문제 방지).
+    if len(pts) <= 400:
+        sel_idx = range(len(pts))
+    else:
+        step = len(pts) / 400
+        sel_idx = sorted({int(k * step) for k in range(400)} | {len(pts) - 1} | spike_idx)
+    curve = [[pts[k]["ts"], round(pts[k]["price"], 4)] for k in sel_idx]
+
+    now = int(time.time())
+    runway_days = round((w.end_ts - now) / 86400, 1) if w.end_ts else None
+
+    return JSONResponse({
+        "condition_id": condition_id,
+        "question": w.question,
+        "status": w.status,
+        "volume_usd": w.volume_usd,
+        "yes_token_id": w.yes_token_id,
+        "end_ts": w.end_ts,
+        "runway_days": runway_days,
+        "n_points": len(pts),
+        "live": live,
+        "curve": curve,
+        "spikes": spikes,
+        "shape_summary": {
+            "n_spikes": len(spikes), "n_big": n_big, "n_clean": n_clean,
+            "clean_ratio": round(n_clean / n_big, 2) if n_big else 0.0,
+        },
+        "sim": sim,
+        "cfg": {"retrace_pct": cfg["retrace_pct"], "timeout_hours": cfg["timeout_hours"],
+                "stop_loss_pct": cfg["stop_loss_pct"], "spike_rel": cfg["spike_rel"],
+                "spike_abs": cfg["spike_abs"], "lookback_s": cfg.get("lookback_s", 3600)},
+    })
+
+
 @router.post("/fade/market/status")
 async def fade_market_status(
     condition_id: str = Query(...), status: str = Query(...),

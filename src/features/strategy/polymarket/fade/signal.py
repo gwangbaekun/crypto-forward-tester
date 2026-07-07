@@ -81,6 +81,115 @@ def latest_status(pts: list[dict], cfg: dict) -> dict | None:
     }
 
 
+def spike_shape(pts: list[dict], i: int, p0: float,
+                peak_window_s: int = 6 * 3600) -> dict:
+    """스파이크 하나의 임펄스-감쇠 shape 계측 (상세 뷰용).
+
+    - A(진폭)=peak−p0, t_up=상승 소요, t_down=peak→절반 되돌림 소요
+    - grad=t_down/t_up (급등 후 완만 하강일수록 큼), reverted=p0쪽 복귀 비율
+    - mono=하강 구간 단조성(재급등 없이 우하향), clean=fade 이상형 판정
+    """
+    n = len(pts)
+    # 트리거 이후 6h 내 실제 고점
+    hz = pts[i]["ts"] + peak_window_s
+    pk = i
+    for k in range(i, n):
+        if pts[k]["ts"] > hz:
+            break
+        if pts[k]["price"] >= pts[pk]["price"]:
+            pk = k
+    peak = pts[pk]["price"]
+    A = peak - p0
+    # 상승 시작점: i 이전에서 p0 근처였던 마지막 지점
+    us = i
+    for k in range(i, -1, -1):
+        if pts[k]["price"] <= p0 * 1.05 + 1e-9:
+            us = k
+            break
+    t_up = max(1.0, pts[pk]["ts"] - pts[us]["ts"])
+    # 하강: 절반 되돌림 도달 시각 + 최저가
+    half = peak - 0.5 * A
+    t_down = None
+    rev_idx = n - 1
+    mn = peak
+    for k in range(pk, n):
+        pr = pts[k]["price"]
+        mn = min(mn, pr)
+        if t_down is None and pr <= half:
+            t_down = pts[k]["ts"] - pts[pk]["ts"]
+            rev_idx = k
+    reverted = min(1.0, (peak - mn) / A) if A > 0 else 0.0
+    if t_down is None:                       # 절반도 안 되돌림
+        t_down = pts[-1]["ts"] - pts[pk]["ts"]
+        rev_idx = n - 1
+    seg = [pts[k]["price"] for k in range(pk, rev_idx + 1)]
+    if len(seg) >= 2:
+        noninc = sum(1 for a, b in zip(seg, seg[1:]) if b <= a + 0.005)
+        mono = noninc / (len(seg) - 1)
+    else:
+        mono = 1.0
+    grad = t_down / t_up
+    clean = A >= 0.03 and reverted >= 0.6 and grad >= 1.5 and mono >= 0.7
+    return {
+        "ts": pts[i]["ts"], "p0": round(p0, 4), "entry": round(pts[i]["price"], 4),
+        "peak": round(peak, 4), "peak_ts": pts[pk]["ts"],
+        "amplitude": round(A, 4), "t_up_h": round(t_up / 3600, 1),
+        "t_down_h": round(t_down / 3600, 1), "grad": round(grad, 1),
+        "reverted": round(reverted, 2), "mono": round(mono, 2), "clean": clean,
+    }
+
+
+def fade_sim(pts: list[dict], cfg: dict) -> dict:
+    """그 종목만 순차 fade 백테스트 — 스파이크마다 NO 진입, 되돌림/손절/타임아웃 청산.
+
+    fade_study.fade_backtest 의 단일 토큰 버전. 순차(열린 포지션 청산 전 재진입 금지).
+    수익%=NO 기준 (진입−청산)/(1−진입).
+    """
+    retrace = cfg["retrace_pct"]
+    stop_loss = cfg["stop_loss_pct"]
+    timeout_s = cfg["timeout_hours"] * 3600
+    trades = []
+    last_exit_i = -1
+    for i, p0, px in detect_spikes(pts, cfg):
+        if i <= last_exit_i:
+            continue
+        target = px - retrace * (px - p0)
+        stop_price = px + stop_loss * (1 - px) if stop_loss > 0 else None
+        t_end = pts[i]["ts"] + timeout_s
+        exit_px, exit_ts, exit_i, reason = pts[i]["price"], pts[i]["ts"], i, "보유중"
+        for k in range(i, len(pts)):
+            p = pts[k]
+            if p["ts"] > t_end:
+                reason = "타임아웃"
+                break
+            exit_px, exit_ts, exit_i = p["price"], p["ts"], k
+            if p["price"] <= target:
+                exit_px, reason = target, "되돌림"
+                break
+            if stop_price is not None and p["price"] >= stop_price:
+                exit_px, reason = stop_price, "손절"
+                break
+        last_exit_i = exit_i
+        ret = (px - exit_px) / (1 - px) if px < 1 else 0.0
+        trades.append({
+            "entry_ts": pts[i]["ts"], "p0": round(p0, 4), "entry": round(px, 4),
+            "exit": round(exit_px, 4), "reason": reason,
+            "hold_h": round((exit_ts - pts[i]["ts"]) / 3600, 1),
+            "ret_pct": round(ret * 100, 2),
+        })
+    rets = [t["ret_pct"] for t in trades]
+    n = len(rets)
+    wins = sum(1 for r in rets if r > 0)
+    return {
+        "n": n, "wins": wins,
+        "winrate": round(wins / n, 3) if n else None,
+        "mean_pct": round(sum(rets) / n, 2) if n else None,
+        "worst_pct": round(min(rets), 2) if n else None,
+        "total_pct": round(sum(rets), 2) if n else None,
+        "trades": trades,
+    }
+
+
 def build_signal(
     market: dict, p0: float, entry_px: float, entry_ts: int, cfg: dict,
 ) -> FadeSignal:
