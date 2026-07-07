@@ -256,6 +256,10 @@ async def _enter(sig: fade_signal.FadeSignal) -> None:
     if status in ("failed", "skipped", "relay_failed"):
         log.warning("[fade] 진입 주문 미체결 → 포지션 미기록: %s", result)
         return
+    # 실체결 검증: order_id/shares 없으면 포지션 기록 안 함(과거 유령 포지션 재발 방지).
+    if not result.get("order_id") or not result.get("shares"):
+        log.warning("[fade] 진입 응답에 order_id/shares 없음 → 유령 방지 위해 포지션 미기록: %s", result)
+        return
     _open_new_position(sig, result)
 
 
@@ -279,6 +283,32 @@ def _open_new_position(sig: fade_signal.FadeSignal, order_result: dict) -> None:
         log.warning("[fade] 포지션 저장 실패: %s", e)
     finally:
         db.close()
+
+
+# ── 수동 강제청산 (유령/잔여 포지션 정리용) ──────────────────────────────────
+
+def force_close_position(condition_id: str, reason: str = "manual_force_close") -> dict:
+    """열린 포지션을 즉시 closed 처리 + 인메모리 슬롯 해제. 릴레이 주문은 보내지 않음
+    (유령/이미 정리된 포지션 정리 전용). 반환: {ok, closed, condition_id}."""
+    db = get_session()
+    try:
+        row = (
+            db.query(PolymarketFadePosition)
+            .filter(PolymarketFadePosition.condition_id == condition_id,
+                    PolymarketFadePosition.status == "open")
+            .first()
+        )
+        if row is None:
+            return {"ok": False, "error": "열린 포지션 없음", "condition_id": condition_id}
+        row.status = "closed"
+        row.exit_ts = int(time.time())
+        row.exit_reason = reason
+        db.commit()
+    finally:
+        db.close()
+    _open_cids.discard(condition_id)   # 슬롯 즉시 해제 → 재시작 없이 신규 진입 재개
+    log.info("[fade] 수동 강제청산 %s (%s)", condition_id[:12], reason)
+    return {"ok": True, "closed": True, "condition_id": condition_id, "reason": reason}
 
 
 # ── 청산 ─────────────────────────────────────────────────────────────────────

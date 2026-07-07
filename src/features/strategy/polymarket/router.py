@@ -1431,3 +1431,16 @@ async def fade_positions(
          "ret_pct": r.ret_pct}
         for r in rows
     ]})
+
+
+@router.post("/fade/position/close")
+async def fade_position_close(
+    condition_id: str = Query(..., description="닫을 열린 포지션의 condition_id"),
+    reason: str = Query("manual_force_close"),
+) -> JSONResponse:
+    """열린 포지션 강제 청산 (DB status=closed + 슬롯 해제). 릴레이 주문은 안 보냄 —
+    유령/잔여 포지션 정리용. 실체결이 있는 포지션에는 쓰지 말 것."""
+    from features.strategy.polymarket.fade import engine as fade_engine
+    result = fade_engine.force_close_position(condition_id, reason)
+    code = 200 if result.get("ok") else 404
+    return JSONResponse(result, status_code=code)
