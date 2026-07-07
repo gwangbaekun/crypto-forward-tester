@@ -142,6 +142,8 @@ async def _value_scan_scheduler() -> None:
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
     init_db()
+    from features.strategy.polymarket.fade.watchlist_seed import seed_watchlist_from_config
+    seed_watchlist_from_config()  # watchlist.yaml → DB 비파괴적 upsert (local/Railway 동기화)
     await startup_binance_price_ws()
     await startup_ctrader()
     try:

@@ -1144,6 +1144,13 @@ async def fade_market_add(token: str = Query(..., description="YES clob token id
     finally:
         db.close()
 
+    # git 커밋 대상 yaml(source of truth)도 함께 갱신 → 커밋/배포 시 Railway 자동 동기화
+    from features.strategy.polymarket.fade.watchlist_seed import upsert_watchlist_yaml
+    upsert_watchlist_yaml({"condition_id": m["condition_id"], "question": m.get("question", ""),
+                           "yes_token_id": m.get("yes_token_id"), "no_token_id": m.get("no_token_id"),
+                           "volume_usd": m.get("volume_usd"), "start_ts": m.get("start_ts"),
+                           "end_ts": m.get("end_ts"), "status": "included"})
+
     n = await _refresh_curve(m["condition_id"], m.get("yes_token_id"), m.get("start_ts"), m.get("end_ts"))
     return JSONResponse({"condition_id": m["condition_id"], "question": m.get("question", ""), "n_points": n})
 
@@ -1357,9 +1364,15 @@ async def fade_market_status(
         if row is None:
             return JSONResponse({"ok": False, "error": "not found"}, status_code=404)
         row.status = status
+        snap = {"condition_id": row.condition_id, "question": row.question,
+                "yes_token_id": row.yes_token_id, "no_token_id": row.no_token_id,
+                "volume_usd": row.volume_usd, "start_ts": row.start_ts,
+                "end_ts": row.end_ts, "status": status}
         db.commit()
     finally:
         db.close()
+    from features.strategy.polymarket.fade.watchlist_seed import upsert_watchlist_yaml
+    upsert_watchlist_yaml(snap)  # yaml(source of truth) 상태 동기화
     return JSONResponse({"ok": True, "condition_id": condition_id, "status": status})
 
 
@@ -1380,6 +1393,8 @@ async def fade_market_delete(condition_id: str = Query(...)) -> JSONResponse:
         db.commit()
     finally:
         db.close()
+    from features.strategy.polymarket.fade.watchlist_seed import remove_from_watchlist_yaml
+    remove_from_watchlist_yaml(condition_id)  # yaml 에서도 제거 (재시작 좀비 부활 방지)
     return JSONResponse({"ok": ok, "condition_id": condition_id})
 
 
