@@ -48,12 +48,26 @@ _entry_lock = asyncio.Lock()
 _price_hist: dict[str, list[tuple[int, float]]] = {}
 # yes_token_id -> watch (구독 갱신 시 재구성)
 _yes_map: dict[str, PolymarketFadeWatch] = {}
-# 같은 마켓 재진입 쿨다운: condition_id -> 쿨다운 해제 ts
-_cooldown: dict[str, int] = {}
 # 토큰당 마지막 처리 시각(throttle) + 열린 포지션 condition_id 캐시(hot path DB 제거)
 _last_proc: dict[str, float] = {}
 _open_cids: set[str] = set()
-_THROTTLE_S = 1.0
+
+# config.yaml 필수 키 — 부팅 시 하나라도 없으면 즉시 터진다(fail-fast, 하드코딩 fallback 없음).
+_REQUIRED_CFG_KEYS = (
+    "enabled", "sweep_interval_sec", "throttle_s",
+    "ws_heartbeat_sec", "ws_reconnect_s", "ws_idle_sleep_s",
+    "seed_interval", "seed_points", "lookback_buffer_s",
+    "lookback_s", "spike_rel", "spike_abs", "p0_lo", "p0_hi",
+    "retrace_pct", "timeout_hours", "stop_loss_pct",
+    "addon_enabled", "addon_max_count", "addon_min_rise_pct",
+    "order_size_mode", "order_size_usd", "balance_buffer",
+)
+
+
+def _validate_cfg(cfg: dict) -> None:
+    missing = [k for k in _REQUIRED_CFG_KEYS if k not in cfg]
+    if missing:
+        raise RuntimeError(f"[fade] config.yaml 필수 키 누락: {missing}")
 
 
 def _refresh_open_cache() -> None:
@@ -96,16 +110,6 @@ def _watchlist_included() -> list[PolymarketFadeWatch]:
         db.close()
 
 
-def _any_open_position() -> bool:
-    """열린 포지션이 하나라도 있으면 True — 전액 순차(한 번에 하나) 신규 진입 차단."""
-    db = get_session()
-    try:
-        stmt = select(PolymarketFadePosition).where(PolymarketFadePosition.status == "open")
-        return db.execute(stmt).scalars().first() is not None
-    finally:
-        db.close()
-
-
 def _open_position(condition_id: str) -> PolymarketFadePosition | None:
     db = get_session()
     try:
@@ -144,7 +148,7 @@ def _record_live(condition_id: str, hist: list[tuple[int, float]], has_position:
     if not hist:
         return
     now, px = hist[-1]
-    lookback = _cfg.get("lookback_s", 600)
+    lookback = _cfg["lookback_s"]
     p0 = _mid_lookback_ago(hist, now, lookback)
     if p0 is None:                       # 아직 lookback 만큼 안 쌓임 → 표시만(스파이크 판정 X)
         _live_status[condition_id] = {
@@ -179,14 +183,14 @@ async def _on_update(token_id: str) -> None:
     now = time.time()
 
     # 토큰당 throttle — 초당 수백 업데이트를 최대 1회/_THROTTLE_S 로 제한(감지/DB skip)
-    if now - _last_proc.get(token_id, 0.0) < _THROTTLE_S:
+    if now - _last_proc.get(token_id, 0.0) < _cfg["throttle_s"]:
         return
     _last_proc[token_id] = now
     now = int(now)
 
     hist = _price_hist.setdefault(token_id, [])
     hist.append((now, mid))
-    cutoff = now - (_cfg.get("lookback_s", 600) + 300)
+    cutoff = now - (_cfg["lookback_s"] + _cfg["lookback_buffer_s"])
     if hist and hist[0][0] < cutoff:
         i = 0
         while i < len(hist) and hist[i][0] < cutoff:
@@ -200,19 +204,19 @@ async def _on_update(token_id: str) -> None:
         open_pos = _open_position(watch.condition_id)   # DB 조회는 포지션 보유 종목만(≤1)
         if open_pos is not None:
             await _check_exit_price(open_pos, mid)
+            # 청산 안 됐으면(여전히 open) 피라미딩 add-on 판정
+            if watch.condition_id in _open_cids and _cfg["addon_enabled"]:
+                await _maybe_addon(watch, open_pos, hist, now, mid)
         return
 
-    # 신규 진입 판정
-    lookback = _cfg.get("lookback_s", 600)
+    # 신규 진입 판정 (쿨다운 게이트 제거 — 재진입/피라미딩 허용)
+    lookback = _cfg["lookback_s"]
     p0 = _mid_lookback_ago(hist, now, lookback)
     if p0 is None:
         return
     if not (_cfg["p0_lo"] <= p0 <= _cfg["p0_hi"]):
         return
     if mid < p0 * _cfg["spike_rel"] or mid - p0 < _cfg["spike_abs"]:
-        return
-    # 쿨다운
-    if now < _cooldown.get(watch.condition_id, 0):
         return
 
     market = {"condition_id": watch.condition_id, "question": watch.question or "",
@@ -225,16 +229,14 @@ async def _on_update(token_id: str) -> None:
 # ── 진입 ─────────────────────────────────────────────────────────────────────
 
 async def _enter(sig: fade_signal.FadeSignal) -> None:
-    if _any_open_position():
-        log.info("[fade] 이미 열린 포지션 있음 → 진입 스킵 %s", sig.condition_id[:12])
-        return
-
+    # 열린 포지션이 있어도 다른 마켓에는 남은 현금으로 동시 진입(전역 1-포지션 차단 제거).
+    # 이중지출은 _entry_lock(호출부 직렬화) + 주문 시 fetch_balance 재조회로 방지.
     no_price = 1 - sig.entry_px
-    size_usd = _cfg.get("order_size_usd", 1.0)
-    if _cfg.get("order_size_mode", "fixed") == "full":
+    size_usd = _cfg["order_size_usd"]
+    if _cfg["order_size_mode"] == "full":
         bal = await oracle_client.fetch_balance()
         if bal is not None:
-            size_usd = bal * _cfg.get("balance_buffer", 0.98)
+            size_usd = bal * _cfg["balance_buffer"]
 
     log.info(
         "[fade] SIGNAL 진입 NO | %s | p0=%.4f entry=%.4f no_px=%.4f size=$%.2f target=%.4f stop=%.4f",
@@ -274,6 +276,7 @@ def _open_new_position(sig: fade_signal.FadeSignal, order_result: dict) -> None:
             shares=order_result.get("shares"), entry_usd=order_result.get("usd"),
             order_id=order_result.get("order_id") or None,
             order_status=(order_result.get("status") or "logged")[:16],
+            last_leg_px=sig.entry_px,   # 초기 레그가 — add-on 상승폭 게이트 기준
         )
         db.add(row)
         db.commit()
@@ -283,6 +286,111 @@ def _open_new_position(sig: fade_signal.FadeSignal, order_result: dict) -> None:
         log.warning("[fade] 포지션 저장 실패: %s", e)
     finally:
         db.close()
+
+
+# ── 피라미딩 add-on (열린 포지션에 새 스파이크 시 평단·SL 상향) ────────────────
+
+async def _maybe_addon(watch: PolymarketFadeWatch, pos: PolymarketFadePosition,
+                       hist: list[tuple[int, float]], now: int, mid: float) -> None:
+    """열린 포지션 마켓에 새 스파이크 → add-on 판정.
+
+    게이트: (1) 최대 횟수, (2) 신규 진입과 동일한 스파이크 기준(p0 대비 상대/절대),
+    (3) 직전 레그가 대비 addon_min_rise_pct 이상 추가 상승(10분창 매틱 폭주 방지).
+    통과 시 _entry_lock 안에서 _add_on 실행.
+    """
+    if (pos.addon_count or 0) >= int(_cfg["addon_max_count"]):
+        return
+    lookback = _cfg["lookback_s"]
+    p0 = _mid_lookback_ago(hist, now, lookback)
+    if p0 is None or not (_cfg["p0_lo"] <= p0 <= _cfg["p0_hi"]):
+        return
+    if mid < p0 * _cfg["spike_rel"] or mid - p0 < _cfg["spike_abs"]:
+        return
+    last_leg = pos.last_leg_px if pos.last_leg_px is not None else pos.entry_px
+    if mid < last_leg * (1 + _cfg["addon_min_rise_pct"]):
+        return
+    async with _entry_lock:
+        await _add_on(pos.condition_id, p0, mid)
+
+
+async def _add_on(condition_id: str, p0: float, add_px: float) -> None:
+    """add-on 주문 실행 → 체결 검증 후 평단/SL 재계산 반영."""
+    cur = _open_position(condition_id)      # 락 안에서 최신 상태 재확인
+    if cur is None:
+        return
+    if (cur.addon_count or 0) >= int(_cfg["addon_max_count"]):
+        return
+
+    no_price = 1 - add_px
+    size_usd = _cfg["order_size_usd"]
+    if _cfg["order_size_mode"] == "full":
+        bal = await oracle_client.fetch_balance()
+        if bal is not None:
+            size_usd = bal * _cfg["balance_buffer"]
+    if size_usd <= 0:
+        log.info("[fade] add-on 스킵 — 가용 잔액 없음 %s", condition_id[:12])
+        return
+
+    log.info(
+        "[fade] ADD-ON NO | %s | leg#%d add(YES)=%.4f no_px=%.4f size=$%.2f",
+        (cur.question or condition_id)[:50], (cur.addon_count or 0) + 1, add_px, no_price, size_usd,
+    )
+    result = await oracle_client.place_order(
+        side="NO", action="buy", condition_id=condition_id, question=cur.question or "",
+        token_id=cur.no_token_id or "", price=no_price, size_usd=size_usd, reason="fade_addon",
+    )
+    status = (result.get("status") or "").lower()
+    if status in ("failed", "skipped", "relay_failed"):
+        log.warning("[fade] add-on 미체결 → 평단 미반영: %s", result)
+        return
+    if not result.get("order_id") or not result.get("shares"):
+        log.warning("[fade] add-on 응답에 order_id/shares 없음 → 미반영: %s", result)
+        return
+    _apply_addon(cur.id, add_px, result)
+
+
+def _apply_addon(pos_id: int, add_px: float, order_result: dict) -> None:
+    """shares 가중 평균으로 평단(entry_px) 상향 → target/stop 재산출(SL 라인 상승)."""
+    db = get_session()
+    try:
+        row = db.get(PolymarketFadePosition, pos_id)
+        if not (row and row.status == "open"):
+            return
+        old_sh = row.shares or 0.0
+        add_sh = order_result.get("shares") or 0.0
+        new_sh = old_sh + add_sh
+        old_entry = row.entry_px
+        new_entry = ((old_entry * old_sh + add_px * add_sh) / new_sh) if new_sh > 0 else old_entry
+        retrace = _cfg["retrace_pct"]
+        stop_loss = _cfg["stop_loss_pct"]
+        row.entry_px = new_entry
+        row.target_px = new_entry - retrace * (new_entry - row.p0)
+        row.stop_px = new_entry + stop_loss * (1 - new_entry)   # 평단 상승 → SL 라인 상승
+        row.shares = new_sh
+        row.entry_usd = (row.entry_usd or 0.0) + (order_result.get("usd") or 0.0)
+        row.addon_count = (row.addon_count or 0) + 1
+        row.last_leg_px = add_px
+        cnt = row.addon_count
+        cid = row.condition_id
+        target, stop = row.target_px, row.stop_px
+        db.commit()
+    except Exception as e:
+        db.rollback()
+        log.warning("[fade] add-on 저장 실패: %s", e)
+        return
+    finally:
+        db.close()
+
+    log.info(
+        "[fade] ADD-ON 반영 %s | 평단(YES) %.4f→%.4f target=%.4f stop=%.4f shares=%.2f cnt=%d",
+        cid[:12], old_entry, new_entry, target, stop, new_sh, cnt,
+    )
+    _tg(
+        f"➕ <b>[Polymarket Fade] 물타기 add-on (leg#{cnt})</b>\n\n"
+        f"평단(YES): <code>{old_entry:.4f}</code> → <code>{new_entry:.4f}</code>\n"
+        f"target: <code>{target:.4f}</code>  |  stop↑: <code>{stop:.4f}</code>\n"
+        f"총 shares: <code>{new_sh:.2f}</code>"
+    )
 
 
 # ── 수동 강제청산 (유령/잔여 포지션 정리용) ──────────────────────────────────
@@ -342,7 +450,6 @@ async def _close_position(pos: PolymarketFadePosition, exit_px: float, reason: s
         db.close()
 
     _open_cids.discard(pos.condition_id)
-    _cooldown[pos.condition_id] = now_ts + int(_cfg.get("cooldown_hours", 12) * 3600)
 
     log.info("[fade] SIGNAL 청산 %s | %s | exit=%.4f ret=%.2f%% shares=%s",
              reason, pos.question[:50] if pos.question else pos.condition_id[:12],
@@ -407,11 +514,11 @@ async def _refresh_subscriptions(ws_client=None) -> bool:
 async def _seed_hist(yes_token_id: str) -> None:
     """REST 1h 히스토리로 mid 버퍼 시드 — 재시작 직후 lookback 공백 방지."""
     try:
-        pts = await poly_client.fetch_prices(yes_token_id, interval="1h")
+        pts = await poly_client.fetch_prices(yes_token_id, interval=_cfg["seed_interval"])
     except Exception:
         return
     if pts:
-        _price_hist[yes_token_id] = [(int(p["ts"]), float(p["price"])) for p in pts[-120:]]
+        _price_hist[yes_token_id] = [(int(p["ts"]), float(p["price"])) for p in pts[-_cfg["seed_points"]:]]
         w = _yes_map.get(yes_token_id)
         if w:
             _record_live(w.condition_id, _price_hist[yes_token_id],
@@ -432,11 +539,11 @@ async def _ws_loop() -> None:
     while True:
         toks = list(_yes_map.keys())
         if not toks:
-            await asyncio.sleep(10); continue
+            await asyncio.sleep(_cfg["ws_idle_sleep_s"]); continue
         subscribed = set(toks)
         try:
             async with aiohttp.ClientSession() as sess:
-                async with sess.ws_connect(ws.WS_URL, heartbeat=30) as conn:
+                async with sess.ws_connect(ws.WS_URL, heartbeat=_cfg["ws_heartbeat_sec"]) as conn:
                     await conn.send_json({"assets_ids": toks, "type": "market"})
                     log.info("[fade] WS 연결 — 구독 %d종목", len(toks))
                     async for msg in conn:
@@ -468,13 +575,14 @@ async def _ws_loop() -> None:
                             break
         except Exception as e:
             log.warning("[fade] WS 오류: %s — 5s 후 재연결", e)
-            await asyncio.sleep(5)
+            await asyncio.sleep(_cfg["ws_reconnect_s"])
 
 
 async def run(ws_client=None) -> None:
     global _cfg
     _cfg = _load_cfg()
-    if not _cfg.get("enabled", True):
+    _validate_cfg(_cfg)          # 필수 키 누락 시 부팅에서 즉시 터짐(loop try/except가 삼키기 전)
+    if not _cfg["enabled"]:
         log.debug("[fade] disabled — skipping")
         return
 
@@ -491,7 +599,7 @@ async def run(ws_client=None) -> None:
                 await _timeout_sweep()
             except Exception as e:
                 log.warning("[fade] 주기 루프 오류: %s", e)
-            await asyncio.sleep(_cfg.get("sweep_interval_sec", 30))
+            await asyncio.sleep(_cfg["sweep_interval_sec"])
 
     # gather 로 묶어 _ws_loop 예외가 삼켜지지 않게
     await asyncio.gather(_ws_loop(), _sweep_loop(), return_exceptions=True)

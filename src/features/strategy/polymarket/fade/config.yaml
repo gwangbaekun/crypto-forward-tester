@@ -1,25 +1,39 @@
+# Fade 전략 설정 — 모든 튜닝 수치는 이 파일에서만 관리한다.
+# 코드는 값을 하드코딩하지 않고 여기서 필수 조회하며, 키가 없으면 부팅 시 즉시 터진다(fail-fast).
+
 enabled: true
 
-# WS 실시간 엔진 — 감지는 오더북 mid 업데이트마다 즉시(폴링 아님).
-sweep_interval_sec: 30      # 주기 루프: 구독 갱신 + 타임아웃 청산 체크 (감지 주기 아님)
+# ── 실시간 엔진 타이밍 ────────────────────────────────────────────────────────
+sweep_interval_sec: 30       # 주기 루프: 구독 갱신 + 타임아웃 청산 체크 (감지 주기 아님)
+throttle_s: 1.0              # 토큰당 최소 처리 간격 — 초당 수백 WS 업데이트를 1회/이 값으로 제한
+ws_heartbeat_sec: 30         # WS 연결 하트비트
+ws_reconnect_s: 5            # WS 오류 후 재연결 대기
+ws_idle_sleep_s: 10          # 구독 종목이 하나도 없을 때 대기
+seed_interval: "1h"          # 재시작 직후 버퍼 시드용 REST 히스토리 간격
+seed_points: 120             # 시드로 채울 최근 포인트 수
+lookback_buffer_s: 300       # mid 버퍼 보관 여유 (lookback_s 초과분 — 이만큼 더 오래 보관)
 
-# 진입 스파이크 감지 (하위 TF 확정: 10분봉·10분창·+30%. btc_backtest 백테스트로 검증)
-lookback_s: 600             # 10분 내 상대/절대 변동 기준 (하위 TF)
-spike_rel: 1.30              # 10분 전 대비 +30%
+# ── 진입 스파이크 감지 (하위 TF: 10분봉·10분창·+30%. btc_backtest 백테스트로 검증) ──────
+lookback_s: 600              # 상대/절대 변동 판정 기준 창(초)
+spike_rel: 1.30              # lookback 전 대비 +30%
 spike_abs: 0.015             # AND 절대 +1.5¢
-p0_lo: 0.005
-p0_hi: 0.5
-cooldown_hours: 12           # 같은 마켓 재진입 쿨다운
+p0_lo: 0.005                 # 진입 대상 p0(기준가) 하한
+p0_hi: 0.5                   # 진입 대상 p0 상한
 
-# 청산 (btc_backtest 백테스트 검증: 10분봉·10분창·+30% → 진입 129 · 승률 105/129 · 평균 10.4% · 최악 -20%)
+# ── 청산 (백테스트 검증: 진입 129 · 승률 105/129 · 평균 10.4% · 최악 -20%) ──────────
 retrace_pct: 0.80            # 스파이크 폭의 80% 되돌리면 청산
 timeout_hours: 72.0          # 72h 내 미도달 시 강제 청산
 stop_loss_pct: 0.20          # 손실 -20% 도달 시 즉시 손절
 
-# 사이징: full = 진입마다 가용 pUSD 전액(순차 포지션이라 한 번에 하나에만 전액 투입).
-#         fixed = order_size_usd 고정 명목.
-order_size_mode: full
-order_size_usd: 1.0          # fixed 모드 명목 / full 모드에선 무시
-balance_buffer: 0.98         # 전액의 98%만(수수료·최소단위·슬리피지 여유)
+# ── 피라미딩 add-on: 열린 포지션에 새 스파이크가 더 오르면 추가 진입 → 평단·SL 라인 상향 ──
+addon_enabled: true
+addon_max_count: 2           # 포지션당 최대 add-on 횟수(초기 진입 제외 → 최대 3레그)
+addon_min_rise_pct: 0.15     # 직전 레그 진입가 대비 +15% 더 올라야 add (10분창 매틱 폭주 방지)
 
-# 워치리스트만 스캔 (전체 마켓 자동 스캔 아님 — 유저가 add/remove 로 직접 관리)
+# ── 사이징 ────────────────────────────────────────────────────────────────────
+order_size_mode: full        # full = 진입마다 가용 pUSD 남은 전액 / fixed = order_size_usd 고정
+order_size_usd: 1.0          # fixed 모드 명목 / full 모드에선 무시
+balance_buffer: 0.98         # 전액의 98%만 진입(수수료·최소단위·슬리피지 여유)
+
+# ── 백테스트(/fade/sim)에서만 사용 — live 엔진은 재진입 허용으로 쿨다운 미사용 ──────────
+cooldown_hours: 12           # sim 순차 백테스트의 같은 마켓 재진입 간격

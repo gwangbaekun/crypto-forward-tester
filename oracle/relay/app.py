@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import math
 import os
 from datetime import datetime, timezone
 from pathlib import Path
@@ -117,7 +118,9 @@ async def order(req: OrderRequest, x_relay_key: str = Header(default="")) -> dic
     else:
         # 안전 하드캡: 매수 명목가가 캡 초과면 캡으로 줄임
         size_usd = min(req.size_usd, _MAX_ORDER_USD)
-        shares = round(size_usd / req.price, 2)
+        # 내림(floor) — round 올림이 캡을 다시 넘겨(예: 5.99×0.835=$5.0017 > $5)
+        # executor 의 `effective_usd > max_usd` 재검증에서 skipped 나던 경계 버그 제거.
+        shares = math.floor(size_usd / req.price * 100) / 100
 
     log.info(
         "[RELAY-ORDER] action=%s side=%s token=%s price=%.4f shares=%.2f (size_usd req %.2f) reason=%s | %s",

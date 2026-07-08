@@ -262,6 +262,8 @@ def _ensure_polymarket_fade_position_columns(engine) -> None:
         "entry_usd":    "ALTER TABLE polymarket_fade_positions ADD COLUMN entry_usd FLOAT",
         "order_id":     "ALTER TABLE polymarket_fade_positions ADD COLUMN order_id VARCHAR(128)",
         "order_status": "ALTER TABLE polymarket_fade_positions ADD COLUMN order_status VARCHAR(16)",
+        "addon_count":  "ALTER TABLE polymarket_fade_positions ADD COLUMN addon_count INTEGER DEFAULT 0",
+        "last_leg_px":  "ALTER TABLE polymarket_fade_positions ADD COLUMN last_leg_px FLOAT",
     }
     missing = [sql for col, sql in required.items() if col not in existing]
     if not missing:
@@ -418,6 +420,9 @@ class PolymarketFadePosition(Base):
     entry_usd:     Mapped[Optional[float]] = mapped_column(Float,      nullable=True)
     order_id:      Mapped[Optional[str]]  = mapped_column(String(128), nullable=True)
     order_status:  Mapped[Optional[str]]  = mapped_column(String(16), nullable=True)  # matched|live|failed|logged
+    # 피라미딩(add-on): 열린 포지션에 새 스파이크 시 평단·SL 재계산하며 누적 진입.
+    addon_count:   Mapped[int]            = mapped_column(Integer,     nullable=False, default=0)   # add-on 횟수
+    last_leg_px:   Mapped[Optional[float]] = mapped_column(Float,      nullable=True)  # 직전 레그 YES 진입가(재추가 상승폭 게이트)
     created_at:    Mapped[datetime]       = mapped_column(DateTime,    nullable=False, default=datetime.utcnow)
 
 
