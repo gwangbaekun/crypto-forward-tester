@@ -204,12 +204,20 @@ async def _on_update(token_id: str) -> None:
         open_pos = _open_position(watch.condition_id)   # DB 조회는 포지션 보유 종목만(≤1)
         if open_pos is not None:
             await _check_exit_price(open_pos, mid)
-            # 청산 안 됐으면(여전히 open) 피라미딩 add-on 판정
-            if watch.condition_id in _open_cids and _cfg["addon_enabled"]:
+            # 청산 안 됐으면(여전히 open) 피라미딩 add-on 판정.
+            # full(전액) 모드는 자본을 최초 진입에 전부 투입 → add-on 여력이 없으므로 skip.
+            if (watch.condition_id in _open_cids and _cfg["addon_enabled"]
+                    and _cfg["order_size_mode"] != "full"):
                 await _maybe_addon(watch, open_pos, hist, now, mid)
         return
 
-    # 신규 진입 판정 (쿨다운 게이트 제거 — 재진입/피라미딩 허용)
+    # 전액(full) 진입은 자본을 한 포지션에 전부 투입한다 → 동시에 1포지션만 보유.
+    # 다른 마켓에 이미 열린 포지션이 있으면 남은 자본이 없으므로 신규 진입하지 않는다.
+    # (청산되면 _open_cids 가 비어 다음 스파이크에 재진입 가능.)
+    if _cfg["order_size_mode"] == "full" and _open_cids:
+        return
+
+    # 신규 진입 판정
     lookback = _cfg["lookback_s"]
     p0 = _mid_lookback_ago(hist, now, lookback)
     if p0 is None:
@@ -222,14 +230,14 @@ async def _on_update(token_id: str) -> None:
     market = {"condition_id": watch.condition_id, "question": watch.question or "",
               "yes_token_id": watch.yes_token_id, "no_token_id": watch.no_token_id}
     sig = fade_signal.build_signal(market, p0, mid, now, _cfg)
-    async with _entry_lock:
+    async with _entry_lock:              # 사이징 이중지출 방지(직렬화)
         await _enter(sig)
 
 
 # ── 진입 ─────────────────────────────────────────────────────────────────────
 
 async def _enter(sig: fade_signal.FadeSignal) -> None:
-    # 열린 포지션이 있어도 다른 마켓에는 남은 현금으로 동시 진입(전역 1-포지션 차단 제거).
+    # full 모드는 1포지션만(호출부에서 _open_cids 게이트). fixed 모드는 다른 마켓 동시 진입 가능.
     # 이중지출은 _entry_lock(호출부 직렬화) + 주문 시 fetch_balance 재조회로 방지.
     no_price = 1 - sig.entry_px
     size_usd = _cfg["order_size_usd"]
@@ -241,13 +249,6 @@ async def _enter(sig: fade_signal.FadeSignal) -> None:
     log.info(
         "[fade] SIGNAL 진입 NO | %s | p0=%.4f entry=%.4f no_px=%.4f size=$%.2f target=%.4f stop=%.4f",
         sig.question[:50], sig.p0, sig.entry_px, no_price, size_usd, sig.target_px, sig.stop_px,
-    )
-    _tg(
-        f"📡 <b>[Polymarket Fade] 진입 신호 감지</b>\n\n"
-        f"<b>{sig.question[:80]}</b>\n\n"
-        f"p0: <code>{sig.p0:.4f}</code>  →  entry(YES): <code>{sig.entry_px:.4f}</code>\n"
-        f"NO 매수가: <code>{no_price:.4f}</code>  |  size: <code>${size_usd:.2f}</code>\n"
-        f"target: <code>{sig.target_px:.4f}</code>  |  stop: <code>{sig.stop_px:.4f}</code>"
     )
     result = await oracle_client.place_order(
         side="NO", action="buy", condition_id=sig.condition_id, question=sig.question,
@@ -262,6 +263,15 @@ async def _enter(sig: fade_signal.FadeSignal) -> None:
     if not result.get("order_id") or not result.get("shares"):
         log.warning("[fade] 진입 응답에 order_id/shares 없음 → 유령 방지 위해 포지션 미기록: %s", result)
         return
+    # 텔레그램은 실체결 확인 후에만 발사 — 미체결이 반복돼도 알림이 폭주하지 않게
+    # (과거: 체결 전 발사 → 매 throttle 재시도마다 텔레그램).
+    _tg(
+        f"📡 <b>[Polymarket Fade] 진입 체결</b>\n\n"
+        f"<b>{sig.question[:80]}</b>\n\n"
+        f"p0: <code>{sig.p0:.4f}</code>  →  entry(YES): <code>{sig.entry_px:.4f}</code>\n"
+        f"NO 매수가: <code>{no_price:.4f}</code>  |  size: <code>${size_usd:.2f}</code>\n"
+        f"target: <code>{sig.target_px:.4f}</code>  |  stop: <code>{sig.stop_px:.4f}</code>"
+    )
     _open_new_position(sig, result)
 
 
@@ -327,7 +337,7 @@ async def _add_on(condition_id: str, p0: float, add_px: float) -> None:
         bal = await oracle_client.fetch_balance()
         if bal is not None:
             size_usd = bal * _cfg["balance_buffer"]
-    if size_usd <= 0:
+    if size_usd <= 0:  
         log.info("[fade] add-on 스킵 — 가용 잔액 없음 %s", condition_id[:12])
         return
 
