@@ -60,6 +60,9 @@ class TelegramService:
 
     def send_message(self, message: str) -> Tuple[bool, str]:
         """HTML parse_mode 로 메시지 전송. (성공 여부, 에러 메시지)"""
+        # 로컬(sim) 환경에서 텔레그램 스팸 차단: TELEGRAM_DISABLE=1/true 면 전송 안 함.
+        if os.environ.get("TELEGRAM_DISABLE", "0").strip().lower() in ("1", "true", "yes"):
+            return False, "Telegram disabled (TELEGRAM_DISABLE)"
         config = self.load_config()
         bot_token = config.get("bot_token")
         chat_id = config.get("chat_id")
