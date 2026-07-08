@@ -76,7 +76,6 @@ def is_live_mode() -> bool:
 async def place_order(
     token_id: str,
     price: float,
-    max_usd: float = 0.0,
     side: str = "BUY",
     size_shares: float | None = None,
 ) -> dict[str, Any]:
@@ -84,7 +83,6 @@ async def place_order(
 
     size_shares 미지정 시 Polymarket 이 수락하는 절대 최솟값으로 시도(기존 동작).
     size_shares 지정 시 그 수량(shares)으로 주문 — fade 처럼 시드 기반 사이징에 사용.
-    max_usd > 0 이면 주문 명목가가 max_usd 를 초과하면 skip (status="skipped").
 
     Returns:
         {"order_id": str, "status": "matched"|"live"|"delayed"|"unmatched"|"failed"|"skipped",
@@ -106,13 +104,6 @@ async def place_order(
         effective_usd = round(shares * price, 4)
     else:
         shares, effective_usd = _min_order(price)
-
-    if max_usd > 0 and effective_usd > max_usd:
-        log.info(
-            "[executor] skip (order $%.2f > max $%.2f) token=%s price=%.4f side=%s",
-            effective_usd, max_usd, token_id[:12], price, _side,
-        )
-        return {"order_id": "", "status": "skipped", "error": f"order_cost ${effective_usd:.2f} > max ${max_usd:.2f}"}
 
     def _sync() -> dict[str, Any]:
         client = _get_clob_client()
@@ -146,12 +137,6 @@ async def place_order(
             )
             corrected_shares = math.ceil(min_size * 100) / 100
             corrected_usd    = round(corrected_shares * price, 4)
-            if max_usd > 0 and corrected_usd > max_usd:
-                return {
-                    "order_id": "",
-                    "status": "skipped",
-                    "error": f"min_cost ${corrected_usd:.2f} > max ${max_usd:.2f} (minimum size={min_size})",
-                }
 
             def _sync_retry() -> dict[str, Any]:
                 client = _get_clob_client()

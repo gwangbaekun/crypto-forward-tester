@@ -7,7 +7,6 @@ services:
     restart: unless-stopped
     environment:
       RELAY_API_KEY: ${RELAY_API_KEY:-}
-      RELAY_MAX_ORDER_USD: ${RELAY_MAX_ORDER_USD:-5.0}
       RELAY_ENV_FILE: /etc/btc-forwardtest.env
     volumes:
       # Polymarket 자격증명(PK 등)은 이미지에 굽지 않고 호스트 파일을 read-only 마운트

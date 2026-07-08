@@ -10,8 +10,6 @@
   features.strategy.polymarket._data.live.fetch_cash_balances
 
 안전장치:
-  RELAY_MAX_ORDER_USD  — 단일 주문 명목가 하드캡(초과 시 거부). 실수/버그로 잔고 전부
-                         날리는 것 방지. 미설정 시 기본 5.0.
   RELAY_API_KEY        — 설정 시 X-Relay-Key 헤더 검증.
   POLYMARKET_LIVE      — executor 가 내부에서 재확인(true 아니면 주문 skip).
 
@@ -56,7 +54,6 @@ def _load_env_file(path: str) -> None:
 _load_env_file(os.environ.get("RELAY_ENV_FILE", "/etc/btc-forwardtest.env"))
 
 _API_KEY = os.environ.get("RELAY_API_KEY", "")
-_MAX_ORDER_USD = float(os.environ.get("RELAY_MAX_ORDER_USD", "5.0"))
 
 # executor/live 는 env 로딩 후 import (모듈 로드 시 env 를 읽는 코드 대비)
 from features.strategy.polymarket._data.executor import place_order, redeem_positions  # noqa: E402
@@ -88,7 +85,6 @@ def health() -> dict:
     return {
         "status": "ok",
         "mode": "live" if is_live_mode() else "sim(POLYMARKET_LIVE!=true)",
-        "max_order_usd": _MAX_ORDER_USD,
         "time": datetime.now(timezone.utc).isoformat(),
     }
 
@@ -116,11 +112,8 @@ async def order(req: OrderRequest, x_relay_key: str = Header(default="")) -> dic
     if req.size_shares is not None and req.size_shares > 0:
         shares = round(req.size_shares, 2)
     else:
-        # 안전 하드캡: 매수 명목가가 캡 초과면 캡으로 줄임
-        size_usd = min(req.size_usd, _MAX_ORDER_USD)
-        # 내림(floor) — round 올림이 캡을 다시 넘겨(예: 5.99×0.835=$5.0017 > $5)
-        # executor 의 `effective_usd > max_usd` 재검증에서 skipped 나던 경계 버그 제거.
-        shares = math.floor(size_usd / req.price * 100) / 100
+        # 내림(floor) — 요청 명목가(size_usd)를 넘지 않게 보수적으로. 하드캡 없음.
+        shares = math.floor(req.size_usd / req.price * 100) / 100
 
     log.info(
         "[RELAY-ORDER] action=%s side=%s token=%s price=%.4f shares=%.2f (size_usd req %.2f) reason=%s | %s",
@@ -131,7 +124,6 @@ async def order(req: OrderRequest, x_relay_key: str = Header(default="")) -> dic
     result = await place_order(
         token_id=req.token_id,
         price=req.price,
-        max_usd=_MAX_ORDER_USD,
         side="BUY" if req.action == "buy" else "SELL",
         size_shares=shares,
     )
