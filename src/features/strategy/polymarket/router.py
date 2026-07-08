@@ -1433,6 +1433,33 @@ async def fade_positions(
     ]})
 
 
+@router.post("/fade/test-order")
+async def fade_test_order(
+    token_id: str = Query(..., description="clob token id (매수/매도 대상)"),
+    price: float = Query(..., description="지정가 (매수는 ask 위로 걸어야 체결)"),
+    side: str = Query("NO", description="NO|YES (기록용)"),
+    action: str = Query("buy", description="buy|sell"),
+    size_usd: float = Query(0.0, description="명목 USD (min 미달 시 릴레이가 최소수량으로 bump)"),
+    size_shares: float = Query(0.0, description=">0 이면 이 수량 그대로 주문"),
+    question: str = Query("manual test order"),
+) -> JSONResponse:
+    """수동 체결 테스트 — fade 엔진과 '동일한' oracle_client.place_order 경로로 릴레이 호출.
+    Railway→oracle 릴레이→Polymarket 실체결 링크 검증용. 실주문(실제 돈)."""
+    from features.strategy.polymarket.fade import oracle_client
+    result = await oracle_client.place_order(
+        side=side, action=action, condition_id="", question=question,
+        token_id=token_id, price=price, size_usd=size_usd,
+        size_shares=(size_shares if size_shares > 0 else None),
+        reason="manual_test",
+    )
+    return JSONResponse({
+        "sent": {"token_id": token_id, "side": side, "action": action,
+                 "price": price, "size_usd": size_usd, "size_shares": size_shares},
+        "relay_configured": oracle_client.relay_configured(),
+        "relay_result": result,
+    })
+
+
 @router.post("/fade/position/close")
 async def fade_position_close(
     condition_id: str = Query(..., description="닫을 열린 포지션의 condition_id"),
