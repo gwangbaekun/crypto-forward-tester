@@ -1,0 +1,27 @@
+name: deploy-oracle-relay
+
+# oracle relay(+의존 모듈 executor/live)가 main 에 push 되면 오사카 VM 의 self-hosted runner
+# 에서 재빌드한다. 폴링 없음 — push 이벤트가 곧바로 트리거. fade 엔진 등 무관 커밋은 트리거 안 함.
+# 최초 1회 러너 설정은 oracle/deploy/RUNNER_SETUP.md 참고.
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'oracle/relay/**'
+      - 'oracle/deploy/vm_build_deploy.sh'
+      - 'src/features/strategy/polymarket/_data/executor.py'
+      - 'src/features/strategy/polymarket/_data/live.py'
+      - 'src/features/strategy/polymarket/_data/__init__.py'
+  workflow_dispatch: {}   # Actions 탭에서 수동 재배포도 허용
+
+concurrency:
+  group: oracle-relay-deploy
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    runs-on: [self-hosted, oracle-relay]   # VM 러너에 등록한 라벨
+    steps:
+      - uses: actions/checkout@v4
+      - name: stage + docker compose up --build
+        run: bash oracle/deploy/vm_build_deploy.sh
