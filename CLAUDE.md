@@ -1,4 +1,4 @@
-# btc_forwardtest — Project Memory
+# forwardtest_quant — Project Memory
 
 > `tradingview_mcp/CLAUDE.md` 를 이 프로젝트 구조에 맞게 옮긴 버전.  
 > 새 전략 전용 체크리스트·폴더 규칙은 **`.claude/QUANT_STRATEGIES.md`** 참고.
@@ -47,7 +47,7 @@ market_stream          →  프리미엄/펀딩/24h/OI/LSR/CVD 프록시 (폴링
 
 ---
 
-## Key Files (btc_forwardtest)
+## Key Files (forwardtest_quant)
 
 | 경로 | 역할 |
 |------|------|
@@ -87,7 +87,7 @@ market_stream          →  프리미엄/펀딩/24h/OI/LSR/CVD 프록시 (폴링
 
 ---
 
-## Gotchas (btc_forwardtest)
+## Gotchas (forwardtest_quant)
 
 - Import: `from common.…`, `from features.…` (`app` 은 `app.main` 엔트리만).
 - Liq 캐시는 **1h 위주**; 15m 등은 별도 fetch/캐시 설계 필요.
@@ -105,5 +105,5 @@ market_stream          →  프리미엄/펀딩/24h/OI/LSR/CVD 프록시 (폴링
 
 ## Session log (요약)
 
-- btc_forwardtest: `src/` 레이아웃, 홈 + strategy API + liq 검증.
+- forwardtest_quant: `src/` 레이아웃, 홈 + strategy API + liq 검증.
 - `CLAUDE.md` / `.claude/QUANT_STRATEGIES.md` 는 `tradingview_mcp/CLAUDE.md` 기준으로 btc에 맞게 재작성.

@@ -9,7 +9,7 @@ echo "=== DB 삭제 ==="
 rm -f data/forwardtest.db
 
 echo "=== Redis 볼륨 삭제 ==="
-docker volume rm btc_forwardtest_redis_forwardtest 2>/dev/null || true
+docker volume rm forwardtest_quant_redis_forwardtest 2>/dev/null || true
 
 echo "=== 재시작 ==="
 docker compose up -d --build

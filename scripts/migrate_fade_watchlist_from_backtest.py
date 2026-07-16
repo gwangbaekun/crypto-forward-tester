@@ -1,6 +1,6 @@
-"""btc_backtest news_lag 워치리스트(included)를 forwardtest fade 워치리스트로 이관.
+"""backtest_quant news_lag 워치리스트(included)를 forwardtest fade 워치리스트로 이관.
 
-btc_backtest 는 read-only 로 취급 — 이 스크립트는 btc_backtest sqlite 를 SELECT 만 하고
+backtest_quant 는 read-only 로 취급 — 이 스크립트는 backtest_quant sqlite 를 SELECT 만 하고
 forwardtest 쪽 DB에만 쓴다.
 
 실행: PYTHONPATH=src python3 scripts/migrate_fade_watchlist_from_backtest.py
@@ -14,7 +14,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 
-BACKTEST_DB = Path("/Users/home/Developer/T/btc_backtest/data/polymarket_asia_lag.db")
+BACKTEST_DB = Path("/Users/home/Developer/T/backtest_quant/data/polymarket_asia_lag.db")
 
 
 def _included_tokens() -> list[tuple[str, str]]:
@@ -37,7 +37,7 @@ async def main() -> None:
     init_db()
 
     tokens = _included_tokens()
-    print(f"btc_backtest 워치리스트(included) {len(tokens)}개 발견")
+    print(f"backtest_quant 워치리스트(included) {len(tokens)}개 발견")
 
     ok, failed = 0, []
     for token, question in tokens:

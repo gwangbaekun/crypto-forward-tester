@@ -1,4 +1,4 @@
-# Quant 전략 — 새로 만들 때 참고 (btc_forwardtest)
+# Quant 전략 — 새로 만들 때 참고 (forwardtest_quant)
 
 > `tradingview_mcp/CLAUDE.md` 의 「새 전략 추가」 절을 이 레포 구조에 맞게 옮김.  
 > **변수명·모듈 경로는 tradingview 와 1:1이 아님** — 여기 기준으로 맞출 것.
@@ -31,7 +31,7 @@ src/features/strategy/
 
 ## 데이터 소스 (tradingview 와의 차이)
 
-| tradingview_mcp | btc_forwardtest (현재) |
+| tradingview_mcp | forwardtest_quant (현재) |
 |-----------------|-------------------------|
 | `RealtimeDataHub` → `DataBundle.sweep_by_tf` | **동일 허브 없음** — 1h는 `liq_series_cache`, 마크는 `BinancePriceWS` |
 | `detect_sweep` 멀티 TF 바 | **15m/1h 바**는 전략 쪽에서 `klines` 어댑터 또는 캐시 확장으로 공급 |
@@ -96,4 +96,4 @@ src/features/strategy/
 
 - `tradingview_mcp/CLAUDE.md` — 프로젝트 전체 메모리
 - `tradingview_mcp/app/quant_strategies/STRATEGIES.md` — 전략별 요약
-- 상위 레포 **`../CLAUDE.md`** — btc_forwardtest 스택·키 파일
+- 상위 레포 **`../CLAUDE.md`** — forwardtest_quant 스택·키 파일
