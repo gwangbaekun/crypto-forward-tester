@@ -1,6 +1,6 @@
-# btc_forwardtest
+# forwardtest_quant
 
-레이아웃은 `btc_backtest`와 같이 **`src/` 아래**에 둡니다.
+레이아웃은 `backtest_quant`와 같이 **`src/` 아래**에 둡니다.
 
 - `src/common/` — Binance WS/REST, 템플릿 유틸
 - `src/features/` — 기능별 라우터 (예: `features/home/`)
@@ -21,7 +21,7 @@
 ## 빠른 시작
 
 ```bash
-cd btc_forwardtest
+cd forwardtest_quant
 cp .env.example .env
 pip install -r requirements.txt
 PYTHONPATH=src python -m app.main
@@ -38,7 +38,7 @@ docker compose up --build
 
 ## Liquidation map (backtest와 동일 요건)
 
-`btc_backtest`의 `data/liq_cache_builder.py` / `serve_liq_cache` 기준:
+`backtest_quant`의 `data/liq_cache_builder.py` / `serve_liq_cache` 기준:
 
 - **1h** 캔들 + **OI** + **CVD(테이커) 델타**
 - 슬라이딩 **window=400** (`LIQ_WINDOW`), **min_bars=50**

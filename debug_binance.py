@@ -2,7 +2,7 @@
 Binance Testnet 연결 디버그 스크립트.
 
 실행:
-    cd /Users/home/Developer/T/btc_forwardtest
+    cd /Users/home/Developer/T/forwardtest_quant
     python debug_binance.py
 """
 import asyncio

@@ -6,7 +6,7 @@
 # 사용: bash oracle/deploy/deploy_relay.sh
 set -euo pipefail
 
-REPO="/Users/home/Developer/T/btc_forwardtest"
+REPO="/Users/home/Developer/T/forwardtest_quant"
 SRC="$REPO/src"
 RELAY="$REPO/oracle/relay"
 VM_HOST="ubuntu@161.33.28.23"
