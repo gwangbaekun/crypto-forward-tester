@@ -1,0 +1,22 @@
+strategy_id: deribit_gex_reversal
+strategy_name: Deribit Expiry GEX Reversal (BTC)
+
+# 자체 포함 전략 (공유 코어 없음). 로드맵 §1.
+# 만기 08:00 UTC 딜러 감마 헤지 되돌림 — GEX<0 & |r_pre| 상위분위에서
+# 만기 직전 과잉이동(02:00→07:30)의 반대로 진입, r_post(12:00) 청산.
+# 실거래 없음 — 엣지 측정 전용(forward test).
+
+currency: BTC
+
+signal:
+  expiry_hour_utc: 8          # Deribit 만기 08:00 UTC (유러피언·현금결제)
+  entry_window_hours: 3       # 08:00~11:00 UTC 사이에만 진입 tick 허용
+  exit_hour_utc: 12           # r_post 청산 시각 (12:00 UTC)
+  atm_band: 0.025             # ATM ±2.5% 집중도 계산용
+  pctl_trigger: 0.80          # |r_pre| in-sample 분위 트리거 시작점 (로드맵 80~90)
+  require_gex_negative: true  # GEX<0 (딜러 숏감마) 조건
+  snap_tol_min: 20            # 목표시각 대비 스냅샷 허용오차(분). 15분 간격이라 여유
+  chain_window_days: 45       # deribit_chain 조회 창 (r_pre 분포 + 현재 만기)
+
+tpsl:
+  sl_pct: 0.0                 # 0 = 비활성 (시간기반 청산이라 hard SL 없음)
