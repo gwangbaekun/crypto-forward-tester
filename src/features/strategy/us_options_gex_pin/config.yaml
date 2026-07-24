@@ -1,0 +1,22 @@
+strategy_id: us_options_gex_pin
+strategy_name: US Options Expiry GEX Pinning (SPY)
+
+# 자체 포함 전략 (공유 코어 없음). 로드맵 §부활조건부(옵션 핀닝, 미국).
+# 일일 해상도라 Deribit의 일중 리버설이 아니라 "만기일 max-OI 핀닝"을 거래한다:
+# 딜러 롱감마(GEX>0)면 만기 근처에서 가격이 max-OI 행사가로 끌린다 → 현물이
+# 핀 행사가에서 멀면 그쪽으로 회귀(반대 방향 진입), 만기에 청산.
+# 데이터: us_options_chain(자체수집, Cboe 지연시세, gamma 제공). 실거래 없음 — 엣지 측정 전용.
+
+underlying: SPY              # 지수 프록시 (SPY→US500). collector priority_symbols 로 수집 보장
+exec_symbol: US500           # (참고용) FTMO 집행 심볼 — 실거래 없음
+
+signal:
+  max_days_to_expiry: 2      # 만기 D-2 이내에만 핀닝 트리거 (감마 폭발 구간)
+  min_distance_pct: 0.5      # 현물이 핀 행사가에서 ±0.5% 이상 떨어졌을 때만
+  require_gex_positive: true # GEX>0 (딜러 롱감마=핀닝 레짐)만
+  contract_multiplier: 100   # 주식/ETF 옵션 계약승수
+  exit_hour_utc: 20          # 만기일 미국 종가(~20:00 UTC) 청산
+  chain_window_days: 20      # us_options_chain 조회 창
+
+tpsl:
+  sl_pct: 0.0                # 0 = 비활성 (만기 청산이라 hard SL 없음)

@@ -229,6 +229,24 @@ deribit_gex_reversal:
     module: features.strategy.deribit_gex_reversal.realtime_feed
     fn: get_state
 
+us_options_gex_pin:
+  enabled: true
+  monitoring: true
+  symbol: "SPY"
+  tick_interval: 600
+  timeframes: ["1d"]
+  entry_tf: "1d"
+  strategy_tag: us_options_gex_pin
+  label: "US Options Expiry GEX Pinning (SPY)"
+  emoji: "📌"
+  telegram_alerts: true
+  discord_alerts: true
+  binance_live: false          # 엣지 측정 전용 — 실거래 없음
+  ctrader_live: false
+  tick:
+    module: features.strategy.us_options_gex_pin.realtime_feed
+    fn: get_state
+
 spc_oiaccel_combine:
   # combine 운영 스위치. tick 블록이 없어 strategy_loop는 자동 제외(tick 안 함).
   # enabled=true → 멤버 이벤트를 받아 주문 fan-out. false → 주문 스킵(끄기).
