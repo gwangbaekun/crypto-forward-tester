@@ -4,11 +4,11 @@ cTrader 심볼 목록 조회 → ctrader_accounts.yaml 자동 저장.
 사용법:
     python scripts/ctrader_list_symbols.py <firm_key>
 
-    firm_key: ctrader_accounts.yaml 의 accounts 키 (예: fintokei, ftmo, funding_pips ...)
+    firm_key: ctrader_accounts.yaml 의 accounts 키 (예: ftmo, funded_next, funding_pips ...)
     생략하면 accounts 목록을 보여주고 선택하게 함.
 
 예:
-    python scripts/ctrader_list_symbols.py fintokei
+    python scripts/ctrader_list_symbols.py ftmo
 """
 
 from __future__ import annotations

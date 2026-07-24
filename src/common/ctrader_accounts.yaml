@@ -8,9 +8,13 @@
 # enabled: true  → 앱 시작 시 자동 연결 + combine fan-out 대상
 # enabled: false → 연결 안 함
 #
-# symbol_id:     브로커마다 다름. scripts/ctrader_list_symbols.py 로 확인.
-# lot_size:      prop firm 계좌 크기·룰에 맞게 조정.
-# units_per_lot: 1 lot → volume 환산 배수. 브로커·심볼마다 다름 (예: FTMO ETHUSD = 1).
+# symbol_id:     브로커마다 독립적인 ID. 같은 숫자라도 브로커가 다르면 다른 종목일 수 있음
+#                (실측 사례: 어떤 브로커는 symbol_id 323 = USDHUFp, ETHUSD는 102였음) → 반드시
+#                scripts/ctrader_list_symbols.py 로 심볼명까지 확인할 것.
+# lot_size:      prop firm 계좌 크기·룰에 맞게 조정. 브로커별 minVolume(ProtoOASymbol) 이상이어야 함.
+# units_per_lot: 1 lot → volume 환산 배수. cTrader Open API의 volume 필드는 항상 lot의 1/100
+#                단위(centilot)이므로 100 고정 (실측: units_per_lot=1로 두면 볼륨이 100배 작게
+#                나가 TRADING_BAD_VOLUME 거부됨).
 # env:           "live" 또는 "demo"
 
 accounts:
@@ -19,18 +23,9 @@ accounts:
     enabled: true
     env: live
     account_id: 47821667   # ctidTraderAccountId (traderLogin 17147778) — 이전 47729078은 RET_ACCOUNT_DISABLED로 교체
-    symbol_id: 323        # ETHUSD on FTMO live
-    lot_size: 0.05
-    units_per_lot: 1
-
-  fintokei:
-    label: "Fintokei"
-    enabled: true
-    env: demo   # cTrader API 상 isLive=false로 등록된 계좌(consent 화면에도 "Demo"로 표시). traderLogin 4294671과 일치하는 실계좌.
-    account_id: 47779327   # ctidTraderAccountId (traderLogin 4294671) — 기존 4294671은 traderLogin을 잘못 넣은 값이었음
-    symbol_id: 323
-    lot_size: 0.05
-    units_per_lot: 1
+    symbol_id: 323        # ETHUSD on FTMO live (실측 확인됨)
+    lot_size: 0.10        # FTMO 심볼323 minVolume=10(=0.10lot) 미만이면 TRADING_BAD_VOLUME 거부됨. 기존 0.05는 최소치 미달.
+    units_per_lot: 100    # 기존 1은 오설정 — 실주문 시 볼륨이 100배 작게 나가 거부됨(실측)
 
   funding_pips:
     label: "Funding Pips"
