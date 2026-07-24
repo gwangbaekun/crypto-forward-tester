@@ -1,0 +1,18 @@
+enabled: false
+
+# --- 수집 ---
+poll_interval_sec: 180        # REST 스캔 주기 (3분). BTC 가격 마켓은 주/월 단위 → 여유
+keywords: ["bitcoin", "btc"]  # 사다리 후보 수집 키워드 (title/question 부분일치)
+min_volume_usd: 5000          # 각 다리 최소 거래량 (유동성 1차 게이트)
+
+# --- 그룹핑 (동치/포함 판정) ---
+end_ts_tolerance_sec: 3600    # 두 마켓 마감시각 일치 허용 오차 = 동일 해상도 시점으로 간주
+require_same_slug: false      # true면 동일 이벤트(slug) 내 마켓끼리만 그룹 (더 안전, 후보 감소)
+
+# --- 차익 판정 ---
+fee_buffer: 0.01              # 수수료+슬리피지 버퍼. 양다리 ask 합에서 이만큼 여유 있어야 발화
+min_profit: 0.005             # 버퍼 반영 후 최소 실수익 (0.5%)
+min_ask_size: 20              # 각 다리 best_ask 최소 체결가능 수량(shares). book 확인 게이트
+
+# --- kill-criteria 계측 (철수 판단용, 발화는 막지 않음) ---
+persistence_track: true       # 위반 감지→소멸 지속시간 로깅 (봇 선점 비율 판단)

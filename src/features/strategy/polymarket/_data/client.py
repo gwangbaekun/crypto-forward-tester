@@ -191,6 +191,64 @@ async def fetch_all_active(keywords: list[str], min_volume: float = 0) -> list[d
     return out
 
 
+async def fetch_active_events_by_keyword(
+    keywords: list[str],
+    min_volume: float = 0.0,
+    page_limit: int = 200,
+    max_pages: int = 20,
+) -> list[dict[str, Any]]:
+    """active(미종료) 이벤트를 volume 내림차순 페이징하며, 이벤트 title 이 keyword 를
+    포함하면 그 이벤트의 **열린 자식 마켓** 전부를 반환.
+
+    사다리형 그룹 이벤트("What price will Bitcoin hit …?")는 자식 마켓 question 에
+    자산명이 없을 수 있어(예: "Will Bitcoin reach $95k…"는 있음), 이벤트 title 로 매칭한다.
+    닫힌 자식 마켓·중복 condition_id 는 제외.
+    """
+    kws = [k.lower() for k in keywords]
+    seen: set[str] = set()
+    out: list[dict[str, Any]] = []
+
+    async with httpx.AsyncClient(timeout=TIMEOUT) as cli:
+        for page in range(max_pages):
+            params: dict[str, Any] = {
+                "limit": page_limit,
+                "offset": page * page_limit,
+                "order": "volume",
+                "ascending": "false",
+                "active": "true",
+                "closed": "false",
+            }
+            r = await cli.get(f"{GAMMA_BASE}/events", params=params)
+            if r.status_code == 422:
+                break
+            r.raise_for_status()
+            events = r.json()
+            if not isinstance(events, list):
+                events = events.get("data", [])
+            if not events:
+                break
+
+            for ev in events:
+                title = (ev.get("title") or "").lower()
+                if not any(k in title for k in kws):
+                    continue
+                if bool(ev.get("closed")):
+                    continue
+                for m in ev.get("markets", []):
+                    norm = _normalize(m, ev)
+                    cid = norm["condition_id"] or norm["question"]
+                    if not cid or cid in seen:
+                        continue
+                    if norm["is_closed"]:
+                        continue
+                    if norm["volume_usd"] < min_volume:
+                        continue
+                    seen.add(cid)
+                    out.append(norm)
+
+    return out
+
+
 async def fetch_prices(token_id: str, interval: str = "1h") -> list[dict[str, Any]]:
     """CLOB 가격 히스토리 (active 마켓만 유효). Returns [{"ts": int, "price": float}]."""
     async with httpx.AsyncClient(timeout=TIMEOUT) as cli:

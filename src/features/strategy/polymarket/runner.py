@@ -21,6 +21,7 @@ from features.strategy.polymarket.pair_hedge       import engine as ph_engine
 from features.strategy.polymarket.bayesian_fomc    import engine as bf_engine
 from features.strategy.polymarket.latency_snipe     import engine as ls_engine
 from features.strategy.polymarket.fade              import engine as fade_engine
+from features.strategy.polymarket.logic_arb          import engine as la_engine
 from features.strategy.polymarket.log_config import configure_polymarket_logging
 from features.strategy.polymarket._data.executor import redeem_positions, redeem_all_pending
 
@@ -137,6 +138,12 @@ def _apply_resolution(sig, outcome: str) -> None:
         if cost and cost > 0:
             sig.actual_pnl = (1.0 - cost) / cost  # 항상 수익 (pair_cost < 1.00 조건)
 
+    elif strategy == "logic_arb":
+        # 포함관계/분할 무위험 구조 — 최소 페이오프 1.00 확정 (cost < 1.00)
+        cost = sig.pair_cost
+        if cost and cost > 0:
+            sig.actual_pnl = (1.0 - cost) / cost
+
     elif strategy == "bayesian_fomc":
         entry = sig.yes_price if side == "YES" else sig.no_price
         if entry and entry > 0:
@@ -155,7 +162,7 @@ def _any_strategy_enabled() -> bool:
     import yaml
     from pathlib import Path
     base = Path(__file__).parent
-    for name in ("late_convergence", "pair_hedge", "bayesian_fomc", "latency_snipe", "fade"):
+    for name in ("late_convergence", "pair_hedge", "bayesian_fomc", "latency_snipe", "fade", "logic_arb"):
         try:
             cfg = yaml.safe_load((base / name / "config.yaml").read_text())
             if cfg and cfg.get("enabled"):
@@ -185,6 +192,7 @@ async def run_polymarket() -> None:
         bf_engine.run(),
         ls_engine.run(ws_client),
         fade_engine.run(ws_client),
+        la_engine.run(ws_client),
         _resolve_signals(ws_client),
         return_exceptions=True,
     )

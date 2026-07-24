@@ -58,6 +58,7 @@ market_stream          →  프리미엄/펀딩/24h/OI/LSR/CVD 프록시 (폴링
 | `src/features/home/router.py` | 홈, charts, verify |
 | `src/features/strategy/router.py` | quant용 liq/market 스냅샷 API |
 | `src/app/templates/` | Jinja 템플릿 |
+| `src/features/strategy/polymarket/logic_arb/` | 조합 차익(포함관계/분할) — 사다리 무위험 구조. basis(TOUCH/TERMINAL) 교차 금지 |
 
 전략 모듈 도입 후:
 
@@ -107,3 +108,15 @@ market_stream          →  프리미엄/펀딩/24h/OI/LSR/CVD 프록시 (폴링
 
 - forwardtest_quant: `src/` 레이아웃, 홈 + strategy API + liq 검증.
 - `CLAUDE.md` / `.claude/QUANT_STRATEGIES.md` 는 `tradingview_mcp/CLAUDE.md` 기준으로 btc에 맞게 재작성.
+- **2026-07-21 — `polymarket/logic_arb` 추가 (조합 차익, 3순위 전략).**
+  - 예측 아님. 사다리 시장의 **논리 관계(무위험 구조)** 만 거래.
+  - 포함관계 차익: GT/LT 사다리에서 `ask(YES_sup)+ask(NO_sub) < 1` → 최소 페이오프 1 확정.
+    lo=hi면 `pair_hedge`(YES+NO<1)와 동일 = 그 시장 간 일반화.
+  - **basis 게이트(핵심)**: Polymarket BTC 사다리는 `reach/dip to`(TOUCH) 문구 — `above/below`(TERMINAL)
+    와 해상도 규칙이 달라 절대 교차 차익 안 함. `parse.py` 가 방향+basis 산술 파싱, 제목 유사성 미사용.
+  - 기계적 검증: 동일 end_ts(±tol) 그룹핑 → ws best_ask 프리스크린 → REST `/book` 실 ask+size 재확인 → fee_buffer.
+  - kill-criteria 계측: 위반 지속시간 로깅(<60s 소멸=봇 선점 신호).
+  - 파일: `logic_arb/{parse,signal,engine,config}.py`, 수집기 `client.fetch_active_events_by_keyword`,
+    단독 테스터 `scripts/polymarket_logic_arb_scan.py [--groups]`. `runner` gather/마스터스위치/resolver 등록.
+  - 실측(2026-07-21): EOY2026 reach 20단 등 7개 사다리, 가격 단조 → 현 차익 0건 (효율적 시장, 논문과 일치).
+  - 기본 `enabled: false` (scan-only). 주문은 `POLYMARKET_LIVE` 별도.
