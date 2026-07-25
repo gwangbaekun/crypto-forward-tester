@@ -1,0 +1,449 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Access Passes</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      background: #0d1117;
+      color: #c9d1d9;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      min-height: 100vh;
+    }
+    .header {
+      background: #161b22;
+      border-bottom: 1px solid #21262d;
+      padding: 12px 20px;
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+    .header-title { font-size: 15px; font-weight: 600; color: #e6edf3; }
+    .header-sub { font-size: 12px; color: #7d8590; }
+    .header-actions { margin-left: auto; display: flex; gap: 10px; align-items: center; }
+    a.link { color: #58a6ff; text-decoration: none; font-size: 12.5px; }
+    a.link:hover { text-decoration: underline; }
+
+    .wrap { max-width: 1000px; margin: 0 auto; padding: 22px 20px 60px; }
+
+    .panel {
+      background: #161b22;
+      border: 1px solid #30363d;
+      border-radius: 8px;
+      padding: 18px;
+      margin-bottom: 20px;
+    }
+    .panel h2 { font-size: 13px; font-weight: 600; color: #e6edf3; margin-bottom: 14px; }
+
+    .row { display: flex; gap: 10px; flex-wrap: wrap; align-items: flex-end; }
+    .field { display: flex; flex-direction: column; gap: 6px; }
+    .field label { font-size: 11.5px; color: #7d8590; }
+    input, select {
+      background: #0d1117;
+      border: 1px solid #30363d;
+      border-radius: 6px;
+      color: #e6edf3;
+      font-size: 13px;
+      padding: 8px 10px;
+    }
+    input:focus, select:focus { outline: none; border-color: #388bfd; }
+    .field.grow { flex: 1; min-width: 200px; }
+    .field.grow input { width: 100%; }
+
+    button {
+      background: #238636; border: 1px solid #2ea043; border-radius: 6px;
+      color: #fff; font-size: 13px; font-weight: 600; padding: 8px 16px; cursor: pointer;
+    }
+    button:hover:not(:disabled) { background: #2ea043; }
+    button:disabled { opacity: 0.55; cursor: not-allowed; }
+    button.danger { background: #21262d; border-color: #30363d; color: #f85149; font-weight: 500; padding: 5px 11px; font-size: 12px; }
+    button.danger:hover { background: #2d1214; border-color: #6e2528; }
+    button.ghost { background: #21262d; border-color: #30363d; color: #c9d1d9; }
+    button.ghost:hover { background: #30363d; }
+
+    .issued {
+      display: none;
+      margin-top: 16px;
+      background: #10251a;
+      border: 1px solid #238636;
+      border-radius: 8px;
+      padding: 16px;
+    }
+    .issued.on { display: block; }
+    .issued .cap { font-size: 11.5px; color: #7d8590; margin-bottom: 8px; }
+    .code-line { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+    .code {
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      font-size: 22px; font-weight: 700; color: #3fb950; letter-spacing: 0.09em;
+    }
+    .issued .warn { margin-top: 10px; font-size: 11.5px; color: #d29922; }
+    .magic {
+      background: #0d1117; border: 1px solid #1f6feb; border-radius: 8px;
+      padding: 14px; margin-bottom: 14px;
+    }
+    .magic-cap { font-size: 12px; color: #58a6ff; font-weight: 600; margin-bottom: 10px; }
+    .magic-url {
+      display: block; font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      font-size: 13.5px; color: #e6edf3; word-break: break-all; line-height: 1.5;
+      background: #161b22; border: 1px solid #30363d; border-radius: 6px; padding: 10px 12px;
+    }
+    .fallback { border-top: 1px solid #21262d; padding-top: 12px; }
+    .fallback .code { font-size: 17px; }
+
+    table { width: 100%; border-collapse: collapse; font-size: 12.5px; }
+    th {
+      text-align: left; font-weight: 600; color: #7d8590; font-size: 11px;
+      text-transform: uppercase; letter-spacing: 0.05em;
+      padding: 8px 10px; border-bottom: 1px solid #30363d; white-space: nowrap;
+    }
+    td { padding: 10px; border-bottom: 1px solid #21262d; vertical-align: middle; }
+    tr:last-child td { border-bottom: none; }
+    .hint { font-family: ui-monospace, Menlo, monospace; color: #8b949e; }
+
+    .badge {
+      display: inline-block; padding: 2px 9px; border-radius: 20px;
+      font-size: 11px; font-weight: 500; white-space: nowrap;
+    }
+    .b-active  { background: #1a4731; color: #3fb950; border: 1px solid #238636; }
+    .b-expired { background: #21262d; color: #7d8590; border: 1px solid #30363d; }
+    .b-revoked { background: #2d1214; color: #f85149; border: 1px solid #6e2528; }
+
+    .empty { padding: 26px; text-align: center; color: #6e7681; font-size: 12.5px; }
+
+    .check { display: flex; align-items: center; gap: 8px; font-size: 12.5px; color: #c9d1d9; cursor: pointer; padding-bottom: 8px; }
+    .check input { width: 15px; height: 15px; accent-color: #238636; cursor: pointer; }
+    .note { margin-top: 10px; font-size: 11.5px; color: #7d8590; line-height: 1.6; }
+    .b-renew { background: #12233d; color: #58a6ff; border: 1px solid #1f6feb; margin-left: 6px; }
+    button.ext { background: #21262d; border-color: #30363d; color: #58a6ff; font-weight: 500; padding: 5px 11px; font-size: 12px; margin-right: 6px; }
+    button.ext:hover { background: #12233d; border-color: #1f6feb; }
+    .acts { white-space: nowrap; }
+    .err {
+      display: none; margin-top: 12px; background: #2d1214; border: 1px solid #6e2528;
+      color: #f85149; font-size: 12.5px; padding: 9px 11px; border-radius: 6px;
+    }
+    .err.on { display: block; }
+  </style>
+</head>
+<body>
+  <div class="header">
+    <span class="header-title">Access Passes</span>
+    <span class="header-sub">기간제 게스트 코드 · 읽기 전용</span>
+    <div class="header-actions">
+      <a class="link" href="/">← Dashboard</a>
+      <a class="link" href="/logout">Logout</a>
+    </div>
+  </div>
+
+  <div class="wrap">
+    <div class="panel">
+      <h2>새 코드 발급</h2>
+      <div class="row">
+        <div class="field grow">
+          <label for="label">라벨 (누구에게 줬는지)</label>
+          <input id="label" type="text" placeholder="e.g. 홍길동 / ACME 리크루터">
+        </div>
+        <div class="field">
+          <label for="ttl">유효시간</label>
+          <select id="ttl">
+            <option value="24" selected>24 시간</option>
+            <option value="1">1 시간</option>
+            <option value="6">6 시간</option>
+            <option value="48">48 시간</option>
+            <option value="72">3 일</option>
+            <option value="168">7 일</option>
+          </select>
+        </div>
+        <div class="field">
+          <label>&nbsp;</label>
+          <button id="issue">발급</button>
+        </div>
+      </div>
+
+      <div class="row" style="margin-top:14px;">
+        <label class="check">
+          <input type="checkbox" id="sliding" checked>
+          <span>자동 연장 — 접속할 때마다 만료가 초기화됨 (재발급 불필요)</span>
+        </label>
+        <div class="field" id="maxWrap">
+          <label for="maxDays">최대 수명</label>
+          <select id="maxDays">
+            <option value="7">7 일</option>
+            <option value="14" selected>14 일</option>
+            <option value="30">30 일</option>
+            <option value="90">90 일</option>
+            <option value="">무제한</option>
+          </select>
+        </div>
+      </div>
+      <p class="note" id="modeNote"></p>
+
+      <div id="issued" class="issued">
+        <div class="cap">발급 완료 — 이 화면을 벗어나면 다시 볼 수 없습니다</div>
+
+        <div class="magic">
+          <div class="magic-cap">✦ 이것만 보내면 됩니다 — 클릭하면 바로 로그인 (코드 입력 불필요)</div>
+          <div class="code-line">
+            <code id="magicUrl" class="magic-url"></code>
+          </div>
+          <div class="code-line" style="margin-top:10px;">
+            <button id="copyLink">링크 복사</button>
+            <button class="ghost" id="copyMsg">안내문 통째로 복사</button>
+          </div>
+        </div>
+
+        <div class="fallback">
+          <div class="cap" style="margin-bottom:6px;">링크가 막히는 환경이면 코드를 불러주세요</div>
+          <div class="code-line">
+            <span id="code" class="code"></span>
+            <button class="ghost" id="copy">코드만 복사</button>
+          </div>
+        </div>
+
+        <div class="warn" id="expWarn"></div>
+      </div>
+
+      <div id="err" class="err"></div>
+    </div>
+
+    <div class="panel">
+      <h2>발급 이력</h2>
+      <div id="tableWrap">
+        <div class="empty">불러오는 중…</div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const $ = (id) => document.getElementById(id);
+    const ORIGIN = window.location.origin;
+
+    let lastIssued = null;
+
+    function showErr(text) {
+      const el = $('err');
+      if (!text) { el.className = 'err'; el.textContent = ''; return; }
+      el.className = 'err on';
+      el.textContent = text;
+    }
+
+    function fmt(iso) {
+      if (!iso) return '—';
+      const d = new Date(iso);
+      return d.toLocaleString(undefined, {
+        month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit',
+      });
+    }
+
+    function remain(sec) {
+      if (!sec || sec <= 0) return '';
+      const h = Math.floor(sec / 3600);
+      const m = Math.floor((sec % 3600) / 60);
+      return h > 0 ? `${h}h ${m}m 남음` : `${m}m 남음`;
+    }
+
+    async function issue() {
+      showErr('');
+      $('issue').disabled = true;
+      try {
+        const res = await fetch('/api/access/passes', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            label: $('label').value.trim(),
+            ttl_hours: parseInt($('ttl').value, 10),
+            sliding: $('sliding').checked,
+            max_days: $('maxDays').value,
+          }),
+        });
+        const data = await res.json();
+        if (!res.ok || !data.ok) { showErr(data.error || '발급 실패'); return; }
+
+        lastIssued = data;
+        lastIssued.url = `${ORIGIN}/a/${data.code}`;
+        $('code').textContent = data.code;
+        $('magicUrl').textContent = lastIssued.url;
+        $('expWarn').textContent = data.auto_renew
+          ? `자동 연장 · 마지막 접속 +${data.ttl_hours}시간까지 유효`
+            + (data.max_expires_at ? ` (최대 ${fmt(data.max_expires_at)} 까지)` : ' (상한 없음)')
+            + ` · ${data.ttl_hours}시간 동안 접속이 없으면 자동 소멸`
+          : `만료: ${fmt(data.expires_at)} (${data.ttl_hours}시간 후) · 만료되면 자동으로 접속 차단`;
+        $('issued').className = 'issued on';
+        $('label').value = '';
+        await load();
+      } catch (e) {
+        showErr('Network error: ' + e.message);
+      } finally {
+        $('issue').disabled = false;
+      }
+    }
+
+    async function copyText(text, btn) {
+      try {
+        await navigator.clipboard.writeText(text);
+        const old = btn.textContent;
+        btn.textContent = '복사됨 ✓';
+        setTimeout(() => { btn.textContent = old; }, 1600);
+      } catch (e) {
+        showErr('클립보드 복사 실패: ' + e.message);
+      }
+    }
+
+    async function extend(id, hours) {
+      showErr('');
+      try {
+        const res = await fetch(`/api/access/passes/${id}/extend`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ hours }),
+        });
+        const data = await res.json();
+        if (!res.ok || !data.ok) { showErr(data.error || '연장 실패'); return; }
+        await load();
+      } catch (e) {
+        showErr('Network error: ' + e.message);
+      }
+    }
+
+    async function revoke(id, label) {
+      if (!confirm(`이 코드를 즉시 폐기할까요?\n\n${label || '(라벨 없음)'}\n\n이미 접속 중인 사람도 바로 차단됩니다.`)) return;
+      showErr('');
+      try {
+        const res = await fetch(`/api/access/passes/${id}/revoke`, { method: 'POST' });
+        const data = await res.json();
+        if (!res.ok || !data.ok) { showErr(data.error || '폐기 실패'); return; }
+        await load();
+      } catch (e) {
+        showErr('Network error: ' + e.message);
+      }
+    }
+
+    function render(items) {
+      const wrap = $('tableWrap');
+      if (!items.length) {
+        wrap.innerHTML = '<div class="empty">아직 발급한 코드가 없습니다.</div>';
+        return;
+      }
+
+      const table = document.createElement('table');
+      table.innerHTML = `
+        <thead><tr>
+          <th>상태</th><th>라벨</th><th>코드</th><th>발급</th>
+          <th>만료</th><th>사용</th><th></th>
+        </tr></thead><tbody></tbody>`;
+      const tbody = table.querySelector('tbody');
+
+      for (const it of items) {
+        const tr = document.createElement('tr');
+
+        const badge = document.createElement('span');
+        badge.className = 'badge b-' + it.status;
+        badge.textContent = { active: 'ACTIVE', expired: 'EXPIRED', revoked: 'REVOKED' }[it.status];
+        const tdStatus = document.createElement('td');
+        tdStatus.appendChild(badge);
+        if (it.auto_renew && it.status === 'active') {
+          const ar = document.createElement('span');
+          ar.className = 'badge b-renew';
+          ar.textContent = '자동연장';
+          ar.title = it.max_expires_at
+            ? `접속 시마다 +${it.sliding_hours}h · 최대 ${fmt(it.max_expires_at)} 까지`
+            : `접속 시마다 +${it.sliding_hours}h · 상한 없음`;
+          tdStatus.appendChild(ar);
+        }
+
+        const tdLabel = document.createElement('td');
+        tdLabel.textContent = it.label || '—';
+
+        const tdHint = document.createElement('td');
+        tdHint.className = 'hint';
+        tdHint.textContent = it.hint + '-••••-••••';
+
+        const tdCreated = document.createElement('td');
+        tdCreated.textContent = fmt(it.created_at);
+
+        const tdExp = document.createElement('td');
+        tdExp.textContent = fmt(it.expires_at) + (it.status === 'active' ? ` · ${remain(it.remaining_sec)}` : '');
+
+        const tdUse = document.createElement('td');
+        tdUse.textContent = it.use_count > 0 ? `${it.use_count}회 · ${fmt(it.last_used_at)}` : '미사용';
+        if (it.renew_count > 0) tdUse.textContent += ` · 연장 ${it.renew_count}회`;
+
+        const tdAct = document.createElement('td');
+        tdAct.className = 'acts';
+        if (it.status !== 'revoked') {
+          const e = document.createElement('button');
+          e.className = 'ext';
+          // 만료된 코드도 같은 코드 그대로 되살릴 수 있다
+          e.textContent = it.status === 'expired' ? '+24h 재활성' : '+24h';
+          e.title = '같은 코드를 유지한 채 만료만 연장 — 새 코드를 다시 보낼 필요 없음';
+          e.addEventListener('click', () => extend(it.id, 24));
+          tdAct.appendChild(e);
+        }
+        if (it.status === 'active') {
+          const b = document.createElement('button');
+          b.className = 'danger';
+          b.textContent = '폐기';
+          b.addEventListener('click', () => revoke(it.id, it.label));
+          tdAct.appendChild(b);
+        }
+
+        for (const td of [tdStatus, tdLabel, tdHint, tdCreated, tdExp, tdUse, tdAct]) tr.appendChild(td);
+        tbody.appendChild(tr);
+      }
+
+      wrap.innerHTML = '';
+      wrap.appendChild(table);
+    }
+
+    async function load() {
+      try {
+        const res = await fetch('/api/access/passes');
+        const data = await res.json();
+        if (!res.ok || !data.ok) { showErr(data.error || '목록 조회 실패'); return; }
+        render(data.items);
+      } catch (e) {
+        showErr('Network error: ' + e.message);
+      }
+    }
+
+    function syncMode() {
+      const on = $('sliding').checked;
+      const h = $('ttl').value;
+      const maxSel = $('maxDays').options[$('maxDays').selectedIndex].text;
+      $('maxWrap').style.display = on ? '' : 'none';
+      $('modeNote').textContent = on
+        ? `자동 연장 ON — 상대가 계속 열어보면 만료되지 않고, ${h}시간 동안 접속이 없으면 스스로 소멸합니다. `
+          + `최대 ${maxSel} 이 지나면 자동 연장도 멈춥니다. 재발급이 필요 없는 모드입니다.`
+        : `고정 만료 — 발급 시점부터 ${h}시간 뒤 무조건 차단됩니다. 이후에는 목록에서 '+24h' 로 같은 코드를 되살릴 수 있습니다.`;
+    }
+    $('sliding').addEventListener('change', syncMode);
+    $('ttl').addEventListener('change', syncMode);
+    $('maxDays').addEventListener('change', syncMode);
+    syncMode();
+
+    $('issue').addEventListener('click', issue);
+    $('copy').addEventListener('click', (e) => {
+      if (lastIssued) copyText(lastIssued.code, e.target);
+    });
+    $('copyLink').addEventListener('click', (e) => {
+      if (lastIssued) copyText(lastIssued.url, e.target);
+    });
+    $('copyMsg').addEventListener('click', (e) => {
+      if (!lastIssued) return;
+      const validity = lastIssued.auto_renew
+        ? `The link stays active while you're using it, and expires after ${lastIssued.ttl_hours}h of inactivity.`
+        : `The link is valid for ${lastIssued.ttl_hours} hours.`;
+      const text =
+        `Live forward-test dashboard (read-only):\n${lastIssued.url}\n\n` +
+        `${validity}\n` +
+        `No sign-up needed — just open the link.\n\n` +
+        `If the link doesn't open, go to ${ORIGIN}/login and enter: ${lastIssued.code}`;
+      copyText(text, e.target);
+    });
+
+    load();
+    setInterval(load, 30000);
+  </script>
+</body>
+</html>

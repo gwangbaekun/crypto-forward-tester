@@ -1,9 +1,15 @@
 """
-Root dashboard — strategies_master.yaml 브라우저 에디터.
+strategies_master.yaml 브라우저 에디터 (admin 전용).
 
-GET  /                           → 에디터 HTML
+루트(`/`)는 사이트 인덱스(`features.site_index`)가 가져갔다 — 이 편집기는
+읽는 사람 대부분에게 쓸모가 없고, 쓰기 권한이 필요해서 게스트에게 열 수 없다.
+
+GET  /admin/strategies           → 에디터 HTML
 GET  /api/strategies-master      → 현재 YAML 텍스트 반환
 POST /api/strategies-master      → YAML 저장 후 캐시 초기화
+
+주의: 저장은 컨테이너 파일시스템에 쓴다. 볼륨 마운트가 없는 배포(Railway 등)에서는
+재배포 시 사라진다 — 영구 반영은 리포의 YAML 을 고쳐 커밋해야 한다.
 """
 from __future__ import annotations
 
@@ -20,8 +26,10 @@ router = APIRouter()
 _MASTER_PATH = pathlib.Path(__file__).resolve().parent / "strategies_master.yaml"
 
 
-@router.get("/", response_class=HTMLResponse, include_in_schema=False)
-async def root_dashboard(_: Request):
+@router.get("/admin/strategies", response_class=HTMLResponse, include_in_schema=False)
+async def strategies_editor(request: Request):
+    if getattr(request.state, "auth_role", None) != "admin":
+        return JSONResponse({"ok": False, "error": "admin only"}, status_code=403)
     return HTMLResponse(render_template("strategies_master.html"))
 
 

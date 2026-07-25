@@ -27,6 +27,28 @@ def create_tables(engine) -> None:
     _ensure_polymarket_fade_watch_columns(engine)
     _ensure_polymarket_fade_position_columns(engine)
     _ensure_polymarket_fade_curve_columns(engine)
+    _ensure_access_passes_columns(engine)
+
+
+def _ensure_access_passes_columns(engine) -> None:
+    """access_passes 자동연장 컬럼 backfill (기존 DB 대응)."""
+    insp = inspect(engine)
+    if "access_passes" not in insp.get_table_names():
+        return
+
+    existing = {c["name"] for c in insp.get_columns("access_passes")}
+    required = {
+        "sliding_hours":  "ALTER TABLE access_passes ADD COLUMN sliding_hours INTEGER",
+        "max_expires_at": "ALTER TABLE access_passes ADD COLUMN max_expires_at TIMESTAMP",
+        "renew_count":    "ALTER TABLE access_passes ADD COLUMN renew_count INTEGER DEFAULT 0",
+    }
+    missing = [sql for col, sql in required.items() if col not in existing]
+    if not missing:
+        return
+
+    with engine.begin() as conn:
+        for sql in missing:
+            conn.execute(text(sql))
 
 
 def _ensure_forward_trades_columns(engine) -> None:
@@ -435,3 +457,33 @@ class CTraderToken(Base):
     access_token: Mapped[str] = mapped_column(Text, nullable=False)
     refresh_token: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     updated_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.utcnow)
+
+
+class AccessPass(Base):
+    """
+    기간제 게스트 패스코드 (이력 공개용 링크).
+
+    평문 코드는 발급 시 1회만 노출되고 DB에는 HMAC-SHA256 해시만 남는다.
+    admin 은 이 테이블을 쓰지 않는다 (ADMIN_PASSWORD env 로 인증).
+    """
+
+    __tablename__ = "access_passes"
+
+    id:         Mapped[int]      = mapped_column(Integer, primary_key=True, autoincrement=True)
+    code_hash:  Mapped[str]      = mapped_column(String(64), nullable=False, unique=True, index=True)
+    code_hint:  Mapped[str]      = mapped_column(String(16), nullable=False)   # 앞 4자리 (목록 식별용)
+    label:      Mapped[str]      = mapped_column(String(120), nullable=False, default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.utcnow, index=True)
+    expires_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, index=True)
+    revoked_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    first_used_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    last_used_at:  Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    use_count:  Mapped[int]      = mapped_column(Integer, nullable=False, default=0)
+
+    # 자동 연장 (sliding window). NULL 이면 고정 만료.
+    # 값이 있으면 접속할 때마다 expires_at = now + sliding_hours 로 밀린다 →
+    # 계속 보는 사람은 재발급이 필요 없고, 발길이 끊기면 그 시점부터 sliding_hours 뒤 자동 소멸.
+    sliding_hours:  Mapped[Optional[int]]      = mapped_column(Integer, nullable=True)
+    # 자동 연장이 무한정 가지 않도록 하는 절대 상한. NULL 이면 상한 없음.
+    max_expires_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    renew_count:    Mapped[int]                = mapped_column(Integer, nullable=False, default=0)

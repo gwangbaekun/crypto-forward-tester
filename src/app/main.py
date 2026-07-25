@@ -22,7 +22,11 @@ logging.getLogger("uvicorn.access").addFilter(_AccessLogFilter())
 
 from common.binance_price_ws import BinancePriceWS
 from db.session import init_db
+from features.auth.config import get_auth_config
+from features.auth.middleware import AccessGateMiddleware
+from features.auth.router import router as access_auth_router
 from features.ctrader.router import router as ctrader_auth_router
+from features.site_index.router import router as site_index_router
 from features.strategy.router_registry import include_strategy_routers
 from features.strategy.router import router as strategy_router
 from features.strategy.polymarket.router import router as polymarket_router
@@ -184,12 +188,25 @@ async def lifespan(_app: FastAPI):
 
 app = FastAPI(title="BTC Forward Test API", lifespan=lifespan)
 
+# 접근 게이트 — env 가 잘못되면 여기서 즉시 예외 (부팅 실패 > 무방비 공개)
+_auth_cfg = get_auth_config()
+app.add_middleware(AccessGateMiddleware)
+if _auth_cfg.enabled:
+    print(
+        f"[Auth] 접근 게이트 ON — guest TTL {_auth_cfg.guest_ttl_hours}h, "
+        f"admin 세션 {_auth_cfg.admin_ttl_days}d. 패스 발급: /admin/access"
+    )
+else:
+    print("[Auth] ⚠️ AUTH_ENABLED=false — 전체 공개 상태입니다.")
+
 
 @app.get("/health")
 async def health() -> dict:
     return {"ok": True}
 
 
+app.include_router(access_auth_router)
+app.include_router(site_index_router)      # "/" — 전체 페이지 인덱스
 app.include_router(master_dashboard_router)
 app.include_router(ctrader_auth_router)
 app.include_router(strategy_router)

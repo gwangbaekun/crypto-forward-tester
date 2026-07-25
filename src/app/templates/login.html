@@ -1,0 +1,140 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Sign in — Forward Test</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      background: #0d1117;
+      color: #c9d1d9;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 20px;
+    }
+    .card {
+      width: 100%;
+      max-width: 380px;
+      background: #161b22;
+      border: 1px solid #30363d;
+      border-radius: 10px;
+      padding: 28px 24px;
+    }
+    h1 { font-size: 17px; font-weight: 600; color: #e6edf3; margin-bottom: 6px; }
+    .sub { font-size: 12.5px; color: #7d8590; line-height: 1.55; margin-bottom: 22px; }
+    label { display: block; font-size: 12px; color: #7d8590; margin-bottom: 7px; }
+    input {
+      width: 100%;
+      background: #0d1117;
+      border: 1px solid #30363d;
+      border-radius: 6px;
+      color: #e6edf3;
+      font-size: 14px;
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      padding: 10px 12px;
+      letter-spacing: 0.04em;
+    }
+    input:focus { outline: none; border-color: #388bfd; box-shadow: 0 0 0 3px rgba(56,139,253,0.15); }
+    button {
+      width: 100%;
+      margin-top: 16px;
+      background: #238636;
+      border: 1px solid #2ea043;
+      border-radius: 6px;
+      color: #fff;
+      font-size: 14px;
+      font-weight: 600;
+      padding: 10px;
+      cursor: pointer;
+    }
+    button:hover:not(:disabled) { background: #2ea043; }
+    button:disabled { opacity: 0.55; cursor: not-allowed; }
+    .msg {
+      margin-top: 14px;
+      font-size: 12.5px;
+      padding: 9px 11px;
+      border-radius: 6px;
+      display: none;
+      line-height: 1.5;
+    }
+    .msg.err { display: block; background: #2d1214; border: 1px solid #6e2528; color: #f85149; }
+    .msg.ok  { display: block; background: #10251a; border: 1px solid #238636; color: #3fb950; }
+    .foot { margin-top: 20px; font-size: 11.5px; color: #6e7681; line-height: 1.6; }
+  </style>
+</head>
+<body>
+  <div class="card" data-next="{{ next_url }}">
+    <h1>Forward Test</h1>
+    <p class="sub">Enter your admin password or the access code you were given.</p>
+
+    <form id="form" autocomplete="off">
+      <label for="password">Password / Access code</label>
+      <input id="password" name="password" type="password" placeholder="XXXX-XXXX-XXXX" autofocus>
+      <button id="submit" type="submit">Sign in</button>
+    </form>
+
+    <div id="msg" class="msg{% if link_failed %} err{% endif %}">
+      {%- if link_failed -%}
+      링크가 만료되었거나 유효하지 않습니다. 코드를 직접 입력하거나 재발급을 요청하세요.
+      {%- endif -%}
+    </div>
+
+    <p class="foot">Access codes are time-limited and read-only.</p>
+  </div>
+
+  <script>
+    // data 속성으로 읽는다 — 스크립트 본문에 값을 심지 않아 주입 자체가 불가능
+    const NEXT = document.querySelector('.card').dataset.next || '/';
+    const form = document.getElementById('form');
+    const input = document.getElementById('password');
+    const btn = document.getElementById('submit');
+    const msg = document.getElementById('msg');
+
+    function show(kind, text) {
+      msg.className = 'msg ' + kind;
+      msg.textContent = text;
+    }
+
+    // 오픈 리다이렉트 방지: 같은 사이트의 경로만 허용
+    function safeNext(v) {
+      if (typeof v !== 'string' || !v.startsWith('/') || v.startsWith('//')) return '/';
+      return v;
+    }
+
+    form.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const password = input.value.trim();
+      if (!password) return;
+
+      btn.disabled = true;
+      show('', '');
+      msg.className = 'msg';
+
+      try {
+        const res = await fetch('/login', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ password }),
+        });
+        const data = await res.json();
+        if (!res.ok || !data.ok) {
+          show('err', data.error || 'Sign-in failed');
+          btn.disabled = false;
+          input.select();
+          return;
+        }
+        const hrs = Math.round((data.expires_in || 0) / 3600);
+        show('ok', `Signed in as ${data.role} — session valid for ~${hrs}h. Redirecting…`);
+        window.location.href = safeNext(NEXT);
+      } catch (err) {
+        show('err', 'Network error: ' + err.message);
+        btn.disabled = false;
+      }
+    });
+  </script>
+</body>
+</html>

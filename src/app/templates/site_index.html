@@ -1,0 +1,196 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Forward Test — Index</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      background: #0d1117;
+      color: #c9d1d9;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      min-height: 100vh;
+    }
+
+    .header {
+      background: #161b22;
+      border-bottom: 1px solid #21262d;
+      padding: 12px 20px;
+      display: flex; align-items: center; gap: 12px;
+      position: sticky; top: 0; z-index: 10;
+    }
+    .header-title { font-size: 15px; font-weight: 600; color: #e6edf3; }
+    .header-sub { font-size: 12px; color: #7d8590; }
+    .header-actions { margin-left: auto; display: flex; gap: 10px; align-items: center; }
+    a.link { color: #58a6ff; text-decoration: none; font-size: 12.5px; }
+    a.link:hover { text-decoration: underline; }
+
+    .badge {
+      display: inline-flex; align-items: center; gap: 5px;
+      padding: 3px 10px; border-radius: 20px; font-size: 11.5px; font-weight: 500;
+      white-space: nowrap;
+    }
+    .b-role    { background: #12233d; color: #58a6ff; border: 1px solid #1f6feb; }
+    .b-ro      { background: #21262d; color: #7d8590; border: 1px solid #30363d; }
+    .b-on      { background: #1a4731; color: #3fb950; border: 1px solid #238636; }
+    .b-off     { background: #21262d; color: #6e7681; border: 1px solid #30363d; }
+    .b-watch   { background: #2b2313; color: #d29922; border: 1px solid #9e6a03; }
+
+    .wrap { max-width: 1120px; margin: 0 auto; padding: 22px 20px 70px; }
+
+    .searchbar { margin-bottom: 22px; }
+    .searchbar input {
+      width: 100%; background: #161b22; border: 1px solid #30363d; border-radius: 8px;
+      color: #e6edf3; font-size: 14px; padding: 11px 14px;
+    }
+    .searchbar input:focus { outline: none; border-color: #388bfd; box-shadow: 0 0 0 3px rgba(56,139,253,0.12); }
+
+    .section { margin-bottom: 30px; }
+    .section-head { display: flex; align-items: baseline; gap: 10px; margin-bottom: 12px; }
+    .section-title { font-size: 13px; font-weight: 600; color: #e6edf3; }
+    .section-desc { font-size: 11.5px; color: #6e7681; }
+    .section-count { margin-left: auto; font-size: 11.5px; color: #6e7681; }
+
+    .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(268px, 1fr)); gap: 11px; }
+
+    .card {
+      display: block; text-decoration: none; color: inherit;
+      background: #161b22; border: 1px solid #30363d; border-radius: 8px;
+      padding: 14px; transition: border-color .12s, transform .12s, background .12s;
+    }
+    .card:hover { border-color: #58a6ff; background: #1a2029; transform: translateY(-1px); }
+    .card:focus-visible { outline: 2px solid #58a6ff; outline-offset: 2px; }
+
+    .card-top { display: flex; align-items: flex-start; gap: 9px; margin-bottom: 9px; }
+    .card-emoji { font-size: 17px; line-height: 1.25; flex-shrink: 0; }
+    .card-titles { min-width: 0; flex: 1; }
+    .card-title {
+      font-size: 13.5px; font-weight: 600; color: #e6edf3; line-height: 1.35;
+      overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    }
+    .card-sub { font-size: 11.5px; color: #7d8590; margin-top: 2px; }
+
+    .card-meta { display: flex; flex-wrap: wrap; gap: 5px; align-items: center; margin-bottom: 9px; }
+    .chip {
+      font-size: 10.5px; padding: 2px 7px; border-radius: 4px;
+      background: #0d1117; border: 1px solid #30363d; color: #8b949e;
+      font-family: ui-monospace, Menlo, monospace;
+    }
+    .card-path {
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      font-size: 10.5px; color: #6e7681;
+      overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    }
+
+    .empty { padding: 40px; text-align: center; color: #6e7681; font-size: 13px; }
+    .hidden { display: none !important; }
+    .note {
+      margin-top: 26px; padding: 12px 14px; background: #161b22;
+      border: 1px solid #21262d; border-radius: 8px;
+      font-size: 11.5px; color: #7d8590; line-height: 1.65;
+    }
+  </style>
+</head>
+<body>
+  <div class="header">
+    <span class="header-title">Forward Test</span>
+    <span class="header-sub">{{ total_pages }} pages · {{ enabled_count }} live</span>
+    <div class="header-actions">
+      <span class="badge b-role">{{ role }}</span>
+      {% if role != 'admin' %}<span class="badge b-ro">read-only</span>{% endif %}
+      <a class="link" href="/logout">Logout</a>
+    </div>
+  </div>
+
+  <div class="wrap">
+    <div class="searchbar">
+      <input id="q" type="search" placeholder="페이지 검색 — 이름, 심볼, 경로…" autofocus>
+    </div>
+
+    {% for section in sections %}
+    <div class="section" data-section>
+      <div class="section-head">
+        <span class="section-title">{{ section.title }}</span>
+        <span class="section-desc">{{ section.desc }}</span>
+        <span class="section-count">{{ section["items"] | length }}</span>
+      </div>
+      <div class="grid">
+        {% for it in section["items"] %}
+        <a class="card" href="{{ it.path }}"
+           data-search="{{ it.title }} {{ it.subtitle }} {{ it.symbol }} {{ it.path }}">
+          <div class="card-top">
+            <span class="card-emoji">{{ it.emoji }}</span>
+            <div class="card-titles">
+              <div class="card-title">{{ it.title }}</div>
+              {% if it.subtitle %}<div class="card-sub">{{ it.subtitle }}</div>{% endif %}
+            </div>
+          </div>
+          <div class="card-meta">
+            {% if it.enabled is not none %}
+              {% if it.enabled %}<span class="badge b-on">LIVE</span>
+              {% elif it.monitoring %}<span class="badge b-watch">MONITOR</span>
+              {% else %}<span class="badge b-off">OFF</span>{% endif %}
+            {% endif %}
+            {% if it.symbol %}<span class="chip">{{ it.symbol }}</span>{% endif %}
+            {% for tf in it.timeframes[:4] %}<span class="chip">{{ tf }}</span>{% endfor %}
+          </div>
+          <div class="card-path">{{ it.path }}</div>
+        </a>
+        {% endfor %}
+      </div>
+    </div>
+    {% endfor %}
+
+    <div id="noResult" class="empty hidden">검색 결과 없음</div>
+
+    {% if role != 'admin' %}
+    <div class="note">
+      읽기 전용 세션입니다. 모든 대시보드를 열람할 수 있고, 설정 변경·주문·데이터 수정은 차단됩니다.
+    </div>
+    {% endif %}
+  </div>
+
+  <script>
+    const q = document.getElementById('q');
+    const cards = Array.from(document.querySelectorAll('.card'));
+    const sections = Array.from(document.querySelectorAll('[data-section]'));
+    const noResult = document.getElementById('noResult');
+
+    function filter() {
+      const term = q.value.trim().toLowerCase();
+      let shown = 0;
+
+      for (const c of cards) {
+        const hit = !term || c.dataset.search.toLowerCase().includes(term);
+        c.classList.toggle('hidden', !hit);
+        if (hit) shown++;
+      }
+      // 결과가 하나도 없는 섹션은 헤더까지 숨긴다
+      for (const s of sections) {
+        const any = s.querySelectorAll('.card:not(.hidden)').length > 0;
+        s.classList.toggle('hidden', !any);
+      }
+      noResult.classList.toggle('hidden', shown > 0);
+    }
+
+    q.addEventListener('input', filter);
+
+    // Enter → 첫 번째 결과로 이동
+    q.addEventListener('keydown', (e) => {
+      if (e.key !== 'Enter') return;
+      const first = cards.find((c) => !c.classList.contains('hidden'));
+      if (first) window.location.href = first.getAttribute('href');
+    });
+
+    // "/" 로 검색창 포커스
+    document.addEventListener('keydown', (e) => {
+      if (e.key === '/' && document.activeElement !== q) {
+        e.preventDefault();
+        q.focus();
+        q.select();
+      }
+    });
+  </script>
+</body>
+</html>
