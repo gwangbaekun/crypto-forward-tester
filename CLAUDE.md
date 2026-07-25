@@ -131,9 +131,11 @@ market_stream          →  프리미엄/펀딩/24h/OI/LSR/CVD 프록시 (폴링
 | 역할 | 인증 | 권한 |
 |------|------|------|
 | admin | `ADMIN_PASSWORD` (env) | 전체. 세션 `AUTH_ADMIN_TTL_DAYS`(기본 30일) |
-| guest | 발급된 패스코드 | **읽기 전용** — GET/HEAD/OPTIONS 만, 그 외 403 |
+| guest | 발급된 패스코드 | **선택된 3개 대시보드 전용·읽기 전용** — 그 외 경로와 쓰기 요청 403 |
 
 - 공개 경로: `/health`, `/login`, `/logout`, `/static/*`, `/favicon.ico`. 나머지 전부 게이트.
+- 게스트 허용 화면: Spot-Perp CVD, OI Accel Breakout v2, Polymarket Fade. 루트 인덱스도
+  이 3개만 표시하며, 필요한 읽기 API 외에는 직접 URL 접근도 403 (`features.auth.policy`).
 - 세션: HMAC-SHA256 서명 쿠키 (`ft_session`, HttpOnly, SameSite=Lax, https면 Secure). **새 의존성 없음** (stdlib).
 - 게스트 코드는 평문 저장 안 함 — `access_passes.code_hash` (HMAC). 발급 응답에서 1회만 노출.
 - 매 요청마다 DB 재확인 → **폐기·만료가 즉시 반영**된다 (쿠키가 남아 있어도 차단).

@@ -17,6 +17,7 @@ from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.responses import HTMLResponse as _HTMLResponse
 
 from common.utils import render_template
+from features.auth.policy import GUEST_DASHBOARD_PATHS
 
 router = APIRouter()
 
@@ -167,6 +168,8 @@ def build_index(app: Any, role: str) -> List[Dict[str, Any]]:
         if path in _HIDDEN or path in seen:
             continue
         if path in _ADMIN_ONLY and role != "admin":
+            continue
+        if role == "guest" and path not in GUEST_DASHBOARD_PATHS:
             continue
         seen.add(path)
         items.append(_describe(path, getattr(route, "name", ""), master))

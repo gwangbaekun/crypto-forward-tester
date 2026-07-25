@@ -2,7 +2,7 @@
 전역 접근 게이트.
 
 - 미인증        → HTML 요청은 /login 리다이렉트, API 요청은 401 JSON
-- role=guest    → GET/HEAD/OPTIONS 만 허용. 그 외 메서드는 403 (읽기 전용)
+- role=guest    → 선택된 3개 대시보드와 필요한 읽기 API만 허용. 나머지는 403
                   + 매 요청마다 DB 에서 패스 유효성 재확인 (폐기/만료 즉시 반영)
 - role=admin    → 제한 없음
 - AUTH_ENABLED=false → 미들웨어가 아예 통과 (로컬 개발)
@@ -16,6 +16,7 @@ from starlette.requests import Request
 from starlette.responses import JSONResponse, RedirectResponse, Response
 
 from features.auth.config import COOKIE_NAME, get_auth_config
+from features.auth.policy import is_guest_path_allowed
 from features.auth.store import is_pass_active
 from features.auth.tokens import verify_token
 
@@ -66,6 +67,8 @@ class AccessGateMiddleware(BaseHTTPMiddleware):
                 return _deny(request, 401, "access pass expired or revoked")
             if request.method.upper() not in _READ_METHODS:
                 return _deny(request, 403, "read-only access: this action requires admin")
+            if not is_guest_path_allowed(request.url.path):
+                return _deny(request, 403, "guest access is limited to selected dashboards")
 
         request.state.auth_role = token.role
         request.state.auth_pass_id = token.pass_id
