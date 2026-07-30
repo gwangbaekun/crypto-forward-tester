@@ -487,3 +487,22 @@ class AccessPass(Base):
     # 자동 연장이 무한정 가지 않도록 하는 절대 상한. NULL 이면 상한 없음.
     max_expires_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
     renew_count:    Mapped[int]                = mapped_column(Integer, nullable=False, default=0)
+
+
+class DrawdownLedger(Base):
+    """드로다운 매수 포워드 테스트 원장 — 단일 행(id=1) JSON 블롭.
+
+    Railway 컨테이너 파일시스템은 재배포마다 초기화된다. 원장을 `data/*.json` 에만 두면
+    배포할 때마다 열린 에피소드가 전부 backfilled 로 다시 잡히고 **out-of-sample 기록이
+    영원히 0** 이 된다 — 포워드 테스트가 성립하지 않는다. 그래서 DB 에 둔다.
+
+    스키마를 쪼개지 않고 블롭으로 두는 이유: 원장 형태가 아직 바뀔 수 있고,
+    행 수가 종목 수 수준(수십)이라 쿼리 성능이 문제되지 않는다.
+    (`ValueScanSnapshot.rows_json` 과 같은 패턴)
+    """
+
+    __tablename__ = "drawdown_ledger"
+
+    id:           Mapped[int]      = mapped_column(Integer, primary_key=True)   # 항상 1
+    payload_json: Mapped[str]      = mapped_column(Text, nullable=False)
+    updated_at:   Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.utcnow)

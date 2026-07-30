@@ -116,6 +116,20 @@ value_scan:
     module: features.strategy.value_scan.engine
     fn: get_scan_status
 
+drawdown_signal:
+  enabled: false
+  monitoring: false
+  strategy_tag: drawdown_signal
+  label: "Drawdown Ladder"
+  emoji: "🩸"
+  timeframes: ["1d"]
+  telegram_alerts: true
+  discord_alerts: false
+  binance_live: false
+  tick:
+    module: features.strategy.drawdown_signal.engine
+    fn: is_due
+
 oi_cvd_surge:
   enabled: false
   monitoring: false

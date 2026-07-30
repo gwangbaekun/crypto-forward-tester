@@ -116,6 +116,34 @@ async def _run_market_scan_if_due(market: str) -> bool:
     return True
 
 
+_DRAWDOWN_POLL_SEC = 1800
+
+
+async def _drawdown_scheduler() -> None:
+    """드로다운 매수 신호 — 일봉 기준 하루 1회 (Railway 배포본에서 그대로 동작).
+
+    cron 대신 앱 안에 두는 이유: 배포 환경이 Docker 라 호스트 crontab 이 없고,
+    컨테이너가 재시작돼도 원장의 last_run 을 보고 catch-up 하면 하루 1회가 보장된다.
+    일봉이라 30분 폴링으로 충분하다.
+    """
+    from features.strategy.drawdown_signal.cache import dd_cache
+    from features.strategy.drawdown_signal.engine import is_due, run_exclusive
+
+    await asyncio.sleep(20)
+    while True:
+        try:
+            if is_due():
+                # 대시보드 수동 실행과 겹치면 원장이 서로 덮어써진다 → run_exclusive
+                r = await asyncio.to_thread(run_exclusive)
+                if r is not None:
+                    dd_cache.invalidate()
+                    print(f"[Drawdown] 열림 {r['open']} · 신규 {len(r['new_signals'])} · "
+                          f"청산 {len(r['closed'])} · OOS {r['out_of_sample']}")
+        except Exception as exc:
+            print(f"[Drawdown] scheduler tick error: {exc}")
+        await asyncio.sleep(_DRAWDOWN_POLL_SEC)
+
+
 async def _value_scan_scheduler() -> None:
     """장 마감 시각 이후, 시장별 거래일 기준 하루 1회 스캔."""
     from features.strategy.value_scan.scan_schedule import build_schedule_status
@@ -166,8 +194,10 @@ async def lifespan(_app: FastAPI):
         polymarket_task = None
 
     scan_task = asyncio.create_task(_value_scan_scheduler())
+    drawdown_task = asyncio.create_task(_drawdown_scheduler())
     yield
     scan_task.cancel()
+    drawdown_task.cancel()
     try:
         await scan_task
     except asyncio.CancelledError:

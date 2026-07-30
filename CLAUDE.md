@@ -181,6 +181,35 @@ market_stream          →  프리미엄/펀딩/24h/OI/LSR/CVD 프록시 (폴링
 
 ---
 
+## 드로다운 매수 (`src/features/strategy/drawdown_signal/`)
+
+인기 종목 + Crypto + 지수 + 원자재 28종목, 52주 고점 −30% 진입 → −40/−50% 물타기 →
+고점 회복 시 청산. **하루 1회 일봉**. 자세한 건 모듈 `README.md`.
+
+- 구조는 `value_scan` 을 따른다: `engine / stats / router / cache` + `strategies_master.yaml` 등록
+  → `router_registry` 가 `/quant/drawdown_signal/*` 자동 등록, 사이트 인덱스에도 자동 노출.
+- **알림봇이 아니라 원장이다.** `backfilled` 플래그로 사후 발견분을 분리하지 않으면
+  포워드 테스트가 아니라 백테스트가 된다. 모든 집계가 코호트별로 갈린다.
+- 원장은 `DATABASE_URL` 있으면 DB(`drawdown_ledger` 단일 행 블롭)가 정본. 파일에만 두면
+  Railway 재배포마다 `first_run` 이 되어 out-of-sample 이 영원히 0.
+- 실행은 앱 안 `_drawdown_scheduler` (30분 폴링 + `last_run` catch-up). cron 없음.
+  스케줄러와 대시보드 수동 실행은 `engine.run_exclusive` 락을 공유 — 단일 블롭이라
+  동시 write 시 한쪽이 통째로 덮인다.
+- 실측: 1회 스캔 **7.5초 · 요청 28건 · 계산 14ms**. 대시보드는 원장만 읽어 네트워크 0.
+
+### 차트 기준 (다른 대시보드에도 적용할 것)
+
+`backtest_quant/posts/ipo-two-ways-in/chart.py` 의 **리서치 차트 문법**을 따른다.
+소셜 카드와 반대다 — 작은 활자, 얇은 선, 높은 밀도, 범례 상자 대신 **선 끝 직접 라벨**,
+구간별 표본 수 `n` 표기, 낮은 채도(`#2e6fd4`/`#8a5cd0`, 네온 금지), 8:5, 하단 2줄 방법론.
+외부 차트 라이브러리 없이 순수 SVG 로 그린다 (`renderCurveChart` / `renderEdgeChart`).
+
+**미래 정보 누수 주의**: 보유 기간별 곡선에서 각 구간의 평단은 *그 시점까지 체결된 것만*
+반영해야 한다 (`engine._return_path`). 전체 평단을 초반 구간에 쓰면 아직 일어나지 않은
+매수를 소급 적용하는 셈이라 물타기가 실제보다 좋아 보인다.
+
+---
+
 ## Session log (요약)
 
 - forwardtest_quant: `src/` 레이아웃, 홈 + strategy API + liq 검증.
@@ -210,3 +239,17 @@ market_stream          →  프리미엄/펀딩/24h/OI/LSR/CVD 프록시 (폴링
   - 기존 루트(YAML 편집기)는 열람자에게 무의미하고 쓰기 권한이 필요 → `/admin/strategies` 로 이동.
   - 인덱스는 `app.routes` 자동 수집 — 전략 추가 시 목록 관리 불필요.
   - 33개 페이지 수집 확인, 역할 필터·깨진 링크 0 검증 완료.
+- **2026-07-28 — `drawdown_signal` 모듈화 + 대시보드 (`src/features/strategy/drawdown_signal/`).**
+  - 엔진만 있던 것을 `value_scan` 구조로 완성: `stats.py`(집계) · `router.py`(6개 엔드포인트) ·
+    `cache.py`(TTL 120s) · `README.md` + `strategies_master.yaml` 등록.
+  - `engine.run_exclusive()` 추가 — 스케줄러 틱과 대시보드 수동 실행이 원장을 동시에
+    덮어쓰는 문제. `main.py` 스케줄러도 이 경로로 바꿨다.
+  - `engine._return_path()` 추가 — 리플레이가 이미 든 가격으로 보유 기간별
+    (래더 vs 1차 진입만) 수익률을 같이 계산. **네트워크 추가 비용 0**.
+  - 차트 2종을 IPO 포스트 문법으로 SVG 직접 구현 (라이브러리 없음).
+  - 리소스 실측: 스캔 1회 7.5s / 요청 28건 / 계산 14ms / RSS +32MB, 실패 0건.
+  - 검증: 로컬 TestClient 6개 엔드포인트 200, 도커 컨테이너 안 TestClient 도 200,
+    사이트 인덱스 카드 자동 노출 확인, 브라우저 콘솔 에러 0.
+  - 함정: 컨테이너의 fastapi 0.139 는 `include_router` 결과를 `app.routes` 에
+    `_IncludedRouter` 래퍼로 넣는다 → `r.path` 로 라우트 존재를 확인하면 빈 목록이 나온다.
+    등록 여부는 TestClient 로 실제 요청해서 봐야 한다.
