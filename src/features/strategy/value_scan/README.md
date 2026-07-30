@@ -9,7 +9,7 @@ KOSPI 200 + S&P 500 전 종목을 대상으로 **5개 팩터 종합 스코어(0~
 | 시장 | 기본 데이터 | 보완 데이터 |
 |------|------------|------------|
 | **NASDAQ / S&P 500** | yfinance (전체) | — |
-| **KOSPI 200** | Naver Mobile API (PER, PBR, EPS) | yfinance `.KS` (Quality/Health/Growth/Sentiment) |
+| **KOSPI 200** | Naver Mobile API (PER, PBR, EPS) | yfinance `.KS` (Quality/Health/Growth) |
 
 > KOSPI는 Naver가 한국 밸류에이션 데이터를 더 정확히 제공하므로 PER·PBR은 Naver 우선.  
 > ROE·D/E 등 재무 지표는 yfinance `.KS`로 보완. 소형주는 yfinance 커버리지가 없을 수 있음.
@@ -19,13 +19,16 @@ KOSPI 200 + S&P 500 전 종목을 대상으로 **5개 팩터 종합 스코어(0~
 ## 종합 스코어 구조 (100점 만점)
 
 ```
-Composite Score (100)
+Composite Score (95)
 ├── Valuation   30점  — 얼마나 싸게 사는가
 ├── Quality     30점  — 얼마나 잘 버는 기업인가
 ├── Health      20점  — 재무 안전성
-├── Growth      15점  — 성장하고 있는가
-└── Sentiment    5점  — 시장 컨센서스
+└── Growth      15점  — 성장하고 있는가
 ```
+
+> Sentiment 팩터는 제거됨 — KOSPI는 yfinance 커버리지 부재로 NaN 고정이었고,
+> 애널리스트 추천 수준은 후행 신호라 스코어링에서 배제. `analyst_rec`/`target_upside`는
+> 표시용으로만 남아있고 점수에 기여하지 않음.
 
 ---
 
@@ -194,24 +197,6 @@ FCF가 양수면 4pt, 음수면 0pt. (단순 이진 판정)
 
 ---
 
-### 5. Sentiment (시장 컨센서스) — 5점
-
-#### Analyst Recommendation (애널리스트 컨센서스)
-
-yfinance `recommendationMean`: 1.0 (Strong Buy) ~ 5.0 (Strong Sell)
-
-| Rec. 값 | 의미 | 점수 |
-|---------|------|------|
-| ≤ 1.5 | Strong Buy | 5pt |
-| ≤ 2.0 | Buy | 4pt |
-| ≤ 2.5 | Hold (매수 우위) | 3pt |
-| ≤ 3.0 | Hold | 1pt |
-| > 3.0 | Sell/Strong Sell | 0pt |
-
-> 전체 배점의 5%만 차지. 애널리스트 컨센서스는 후행 지표이므로 가중치를 낮게 둠.
-
----
-
 ## BUY / SELL / HOLD 판정 기준
 
 ```
@@ -220,11 +205,11 @@ SELL (강제 — 점수 무관):
   └── ROE < -15%          → 지속적 대규모 손실
 
 SELL (점수 기반):
-  ├── Composite ≤ 28점
+  ├── Composite ≤ 27점
   └── Health ≤ 4점        → 재무건전성 최소 기준 미달
 
 BUY:
-  ├── Composite ≥ 65점
+  ├── Composite ≥ 62점
   ├── Quality ≥ 14점      → 최소 수익성 확보
   └── Health ≥ 8점        → 최소 재무건전성 확보
 
@@ -237,18 +222,17 @@ HOLD: 나머지 전부
 
 | 점수 | 색상 | 의미 |
 |------|------|------|
-| 65+ | 🟢 초록 | BUY 후보. 밸류·퀄리티·건전성 종합 우수 |
-| 45~64 | 🟡 노랑 | HOLD. 일부 팩터 미흡 — 모니터링 |
-| 0~44 | 🔴 빨강 | SELL 후보 또는 리스크 높음 |
+| 62+ | 🟢 초록 | BUY 후보. 밸류·퀄리티·건전성 종합 우수 |
+| 43~61 | 🟡 노랑 | HOLD. 일부 팩터 미흡 — 모니터링 |
+| 0~42 | 🔴 빨강 | SELL 후보 또는 리스크 높음 |
 
 ### 케이스 해석 예시
 
-**PLTR (Palantir) — Score 72, BUY**
+**PLTR (Palantir) — Score 68, BUY**
 - Valuation: 0/30 (PER 180+, 섹터 대비 5× 고평가)
 - Quality: 28/30 (ROE 30%+, Op.Margin 20%+)
 - Health: 19/20 (무부채, FCF 양수)
 - Growth: 14/15 (매출 35%+, EPS 80%+)
-- Sentiment: 4/5 (Buy 컨센서스)
 
 → 비싸지만 퀄리티·성장이 압도적. 이 시스템은 **"비싼 퀄리티 성장주"도 BUY** 가능.
 
@@ -293,12 +277,11 @@ HOLD: 나머지 전부
   "market": "nasdaq",
   "sector": "Technology",
   "rating": "BUY",
-  "score": 78,
+  "score": 74,
   "score_valuation": 18,
   "score_quality": 27,
   "score_health": 17,
   "score_growth": 12,
-  "score_sentiment": 4,
   "per": 28.4,
   "sector_median": 36.2,
   "roe": 147.2,

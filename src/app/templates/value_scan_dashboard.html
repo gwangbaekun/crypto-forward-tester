@@ -1256,10 +1256,6 @@ function detailRowHtml(r, colspan) {
         <span class="dsc-label">Growth</span>
         <span class="dsc-val">${r.score_growth ?? "—"}<small style="font-weight:400;font-size:.65rem">/15</small></span>
       </div>
-      <div class="dscore-chip ${dchipCls(r.score_sentiment,5)}">
-        <span class="dsc-label">Sentiment</span>
-        <span class="dsc-val">${r.score_sentiment ?? "—"}<small style="font-weight:400;font-size:.65rem">/5</small></span>
-      </div>
     </div>` : "";
 
   const fields = [

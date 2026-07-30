@@ -378,18 +378,9 @@ def _score_nasdaq(r: dict, sector_med: dict) -> dict:
 
     growth_score = min(growth, 15)
 
-    # ── Sentiment (5 pts) ─────────────────────────────────────────────────────
-    rec = _v("analyst_rec")
-    if ok(rec) and rec > 0:
-        if   rec <= 1.5: sent_score = 5
-        elif rec <= 2.0: sent_score = 4
-        elif rec <= 2.5: sent_score = 3
-        elif rec <= 3.0: sent_score = 1
-        else:            sent_score = 0
-    else:
-        sent_score = 0
-
-    composite = val_score + qual_score + health_score + growth_score + sent_score
+    # Sentiment 팩터 제거 — KOSPI는 yfinance 커버리지 부재로 NaN 고정이었고,
+    # 애널리스트 추천 수준은 후행 신호라 스코어링에서 배제. composite 만점 95.
+    composite = val_score + qual_score + health_score + growth_score
 
     return {
         "score":           composite,
@@ -397,7 +388,6 @@ def _score_nasdaq(r: dict, sector_med: dict) -> dict:
         "score_quality":   qual_score,
         "score_health":    health_score,
         "score_growth":    growth_score,
-        "score_sentiment": sent_score,
     }
 
 
@@ -413,9 +403,9 @@ def _rate_nasdaq_by_score(r: dict) -> str:
     if not math.isnan(roe) and roe < -15:
         return "SELL"
 
-    if score >= 65 and qual >= 14 and health >= 8:
+    if score >= 62 and qual >= 14 and health >= 8:
         return "BUY"
-    if score <= 28 or health <= 4:
+    if score <= 27 or health <= 4:
         return "SELL"
     return "HOLD"
 

@@ -600,7 +600,6 @@ function cardHtml(r, idx) {
       <div class="factor ${factorCls(r.score_quality, 30)}"><div class="f-lbl">Qual</div><div class="f-val">${r.score_quality ?? "—"}</div></div>
       <div class="factor ${factorCls(r.score_health, 20)}"><div class="f-lbl">Hlth</div><div class="f-val">${r.score_health ?? "—"}</div></div>
       <div class="factor ${factorCls(r.score_growth, 15)}"><div class="f-lbl">Grw</div><div class="f-val">${r.score_growth ?? "—"}</div></div>
-      <div class="factor ${factorCls(r.score_sentiment, 5)}"><div class="f-lbl">Sent</div><div class="f-val">${r.score_sentiment ?? "—"}</div></div>
     </div>` : "";
 
   const details = [
