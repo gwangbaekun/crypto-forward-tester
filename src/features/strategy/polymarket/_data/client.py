@@ -4,6 +4,7 @@ async 버전. httpx.AsyncClient 사용.
 """
 from __future__ import annotations
 
+import asyncio
 import json
 from datetime import UTC, datetime
 from typing import Any
@@ -367,3 +368,139 @@ async def fetch_by_expiry(
                 break
 
     return sorted(out, key=lambda m: m["end_ts"] or 0)
+
+
+# ── 밴드 스크리너 (fade 후보 자동 발굴) ───────────────────────────────────────
+#
+# Gamma 의 offset 상한은 2000 이라 단일 쿼리로는 볼륨 상위 ~2,100개까지만 열거된다.
+# 실측상 그 방식은 5~15% 밴드 후보의 60%를 놓친다(388 vs 941) — 누적볼륨 상위와
+# "지금 5~15%에 있는 마켓"은 다른 집합이기 때문.
+# 서버측 필터 volume_num_min / end_date_min·max 는 **실제로 동작**하므로(무시되지 않음),
+# 종료월 단위로 슬라이스를 쪼개면 각 슬라이스가 offset 상한 아래로 내려가 전수 열거가 된다.
+# 실측(vol>=$10k, 18개월): 마켓 4,609개 · 밴드 941개 · 요청 58건 · 26초.
+
+_SLICE_MONTHS = 18          # 이 기간까지 월 슬라이스, 이후는 롱테일 한 덩어리
+_GAMMA_OFFSET_CAP = 2000    # Gamma 하드 상한. 슬라이스가 이걸 채우면 커버리지 불완전.
+
+
+def _month_bounds(n: int) -> list[tuple[datetime, datetime | None]]:
+    """이번 달부터 n개월 경계 + 마지막에 (n개월 후, None) 롱테일 슬라이스."""
+    now = datetime.now(UTC)
+    cur = datetime(now.year, now.month, 1, tzinfo=UTC)
+    out: list[tuple[datetime, datetime | None]] = []
+    for _ in range(n):
+        nxt = datetime(cur.year + (cur.month == 12), (cur.month % 12) + 1, 1, tzinfo=UTC)
+        out.append((cur, nxt))
+        cur = nxt
+    out.append((cur, None))
+    return out
+
+
+async def _page_slice(
+    cli: httpx.AsyncClient,
+    min_volume: float,
+    lo: datetime,
+    hi: datetime | None,
+    page_sleep: float,
+) -> tuple[list[dict], bool]:
+    """한 슬라이스를 offset 페이징. (raw markets, offset 상한 도달 여부)."""
+    rows: list[dict] = []
+    off = 0
+    while off <= _GAMMA_OFFSET_CAP:
+        params: dict[str, Any] = {
+            "limit": 100, "offset": off,
+            "closed": "false", "active": "true",
+            "order": "volumeNum", "ascending": "false",
+            "volume_num_min": min_volume,
+            "end_date_min": lo.strftime("%Y-%m-%dT%H:%M:%SZ"),
+        }
+        if hi is not None:
+            params["end_date_max"] = hi.strftime("%Y-%m-%dT%H:%M:%SZ")
+        r = await cli.get(f"{GAMMA_BASE}/markets", params=params)
+        if r.status_code != 200:
+            break
+        data = r.json()
+        data = data if isinstance(data, list) else data.get("data", [])
+        if not data:
+            return rows, False
+        rows.extend(data)
+        off += 100
+        if len(data) < 100:
+            return rows, False
+        await asyncio.sleep(page_sleep)
+    return rows, True
+
+
+async def screen_band_markets(
+    band_lo: float,
+    band_hi: float,
+    min_volume: float,
+    months_ahead: int = _SLICE_MONTHS,
+    page_sleep: float = 0.05,
+) -> tuple[list[dict[str, Any]], list[str]]:
+    """YES 가격이 [band_lo, band_hi] 인 활성 마켓을 **전수** 열거.
+
+    이름·키워드를 전혀 보지 않고 가격/볼륨만으로 거른다. 히스토리 요청 0건
+    (Gamma 응답의 outcomePrices 로 판정) — 후보를 좁힌 뒤에 곡선을 받는 게 핵심.
+
+    Returns: (밴드 마켓 normalize 결과, offset 상한에 걸린 슬라이스 라벨 목록)
+    라벨이 비어있지 않으면 그 구간은 커버리지가 불완전하다는 뜻 —
+    호출자가 조용히 넘기지 말고 로그로 드러내야 한다.
+    """
+    seen: dict[str, dict[str, Any]] = {}
+    capped: list[str] = []
+
+    async with httpx.AsyncClient(timeout=TIMEOUT) as cli:
+        for lo, hi in _month_bounds(months_ahead):
+            rows, hit_cap = await _page_slice(cli, min_volume, lo, hi, page_sleep)
+            if hit_cap:
+                capped.append(lo.strftime("%Y-%m") if hi else f">{months_ahead}mo")
+            for m in rows:
+                norm = _normalize(m)
+                cid = norm["condition_id"]
+                if not cid or cid in seen or norm["is_closed"]:
+                    continue
+                y = norm["yes_price"]
+                if y is None or not (band_lo <= y <= band_hi):
+                    continue
+                if not norm["yes_token_id"]:
+                    continue
+                seen[cid] = norm
+
+    return list(seen.values()), capped
+
+
+async def fetch_curve_batch(
+    token_ids: list[str],
+    fidelity: int = 10,
+    concurrency: int = 20,
+) -> dict[str, list[dict[str, Any]]]:
+    """여러 토큰의 최근 곡선을 한 세션으로 병렬 수집 (스크리너 검증용).
+
+    interval=max 는 fidelity 와 무관하게 **31일 캡**(실측: 1/60/180분 모두 31.0일).
+    밴드 체류율·최근 스파이크 판정에는 충분하고, 그 이상 과거가 필요하면
+    fetch_curve_full(start_ts, end_ts) 의 14일 청킹 경로를 쓴다.
+
+    실측: 동시 20으로 390건 6.6초(59 req/s), 429 0건. CLOB 은 여기서 병목이 아니다.
+    """
+    sem = asyncio.Semaphore(concurrency)
+    out: dict[str, list[dict[str, Any]]] = {}
+
+    async with httpx.AsyncClient(timeout=TIMEOUT) as cli:
+        async def one(tid: str) -> None:
+            async with sem:
+                try:
+                    r = await cli.get(f"{CLOB_BASE}/prices-history", params={
+                        "market": tid, "interval": "max", "fidelity": fidelity,
+                    })
+                    if r.status_code != 200:
+                        return
+                    hist = (r.json() or {}).get("history", [])
+                except Exception:
+                    return
+                out[tid] = [{"ts": int(p["t"]), "price": float(p["p"])}
+                            for p in hist if "t" in p and "p" in p]
+
+        await asyncio.gather(*[one(t) for t in token_ids if t])
+
+    return out

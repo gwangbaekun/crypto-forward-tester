@@ -31,6 +31,7 @@ from features.strategy.polymarket._data import client as poly_client
 from features.strategy.polymarket._data import ws_client as ws
 from features.strategy.polymarket.fade import signal as fade_signal
 from features.strategy.polymarket.fade import oracle_client
+from features.strategy.polymarket.fade import screener
 from features.notifications.telegram_service import TelegramService
 
 log = logging.getLogger("polymarket.fade")
@@ -51,11 +52,17 @@ _yes_map: dict[str, PolymarketFadeWatch] = {}
 # 토큰당 마지막 처리 시각(throttle) + 열린 포지션 condition_id 캐시(hot path DB 제거)
 _last_proc: dict[str, float] = {}
 _open_cids: set[str] = set()
+# 구독 세대 — _yes_map 의 키가 바뀔 때마다 +1. WS 샤드들이 이 값을 보고 일제히 재구독한다.
+_ws_generation: int = 0
+# 스크리너 마지막 실행 시각/리포트 (대시보드 노출용)
+_last_screen_ts: float = 0.0
+_last_screen_report: dict = {}
 
 # config.yaml 필수 키 — 부팅 시 하나라도 없으면 즉시 터진다(fail-fast, 하드코딩 fallback 없음).
 _REQUIRED_CFG_KEYS = (
     "enabled", "sweep_interval_sec", "throttle_s",
-    "ws_heartbeat_sec", "ws_reconnect_s", "ws_idle_sleep_s",
+    "ws_heartbeat_sec", "ws_reconnect_s", "ws_idle_sleep_s", "ws_shard_size",
+    "screener",
     "seed_interval", "seed_points", "lookback_buffer_s",
     "lookback_s", "spike_rel", "spike_abs", "p0_lo", "p0_hi",
     "retrace_pct", "timeout_hours", "stop_loss_pct",
@@ -68,6 +75,7 @@ def _validate_cfg(cfg: dict) -> None:
     missing = [k for k in _REQUIRED_CFG_KEYS if k not in cfg]
     if missing:
         raise RuntimeError(f"[fade] config.yaml 필수 키 누락: {missing}")
+    screener.validate_cfg(cfg["screener"])   # 중첩 섹션도 같은 fail-fast 규칙
 
 
 def _refresh_open_cache() -> None:
@@ -510,15 +518,32 @@ def _yes_token_of(condition_id: str) -> str | None:
 
 async def _refresh_subscriptions(ws_client=None) -> bool:
     """included 워치리스트를 _yes_map 에 반영. 새 토큰은 REST 로 버퍼 시드(warm-up 제거).
-    실제 WS 구독은 _ws_loop 가 _yes_map 변경을 감지해 재연결로 처리."""
-    global _yes_map
+    실제 WS 구독은 _ws_loop 가 _ws_generation 변화를 감지해 재연결로 처리.
+
+    제거분도 세대를 올린다 — 스크리너 auto_drop 이 종목을 빼면 그만큼 구독도 줄어야
+    한다(이전엔 추가만 감지해서, 빠진 종목을 계속 구독한 채로 남았다)."""
+    global _yes_map, _ws_generation
     included = _watchlist_included()
     new_map = {w.yes_token_id: w for w in included if w.yes_token_id}
-    added = set(new_map) - set(_yes_map)
+    added   = set(new_map) - set(_yes_map)
+    removed = set(_yes_map) - set(new_map)
     _yes_map = new_map
-    for tok in added:
-        await _seed_hist(tok)
-    return bool(added)
+    if added or removed:
+        _ws_generation += 1
+    if added:
+        # 병렬 시드 — 순차로 돌리면 스크리너가 넣은 수백 종목에서 sweep 루프가
+        # 수 분간 막히고, 그 사이 타임아웃 청산이 통째로 밀린다(포지션 있는 상태에서 치명적).
+        sem = asyncio.Semaphore(_cfg["screener"]["history_concurrency"])
+
+        async def _seed_one(t: str) -> None:
+            async with sem:
+                await _seed_hist(t)
+
+        await asyncio.gather(*[_seed_one(t) for t in added], return_exceptions=True)
+    for tok in removed:           # 버퍼도 같이 정리 (자동 해제가 잦으면 메모리 누수)
+        _price_hist.pop(tok, None)
+        _last_proc.pop(tok, None)
+    return bool(added or removed)
 
 
 async def _seed_hist(yes_token_id: str) -> None:
@@ -541,21 +566,41 @@ async def _apply_book(token_id: str, mid: float) -> None:
     await _on_update(token_id)
 
 
-async def _ws_loop() -> None:
-    """fade 전용 WS 연결 — 구독 토큰을 직접 관리(공유 client 타이밍 버그 회피).
-    워치리스트가 바뀌면 재연결해 새 토큰을 구독한다.
+async def _run_screener_if_due(force: bool = False) -> dict | None:
+    """interval_hours 마다 워치리스트 자동 스크리닝. 실패해도 주기 루프를 죽이지 않는다.
+
+    스크리너가 죽으면 워치리스트가 낡을 뿐이지만, 엔진이 죽으면 열린 포지션의
+    청산 로직까지 멈춘다 — 그래서 여기서 예외를 삼킨다(스크리너에 한해서만).
     """
+    global _last_screen_ts, _last_screen_report
+    scfg = _cfg["screener"]
+    if not scfg["enabled"] and not force:
+        return None
+    due = time.time() - _last_screen_ts >= scfg["interval_hours"] * 3600
+    if not (due or force):
+        return None
+    _last_screen_ts = time.time()
+    try:
+        _last_screen_report = await screener.run_screen(scfg)
+        return _last_screen_report
+    except Exception as e:
+        log.warning("[fade] 스크리너 실패(워치리스트는 유지): %s", e)
+        return None
+
+
+def get_screen_report() -> dict:
+    """대시보드용 — 마지막 스크리닝 리포트."""
+    return {"last_run_ts": int(_last_screen_ts), **_last_screen_report}
+
+
+async def _ws_shard(tokens: list[str], generation: int) -> None:
+    """WS 연결 1개가 tokens 를 구독. 워치리스트 세대가 바뀌면 반환한다."""
     import aiohttp, json
-    while True:
-        toks = list(_yes_map.keys())
-        if not toks:
-            await asyncio.sleep(_cfg["ws_idle_sleep_s"]); continue
-        subscribed = set(toks)
+    while _ws_generation == generation:
         try:
             async with aiohttp.ClientSession() as sess:
                 async with sess.ws_connect(ws.WS_URL, heartbeat=_cfg["ws_heartbeat_sec"]) as conn:
-                    await conn.send_json({"assets_ids": toks, "type": "market"})
-                    log.info("[fade] WS 연결 — 구독 %d종목", len(toks))
+                    await conn.send_json({"assets_ids": tokens, "type": "market"})
                     async for msg in conn:
                         if msg.type != aiohttp.WSMsgType.TEXT:
                             break
@@ -579,13 +624,35 @@ async def _ws_loop() -> None:
                                     bb, ba = ch.get("best_bid"), ch.get("best_ask")
                                     if bb and ba:
                                         await _apply_book(tid, (float(bb) + float(ba)) / 2)
-                        # 워치리스트 변경 감지 → 재연결
-                        if set(_yes_map.keys()) != subscribed:
-                            log.info("[fade] 워치리스트 변경 → WS 재구독")
+                        if _ws_generation != generation:
                             break
         except Exception as e:
-            log.warning("[fade] WS 오류: %s — 5s 후 재연결", e)
+            if _ws_generation != generation:
+                return
+            log.warning("[fade] WS 샤드 오류: %s — %.0fs 후 재연결", e, _cfg["ws_reconnect_s"])
             await asyncio.sleep(_cfg["ws_reconnect_s"])
+
+
+async def _ws_loop() -> None:
+    """fade 전용 WS — 구독 토큰을 직접 관리(공유 client 타이밍 버그 회피).
+
+    **샤딩 필수**: subscribe 프레임에 64KB 한계가 있다(토큰당 81B). 실측상 800토큰
+    (63.3KB)부터 서버가 에러도 close 도 없이 메시지만 흘리며 커버리지가 0.9%로
+    무너진다 — 조용히 죽는 종류의 실패라 로그로는 안 보인다. 500토큰/연결은 100%
+    커버 확인. 스크리너가 워치리스트를 900종목대로 늘리므로 단일 연결로는 못 버틴다.
+    """
+    while True:
+        toks = list(_yes_map.keys())
+        if not toks:
+            await asyncio.sleep(_cfg["ws_idle_sleep_s"]); continue
+        gen  = _ws_generation
+        size = _cfg["ws_shard_size"]
+        shards = [toks[i:i + size] for i in range(0, len(toks), size)]
+        log.info("[fade] WS 구독 %d종목 / 샤드 %d개 (연결당 최대 %d)",
+                 len(toks), len(shards), size)
+        await asyncio.gather(*[_ws_shard(s, gen) for s in shards],
+                             return_exceptions=True)
+        log.info("[fade] 워치리스트 변경 → WS 재구독")
 
 
 async def run(ws_client=None) -> None:
@@ -604,6 +671,7 @@ async def run(ws_client=None) -> None:
         while True:
             try:
                 _refresh_open_cache()
+                await _run_screener_if_due()   # 워치리스트 갱신 → 아래 구독 반영까지 한 틱에
                 await _refresh_subscriptions(ws_client)
                 await _poll_book()
                 await _timeout_sweep()

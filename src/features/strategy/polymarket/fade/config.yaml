@@ -9,6 +9,9 @@ throttle_s: 1.0              # 토큰당 최소 처리 간격 — 초당 수백 
 ws_heartbeat_sec: 30         # WS 연결 하트비트
 ws_reconnect_s: 5            # WS 오류 후 재연결 대기
 ws_idle_sleep_s: 10          # 구독 종목이 하나도 없을 때 대기
+ws_shard_size: 500           # WS 연결 1개당 구독 토큰 수 상한 — 넘기면 샤딩(연결 분할)
+                             # 실측: subscribe 프레임 64KB 한계(토큰당 81B). 800개=63.3KB에서
+                             # 에러 없이 커버리지만 0.9%로 붕괴한다. 500개는 100% 확인.
 seed_interval: "1h"          # 재시작 직후 버퍼 시드용 REST 히스토리 간격
 seed_points: 120             # 시드로 채울 최근 포인트 수
 lookback_buffer_s: 300       # mid 버퍼 보관 여유 (lookback_s 초과분 — 이만큼 더 오래 보관)
@@ -37,3 +40,26 @@ balance_buffer: 0.98         # 전액의 98%만 진입(수수료·최소단위·
 
 # ── 백테스트(/fade/sim)에서만 사용 — live 엔진은 재진입 허용으로 쿨다운 미사용 ──────────
 cooldown_hours: 12           # sim 순차 백테스트의 같은 마켓 재진입 간격
+
+# ── 워치리스트 자동 스크리너 — 이름이 아니라 가격 거동으로 종목을 뽑는다 ──────────────
+# 전수 열거 원리와 실측치는 screener.py / _data/client.py:screen_band_markets 주석 참조.
+screener:
+  enabled: true
+  interval_hours: 1            # 스캔 주기. 실측 1회 26s/58요청이라 1h면 부하 무시 가능
+  band_lo: 0.05                # 밴드 하한 — "5~15%대에 머무는" 종목
+  band_hi: 0.15                # 밴드 상한
+  min_volume_usd: 10000        # 볼륨 하한. $10k 기준 밴드 후보 941개(실측)
+  dwell_ratio_min: 0.70        # 최근 곡선의 70% 이상이 밴드 안에 머물러야 편입
+  min_spikes: 1                # 같은 구간에 스파이크 1회 이상
+  history_fidelity: 10         # 검증 곡선 봉 간격(분) — 라이브 lookback_s=600 과 정렬
+  history_concurrency: 20      # 곡선 병렬 수집. 실측 59 req/s, 429 0건
+  months_ahead: 18             # 종료월 슬라이스 범위. 이후는 롱테일 한 덩어리
+  auto_include: true           # 통과분을 included 로 자동 편입
+  auto_drop: true              # 밴드 이탈분을 자동 구독 해제(열린 포지션은 예외)
+  # 스크리너 스파이크 판정 — 라이브 진입 조건과 같은 값으로 맞춰둔다.
+  # 여기를 라이브(lookback_s/spike_rel/spike_abs)와 다르게 두면
+  # "편입은 됐는데 진입은 영영 안 되는" 종목이 쌓인다.
+  spike_lookback_s: 600
+  spike_rel: 1.30
+  spike_abs: 0.015
+  spike_cooldown_hours: 12
