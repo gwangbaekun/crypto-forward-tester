@@ -52,6 +52,9 @@ _yes_map: dict[str, PolymarketFadeWatch] = {}
 # 토큰당 마지막 처리 시각(throttle) + 열린 포지션 condition_id 캐시(hot path DB 제거)
 _last_proc: dict[str, float] = {}
 _open_cids: set[str] = set()
+# 단발 급변 프린트 보류함 — 다음 틱이 같은 값을 확인해줘야 버퍼에 들어간다.
+_pending_confirm: dict[str, float] = {}
+_GLITCH_JUMP = 0.10          # 직전 대비 이만큼 튀면 확인 대기(10¢p)
 # 구독 세대 — _yes_map 의 키가 바뀔 때마다 +1. WS 샤드들이 이 값을 보고 일제히 재구독한다.
 _ws_generation: int = 0
 # 스크리너 마지막 실행 시각/리포트 (대시보드 노출용)
@@ -68,6 +71,8 @@ _REQUIRED_CFG_KEYS = (
     "retrace_pct", "timeout_hours", "stop_loss_pct",
     "addon_enabled", "addon_max_count", "addon_min_rise_pct",
     "order_size_mode", "order_size_usd", "balance_buffer",
+    "max_concurrent", "min_days_left", "glitch_filter",
+    "replace_enabled", "replace_min_age_h", "replace_min_gain_ratio",
 )
 
 
@@ -197,6 +202,16 @@ async def _on_update(token_id: str) -> None:
     now = int(now)
 
     hist = _price_hist.setdefault(token_id, [])
+    # 가짜 프린트 방어 — 호가창이 비면 API/WS 가 중간값(0.50)을 흘리는 일이 있다.
+    # 백테스트 실측: 5배 이상 점프 스파이크 359건 중 138건(38%)이 이 가짜였고,
+    # 한 시각에 61개 마켓이 동시에 0.50 을 찍은 적도 있다. 직전 값에서 한 번에
+    # 크게 튀는 단발 프린트는 다음 틱이 확인해줄 때까지 버퍼에 넣지 않는다.
+    if _cfg["glitch_filter"] and hist:
+        prev = hist[-1][1]
+        if abs(mid - prev) >= _GLITCH_JUMP and _pending_confirm.get(token_id) != round(mid, 4):
+            _pending_confirm[token_id] = round(mid, 4)   # 다음 틱에 같은 값이면 인정
+            return
+    _pending_confirm.pop(token_id, None)
     hist.append((now, mid))
     cutoff = now - (_cfg["lookback_s"] + _cfg["lookback_buffer_s"])
     if hist and hist[0][0] < cutoff:
@@ -219,11 +234,12 @@ async def _on_update(token_id: str) -> None:
                 await _maybe_addon(watch, open_pos, hist, now, mid)
         return
 
-    # 전액(full) 진입은 자본을 한 포지션에 전부 투입한다 → 동시에 1포지션만 보유.
-    # 다른 마켓에 이미 열린 포지션이 있으면 남은 자본이 없으므로 신규 진입하지 않는다.
-    # (청산되면 _open_cids 가 비어 다음 스파이크에 재진입 가능.)
-    if _cfg["order_size_mode"] == "full" and _open_cids:
-        return
+    # 만기 임박 진입 금지 — 되돌아올 시간 자체가 없다.
+    # (백테스트 실측: 만기 30일 이내 진입을 빼면 MDD p95 −18.2% → −12.2%)
+    min_days = float(_cfg["min_days_left"])
+    if min_days > 0 and watch.end_ts:
+        if (watch.end_ts - now) / 86400.0 <= min_days:
+            return
 
     # 신규 진입 판정
     lookback = _cfg["lookback_s"]
@@ -235,6 +251,18 @@ async def _on_update(token_id: str) -> None:
     if mid < p0 * _cfg["spike_rel"] or mid - p0 < _cfg["spike_abs"]:
         return
 
+    # 슬롯 상한 — 스파이크 검증을 **통과한 뒤** 판정한다. 새 신호가 얼마나 좋은지
+    #   알아야 기존 포지션과 비교해 갈아탈지 정할 수 있기 때문이다.
+    #   full  : 자본을 한 포지션에 전부 투입하므로 사실상 1개.
+    #   그 외 : max_concurrent 개. 게이트가 없으면 신호가 몰릴 때(실측: 같은 시각
+    #           33건) 잔액이 바닥날 때까지 무제한 진입하고 이후 주문은 전부 실패한다.
+    limit = 1 if _cfg["order_size_mode"] == "full" else int(_cfg["max_concurrent"])
+    if len(_open_cids) >= limit:
+        if not _cfg["replace_enabled"]:
+            return
+        if not await _free_slot_for(watch.condition_id, now, _upside(p0, mid)):
+            return
+
     market = {"condition_id": watch.condition_id, "question": watch.question or "",
               "yes_token_id": watch.yes_token_id, "no_token_id": watch.no_token_id}
     sig = fade_signal.build_signal(market, p0, mid, now, _cfg)
@@ -244,15 +272,132 @@ async def _on_update(token_id: str) -> None:
 
 # ── 진입 ─────────────────────────────────────────────────────────────────────
 
+
+
+def _upside(p0: float, px: float) -> float:
+    """이 진입에서 되돌림 목표까지 갔을 때 먹을 수익률(NO 기준).
+
+        목표가 = px − retrace·(px − p0)   →   수익 = retrace·(px − p0) / (1 − px)
+
+    상방이 (1 − px) 로 나뉘는 게 핵심이다. 같은 폭이라도 진입가가 높을수록 더 먹는다.
+    """
+    if px >= 1.0:
+        return 0.0
+    return float(_cfg["retrace_pct"]) * (px - p0) / (1.0 - px)
+
+
+def _remaining_upside(pos: PolymarketFadePosition, mid: float) -> float:
+    """열린 포지션에 **아직 남은** 먹을 것. 이미 먹은 건 빼고 본다.
+
+        남은 수익 = (현재가 − 목표가) / (1 − 진입가)
+
+    이익 구간이라도 목표까지 얼마 안 남았으면 이 값이 작다 — 그때 더 좋은 신호가
+    오면 갈아타는 게 맞다. '이익 중이면 유지' 규칙을 쓰지 않는 이유가 이것이다.
+    """
+    if pos.entry_px >= 1.0:
+        return 0.0
+    return max(0.0, (mid - float(pos.target_px)) / (1.0 - float(pos.entry_px)))
+
+
+async def _free_slot_for(new_cid: str, now: int, new_upside: float) -> bool:
+    """슬롯을 하나 비운다. 비웠으면 True.
+
+    기준은 **남은 먹을 것 비교**다. 열린 포지션 중 남은 수익이 가장 적은 것을 골라,
+    새 신호가 그보다 `replace_min_gain_ratio` 배 이상 좋으면 갈아탄다.
+    이익 중이어도 판다 — 목표까지 얼마 안 남은 포지션이 슬롯을 잡고 있는 것보다
+    더 크게 되돌릴 새 신호로 옮기는 게 회전 전략의 취지다.
+
+    replace_min_age_h 는 진입/청산 반복만 막는 최소 장치다(스파이크가 몰릴 때
+    같은 슬롯을 초 단위로 갈아치우는 걸 방지).
+    """
+    if new_cid in _open_cids:
+        return False
+    min_age_s = float(_cfg["replace_min_age_h"]) * 3600
+    ratio = float(_cfg["replace_min_gain_ratio"])
+
+    weakest = None
+    for cid in list(_open_cids):
+        pos = _open_position(cid)
+        if pos is None:
+            continue
+        if now - int(pos.entry_ts or now) < min_age_s:
+            continue
+        yes_tok = _yes_token_of(cid)
+        lvl = ws.price_book.get(yes_tok) if yes_tok else None
+        if not (lvl and lvl.mid is not None):
+            continue                                    # 가격을 모르면 판단 보류
+        mid = float(lvl.mid)
+        rem = _remaining_upside(pos, mid)
+        if weakest is None or rem < weakest[0]:
+            weakest = (rem, pos, mid)
+
+    if weakest is None:
+        return False
+    rem, pos, mid = weakest
+    if new_upside < rem * ratio:
+        return False                                    # 새 신호가 더 낫지 않다
+
+    pnl = (pos.entry_px - mid) / (1 - pos.entry_px)
+    log.info("[fade] 슬롯 교체 — %s (보유 %.1fh · 평가 %+.1f%% · 남은먹을것 %.1f%%) "
+             "→ 새 신호 %.1f%%",
+             (pos.question or pos.condition_id)[:40],
+             (now - int(pos.entry_ts or now)) / 3600, pnl * 100, rem * 100,
+             new_upside * 100)
+    await _close_position(pos, mid, "슬롯교체")
+    return pos.condition_id not in _open_cids
+
+
+def _yes_token_of(condition_id: str) -> str | None:
+    """condition_id → YES 토큰. _yes_map 의 역방향 조회(슬롯이 찼을 때만 호출)."""
+    for tok, w in _yes_map.items():
+        if w.condition_id == condition_id:
+            return tok
+    return None
+
+
+async def _size_for_entry() -> float | None:
+    """진입 금액. None 이면 진입하지 않는다.
+
+    full   : 가용 잔액 전액(×buffer). 한 포지션에 다 넣는다.
+    slots  : 가용 잔액 ×buffer ÷ 남은 슬롯. 자본이 줄면 주문도 같이 줄어
+             '잔액 없는데 계속 쏘는' 상태가 안 된다.
+    fixed  : order_size_usd 고정. 다만 잔액을 확인해서 모자라면 진입을 접는다 —
+             확인 없이 쏘면 릴레이에서 실패만 반복되고 알림이 폭주한다.
+    """
+    mode = _cfg["order_size_mode"]
+    buf = _cfg["balance_buffer"]
+    bal = await oracle_client.fetch_balance()
+
+    if mode == "full":
+        if bal is None:
+            return _cfg["order_size_usd"]      # 릴레이 미설정(시뮬) — 기존 동작 유지
+        return bal * buf
+
+    if mode == "slots":
+        if bal is None:
+            return _cfg["order_size_usd"]
+        free = max(1, int(_cfg["max_concurrent"]) - len(_open_cids))
+        size = bal * buf / free
+        if size <= 0:
+            log.info("[fade] 진입 스킵 — 가용 잔액 없음 (bal=%.2f)", bal)
+            return None
+        return size
+
+    # fixed
+    size = float(_cfg["order_size_usd"])
+    if bal is not None and bal * buf < size:
+        log.info("[fade] 진입 스킵 — 잔액 부족 (bal=%.2f < size=%.2f)", bal, size)
+        return None
+    return size
+
+
 async def _enter(sig: fade_signal.FadeSignal) -> None:
     # full 모드는 1포지션만(호출부에서 _open_cids 게이트). fixed 모드는 다른 마켓 동시 진입 가능.
     # 이중지출은 _entry_lock(호출부 직렬화) + 주문 시 fetch_balance 재조회로 방지.
     no_price = 1 - sig.entry_px
-    size_usd = _cfg["order_size_usd"]
-    if _cfg["order_size_mode"] == "full":
-        bal = await oracle_client.fetch_balance()
-        if bal is not None:
-            size_usd = bal * _cfg["balance_buffer"]
+    size_usd = await _size_for_entry()
+    if size_usd is None:
+        return
 
     log.info(
         "[fade] SIGNAL 진입 NO | %s | p0=%.4f entry=%.4f no_px=%.4f size=$%.2f target=%.4f stop=%.4f",
@@ -340,12 +485,8 @@ async def _add_on(condition_id: str, p0: float, add_px: float) -> None:
         return
 
     no_price = 1 - add_px
-    size_usd = _cfg["order_size_usd"]
-    if _cfg["order_size_mode"] == "full":
-        bal = await oracle_client.fetch_balance()
-        if bal is not None:
-            size_usd = bal * _cfg["balance_buffer"]
-    if size_usd <= 0:  
+    size_usd = await _size_for_entry()
+    if not size_usd or size_usd <= 0:
         log.info("[fade] add-on 스킵 — 가용 잔액 없음 %s", condition_id[:12])
         return
 
