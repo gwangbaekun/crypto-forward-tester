@@ -81,6 +81,12 @@ reconcile_enabled: true
 min_order_usd: 5.0           # 폴리마켓 최소 주문액. 이 아래면 주문해봐야 거부된다.
 raise_cash_enabled: true
 
+# 방금 판 종목을 되사지 않는 시간. 0 이면 끔.
+# 실측 문제: 현금 확보로 X 를 팔았는데 X 가 여전히 스파이크 조건을 만족해서
+# 그 현금으로 X 를 다시 샀다. 수수료만 나가고 자본은 제자리, 결국 처음 4종목을
+# 계속 되사는 순환이 됐다.
+reentry_cooldown_h: 6
+
 # ── 백테스트(/fade/sim)에서만 사용 — live 엔진은 재진입 허용으로 쿨다운 미사용 ──────────
 cooldown_hours: 12           # sim 순차 백테스트의 같은 마켓 재진입 간격
 

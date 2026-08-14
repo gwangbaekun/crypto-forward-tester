@@ -54,6 +54,13 @@ _last_proc: dict[str, float] = {}
 _open_cids: set[str] = set()
 # 단발 급변 프린트 보류함 — 다음 틱이 같은 값을 확인해줘야 버퍼에 들어간다.
 _pending_confirm: dict[str, float] = {}
+# 마지막 매도 시각(condition_id → ts). 팔자마자 같은 종목을 되사는 걸 막는다.
+# 없으면: 현금 확보로 X 를 팔고 → 그 현금으로 X 를 다시 사는 순환이 생긴다.
+_last_exit: dict[str, float] = {}
+# 지갑에서 복구했지만 전략이 원해서 든 게 아닌 포지션 — **청산만** 한다.
+# 매도가 실패해 체인에 남은 잔재라, 새 진입처럼 다루면 타임아웃이 매번 갱신돼
+# 영원히 부활한다.
+_liquidate_only: set[str] = set()
 _GLITCH_JUMP = 0.10          # 직전 대비 이만큼 튀면 확인 대기(10¢p)
 # 구독 세대 — _yes_map 의 키가 바뀔 때마다 +1. WS 샤드들이 이 값을 보고 일제히 재구독한다.
 _ws_generation: int = 0
@@ -74,6 +81,7 @@ _REQUIRED_CFG_KEYS = (
     "max_concurrent", "min_days_left", "glitch_filter",
     "replace_enabled", "replace_min_age_h", "replace_min_gain_ratio",
     "reconcile_enabled", "min_order_usd", "raise_cash_enabled",
+    "reentry_cooldown_h",
 )
 
 
@@ -234,6 +242,14 @@ async def _on_update(token_id: str) -> None:
                     and _cfg["order_size_mode"] != "full"):
                 await _maybe_addon(watch, open_pos, hist, now, mid)
         return
+
+    # 방금 판 종목은 다시 사지 않는다. 현금 확보로 X 를 팔고 그 현금으로 X 를 되사면
+    # 수수료만 나가고 자본은 제자리다(실측: 처음 4종목을 계속 되사는 순환).
+    cd_h = float(_cfg["reentry_cooldown_h"])
+    if cd_h > 0:
+        last = _last_exit.get(watch.condition_id)
+        if last is not None and (now - last) < cd_h * 3600:
+            return
 
     # 만기 임박 진입 금지 — 되돌아올 시간 자체가 없다.
     # (백테스트 실측: 만기 30일 이내 진입을 빼면 MDD p95 −18.2% → −12.2%)
@@ -418,18 +434,22 @@ async def reconcile_wallet() -> dict[str, Any]:
         if not (0 < no_avg < 1):
             continue
         entry_px = 1.0 - no_avg
-        p0 = entry_px * 0.7          # 기준가는 알 수 없다 — 목표가 산출용 보수적 가정
-        retrace = float(_cfg["retrace_pct"])
-        stop = float(_cfg["stop_loss_pct"])
+
+        # **복구분은 청산 대상이다.** 전략이 원해서 든 게 아니라 매도가 실패해
+        # 체인에 남은 잔재다. 새 진입처럼 목표가·타임아웃을 새로 주면
+        #   매도 실패 → 복구(타임아웃 24h 갱신) → 또 실패 → 또 복구 …
+        # 로 영원히 부활하고, 그 사이 슬롯을 계속 잡아먹는다.
+        # 그래서 timeout_ts 를 **과거**로 박아 다음 _timeout_sweep 이 즉시 팔게 한다.
+        _liquidate_only.add(cid)
         row = PolymarketFadePosition(
             condition_id=cid,
             question=(p.get("question") or (watch.question if watch else "") or cid)[:500],
             no_token_id=p.get("token_id") or (watch.no_token_id if watch else ""),
-            p0=round(p0, 4), entry_px=round(entry_px, 4),
-            target_px=round(entry_px - retrace * (entry_px - p0), 4),
-            stop_px=round(entry_px + stop * (1 - entry_px), 4),
+            p0=round(entry_px, 4), entry_px=round(entry_px, 4),
+            target_px=round(entry_px, 4),      # 되돌림 목표를 만들지 않는다
+            stop_px=1.0,                       # 손절선도 두지 않는다 — 즉시 청산 대상
             entry_ts=int(time.time()),
-            timeout_ts=int(time.time() + float(_cfg["timeout_hours"]) * 3600),
+            timeout_ts=int(time.time()) - 1,   # 이미 만료 → 다음 스윕에서 매도
             status="open",
             shares=float(p.get("size") or 0),
             entry_usd=float(p.get("initial_value") or 0) or None,
@@ -474,10 +494,12 @@ async def reconcile_wallet() -> dict[str, Any]:
         _open_cids.discard(cid)
 
     if recovered or ghosts:
-        log.info("[fade] 지갑 동기화 — 복구 %d건 · 유령정리 %d건", len(recovered), len(ghosts))
+        log.info("[fade] 지갑 동기화 — 복구 %d건(청산대기) · 유령정리 %d건",
+                 len(recovered), len(ghosts))
         if recovered:
-            _tg("🔄 <b>[Polymarket Fade] 지갑 동기화</b>\n\n"
-                + "\n".join(f"복구: {r['q']} (${r['value']:.2f}, 진입 {r['entry_px']:.4f})"
+            _tg("🔄 <b>[Polymarket Fade] 지갑 동기화 — 청산 대기</b>\n\n"
+                "매도가 안 나갔던 잔재를 찾았다. 다음 스윕에서 정리한다.\n\n"
+                + "\n".join(f"{r['q']} (${r['value']:.2f}, 평단 {r['entry_px']:.4f})"
                              for r in recovered))
     return {"recovered": recovered, "ghosts": ghosts, "held": len(live_map)}
 
@@ -530,6 +552,8 @@ async def _raise_cash(need_usd: float, exclude_cid: str | None = None) -> float:
             log.warning("[fade] 현금 확보 매도 실패: %s", res)
             continue
         raised += val
+        _last_exit[cid] = time.time()
+        _liquidate_only.discard(cid)
         # DB 에 열려 있던 포지션이면 같이 닫는다
         pos = _open_position(cid)
         if pos is not None:
@@ -544,7 +568,7 @@ async def _raise_cash(need_usd: float, exclude_cid: str | None = None) -> float:
     return raised
 
 
-async def _size_for_entry() -> float | None:
+async def _size_for_entry(cid: str | None = None) -> float | None:
     """진입 금액. None 이면 진입하지 않는다.
 
     full   : 가용 잔액 전액(×buffer). 한 포지션에 다 넣는다.
@@ -578,7 +602,8 @@ async def _size_for_entry() -> float | None:
     # 초당 0.7건씩 거부 주문만 반복한다(실측).
     if size < min_order:
         if _cfg["raise_cash_enabled"]:
-            got = await _raise_cash(min_order - bal * buf)
+            # 진입하려는 종목 자신은 매도 후보에서 뺀다 — 안 그러면 X 를 팔아 X 를 산다.
+            got = await _raise_cash(min_order - bal * buf, exclude_cid=cid)
             if got > 0:
                 bal = await oracle_client.fetch_balance() or 0.0
                 free = max(1, int(_cfg["max_concurrent"]) - len(_open_cids)) \
@@ -595,7 +620,7 @@ async def _enter(sig: fade_signal.FadeSignal) -> None:
     # full 모드는 1포지션만(호출부에서 _open_cids 게이트). fixed 모드는 다른 마켓 동시 진입 가능.
     # 이중지출은 _entry_lock(호출부 직렬화) + 주문 시 fetch_balance 재조회로 방지.
     no_price = 1 - sig.entry_px
-    size_usd = await _size_for_entry()
+    size_usd = await _size_for_entry(sig.condition_id)
     if size_usd is None:
         return
 
