@@ -306,6 +306,9 @@ async def fetch_open_positions() -> list[dict[str, Any]]:
 
         out.append({
             "condition_id":   p.get("conditionId") or p.get("condition_id"),
+            # 매도에 필요하다 — asset 이 곧 보유 중인 토큰(NO 포지션이면 NO 토큰) id.
+            "token_id":       p.get("asset") or p.get("token_id"),
+            "initial_value":  round(init_val, 4),
             "question":       (p.get("title") or p.get("question") or "")[:120],
             "outcome":        p.get("outcome") or p.get("side"),
             "size":           round(size, 4),

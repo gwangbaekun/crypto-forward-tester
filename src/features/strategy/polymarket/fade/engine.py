@@ -73,6 +73,7 @@ _REQUIRED_CFG_KEYS = (
     "order_size_mode", "order_size_usd", "balance_buffer",
     "max_concurrent", "min_days_left", "glitch_filter",
     "replace_enabled", "replace_min_age_h", "replace_min_gain_ratio",
+    "reconcile_enabled", "min_order_usd", "raise_cash_enabled",
 )
 
 
@@ -355,6 +356,194 @@ def _yes_token_of(condition_id: str) -> str | None:
     return None
 
 
+
+# ── 지갑 실보유 ↔ DB 동기화 ─────────────────────────────────────────────────
+
+
+_last_reconcile: float = 0.0
+_RECONCILE_INTERVAL_S = 900          # 15분
+
+
+async def _reconcile_if_due(force: bool = False) -> dict | None:
+    global _last_reconcile
+    if not _cfg.get("reconcile_enabled"):
+        return None
+    now = time.time()
+    if not force and now - _last_reconcile < _RECONCILE_INTERVAL_S:
+        return None
+    _last_reconcile = now
+    try:
+        return await reconcile_wallet()
+    except Exception as e:                                   # noqa: BLE001
+        log.warning("[fade] 지갑 동기화 예외(계속 진행): %s", e)
+        return {"error": str(e)}
+
+
+async def reconcile_wallet() -> dict[str, Any]:
+    """체인에 있는데 DB 에 없는 포지션을 되찾아온다.
+
+    왜 필요한가: 엔진이 '청산했다' 고 기록했는데 매도 주문이 실제로는 안 나간 경우가
+    있다. 그러면 DB 는 포지션 0 인데 지갑에는 토큰이 남아 현금이 묶인다. 엔진은 그걸
+    모른 채 계속 새로 진입하려 하고, 현금이 없으니 주문이 전부 거부된다.
+    (실측 2026-08-14: DB 열린 포지션 0건 / 지갑 보유 $32.77 4건 / 현금 $0.14 →
+     초당 0.7건씩 'not enough balance' 거부가 무한 반복)
+
+    data-api 는 avgPrice·size·conditionId 를 주므로 진입가를 복원할 수 있다.
+    복원한 행은 exit_reason 추적을 위해 order_status='reconciled' 로 표시한다.
+    """
+    from features.strategy.polymarket._data import live as poly_live
+
+    try:
+        held = await poly_live.fetch_open_positions()
+    except Exception as e:                                   # noqa: BLE001
+        log.warning("[fade] 지갑 조회 실패 — 동기화 건너뜀: %s", e)
+        return {"error": str(e)}
+
+    # 값이 남아있는 NO 포지션만 대상. redeemable(결과 확정)은 청산이 아니라 redeem 대상.
+    live_map = {p["condition_id"]: p for p in held
+                if p.get("condition_id") and not p.get("redeemable")
+                and float(p.get("current_value") or 0) > 0.01}
+
+    recovered = []
+    for cid, p in live_map.items():
+        if cid in _open_cids:
+            continue                                         # DB 와 일치 — 할 일 없음
+        watch = None
+        for w in _yes_map.values():
+            if w.condition_id == cid:
+                watch = w
+                break
+        # NO 평단 → YES 진입가. 페이드는 NO 매수라 entry_px(YES) = 1 − NO평단.
+        no_avg = float(p.get("avg_price") or 0)
+        if not (0 < no_avg < 1):
+            continue
+        entry_px = 1.0 - no_avg
+        p0 = entry_px * 0.7          # 기준가는 알 수 없다 — 목표가 산출용 보수적 가정
+        retrace = float(_cfg["retrace_pct"])
+        stop = float(_cfg["stop_loss_pct"])
+        row = PolymarketFadePosition(
+            condition_id=cid,
+            question=(p.get("question") or (watch.question if watch else "") or cid)[:500],
+            no_token_id=p.get("token_id") or (watch.no_token_id if watch else ""),
+            p0=round(p0, 4), entry_px=round(entry_px, 4),
+            target_px=round(entry_px - retrace * (entry_px - p0), 4),
+            stop_px=round(entry_px + stop * (1 - entry_px), 4),
+            entry_ts=int(time.time()),
+            timeout_ts=int(time.time() + float(_cfg["timeout_hours"]) * 3600),
+            status="open",
+            shares=float(p.get("size") or 0),
+            entry_usd=float(p.get("initial_value") or 0) or None,
+            order_status="reconciled",
+            last_leg_px=round(entry_px, 4),
+        )
+        db = get_session()
+        try:
+            db.add(row)
+            db.commit()
+            _open_cids.add(cid)
+            recovered.append({"cid": cid, "value": float(p.get("current_value") or 0),
+                              "entry_px": row.entry_px, "q": row.question[:40]})
+        except Exception as e:                               # noqa: BLE001
+            db.rollback()
+            log.warning("[fade] 포지션 복구 실패 %s: %s", cid[:12], e)
+        finally:
+            db.close()
+
+    # 반대 방향: DB 는 open 인데 지갑에 없다 → 유령. 닫는다.
+    ghosts = []
+    for cid in list(_open_cids):
+        if cid in live_map:
+            continue
+        pos = _open_position(cid)
+        if pos is None:
+            _open_cids.discard(cid)
+            continue
+        db = get_session()
+        try:
+            row = db.get(PolymarketFadePosition, pos.id)
+            if row and row.status == "open":
+                row.status = "closed"
+                row.exit_reason = "phantom_cleanup"
+                row.exit_ts = int(time.time())
+                db.commit()
+                ghosts.append(cid)
+        except Exception:                                     # noqa: BLE001
+            db.rollback()
+        finally:
+            db.close()
+        _open_cids.discard(cid)
+
+    if recovered or ghosts:
+        log.info("[fade] 지갑 동기화 — 복구 %d건 · 유령정리 %d건", len(recovered), len(ghosts))
+        if recovered:
+            _tg("🔄 <b>[Polymarket Fade] 지갑 동기화</b>\n\n"
+                + "\n".join(f"복구: {r['q']} (${r['value']:.2f}, 진입 {r['entry_px']:.4f})"
+                             for r in recovered))
+    return {"recovered": recovered, "ghosts": ghosts, "held": len(live_map)}
+
+
+
+async def _raise_cash(need_usd: float, exclude_cid: str | None = None) -> float:
+    """현금이 모자라면 보유 포지션을 팔아 만든다. 확보한 금액을 돌려준다.
+
+    주문이 'not enough balance' 로 거부되는 상황은 자본이 없는 게 아니라
+    **자본이 포지션에 묶여 있는** 것이다(실측: 현금 $0.14 / 보유 $32.77).
+    그때 새 신호를 그냥 버리면 자본이 영영 안 돈다. 그래서 판다.
+
+    파는 순서: **평가손익이 좋은 것부터**. 이익이 난 건 되돌림이 이미 진행됐다는
+    뜻이라 남은 먹을 것이 적고, 지금 파는 게 기회비용이 가장 작다.
+    (_free_slot_for 의 '남은 먹을 것' 기준과 같은 논리다.)
+    """
+    from features.strategy.polymarket._data import live as poly_live
+    try:
+        held = await poly_live.fetch_open_positions()
+    except Exception as e:                                   # noqa: BLE001
+        log.warning("[fade] 현금 확보 실패 — 지갑 조회 오류: %s", e)
+        return 0.0
+
+    cands = [p for p in held
+             if not p.get("redeemable")
+             and float(p.get("current_value") or 0) > 0.01
+             and p.get("condition_id") != exclude_cid
+             and p.get("token_id")]
+    # 수익률 높은 순 — 남은 먹을 것이 적은 쪽부터 판다
+    cands.sort(key=lambda p: -(float(p.get("unrealized_pnl") or 0)
+                               / max(float(p.get("initial_value") or 1), 1e-9)))
+
+    raised = 0.0
+    for p in cands:
+        if raised >= need_usd:
+            break
+        cid = p["condition_id"]
+        val = float(p.get("current_value") or 0)
+        cur = float(p.get("current_price") or 0)
+        pnl = float(p.get("unrealized_pnl") or 0)
+        log.info("[fade] 현금 확보 매도 — %s ($%.2f · 평가 %+.2f) 필요 $%.2f / 확보 $%.2f",
+                 (p.get("question") or cid)[:40], val, pnl, need_usd, raised)
+        res = await oracle_client.place_order(
+            side="NO", action="sell", condition_id=cid,
+            question=p.get("question") or "", token_id=p["token_id"],
+            price=max(0.01, round(cur, 4)), size_usd=val,
+            size_shares=float(p.get("size") or 0), reason="fade_raise_cash",
+        )
+        if (res.get("status") or "").lower() in ("failed", "skipped", "relay_failed"):
+            log.warning("[fade] 현금 확보 매도 실패: %s", res)
+            continue
+        raised += val
+        # DB 에 열려 있던 포지션이면 같이 닫는다
+        pos = _open_position(cid)
+        if pos is not None:
+            await _close_position(pos, 1.0 - cur, "현금확보")
+        else:
+            _open_cids.discard(cid)
+
+    if raised:
+        _tg(f"💰 <b>[Polymarket Fade] 현금 확보</b>\n\n"
+            f"진입 자금이 모자라 보유분을 정리했다.\n"
+            f"확보: <code>${raised:.2f}</code>  |  필요: <code>${need_usd:.2f}</code>")
+    return raised
+
+
 async def _size_for_entry() -> float | None:
     """진입 금액. None 이면 진입하지 않는다.
 
@@ -373,21 +562,32 @@ async def _size_for_entry() -> float | None:
             return _cfg["order_size_usd"]      # 릴레이 미설정(시뮬) — 기존 동작 유지
         return bal * buf
 
+    min_order = float(_cfg["min_order_usd"])
+
     if mode == "slots":
         if bal is None:
             return _cfg["order_size_usd"]
         free = max(1, int(_cfg["max_concurrent"]) - len(_open_cids))
         size = bal * buf / free
-        if size <= 0:
-            log.info("[fade] 진입 스킵 — 가용 잔액 없음 (bal=%.2f)", bal)
-            return None
-        return size
+    else:                                                    # fixed
+        if bal is None:
+            return _cfg["order_size_usd"]
+        size = float(_cfg["order_size_usd"])
 
-    # fixed
-    size = float(_cfg["order_size_usd"])
-    if bal is not None and bal * buf < size:
-        log.info("[fade] 진입 스킵 — 잔액 부족 (bal=%.2f < size=%.2f)", bal, size)
-        return None
+    # 최소 주문액 미만이면 현금을 만들어 본다. 이게 없으면 잔액이 바닥난 채로
+    # 초당 0.7건씩 거부 주문만 반복한다(실측).
+    if size < min_order:
+        if _cfg["raise_cash_enabled"]:
+            got = await _raise_cash(min_order - bal * buf)
+            if got > 0:
+                bal = await oracle_client.fetch_balance() or 0.0
+                free = max(1, int(_cfg["max_concurrent"]) - len(_open_cids)) \
+                    if mode == "slots" else 1
+                size = bal * buf / free if mode == "slots" else float(_cfg["order_size_usd"])
+        if size < min_order:
+            log.info("[fade] 진입 스킵 — 최소 주문액 미달 (size=%.2f < %.2f, bal=%.2f)",
+                     size, min_order, bal or 0.0)
+            return None
     return size
 
 
@@ -812,6 +1012,10 @@ async def run(ws_client=None) -> None:
         while True:
             try:
                 _refresh_open_cache()
+                # 지갑 ↔ DB 동기화. 부팅 직후 1회 + 이후 주기적으로.
+                # 이게 없으면 '체인엔 있는데 DB엔 없는' 포지션 때문에 현금이 묶인 채
+                # 진입만 무한 재시도한다(실측 2026-08-14).
+                await _reconcile_if_due()
                 await _run_screener_if_due()   # 워치리스트 갱신 → 아래 구독 반영까지 한 틱에
                 await _refresh_subscriptions(ws_client)
                 await _poll_book()
