@@ -41,7 +41,9 @@ addon_min_rise_pct: 0.15     # 직전 레그 진입가 대비 +15% 더 올라야
 # slots = 가용 pUSD ÷ 남은 슬롯 → max_concurrent 개까지 동시 보유 (순회)
 # fixed = order_size_usd 고정. 잔액이 모자라면 진입을 접는다.
 order_size_mode: slots
-max_concurrent: 3            # 동시 보유 상한. full 모드에선 무시(항상 1)
+max_concurrent: 2            # 동시 보유 상한. full 모드에선 무시(항상 1)
+                             # 계좌가 ~$30 규모다. 최소 주문이 5주(진입가에 따라
+                             # $4~5)라 슬롯을 늘려봐야 채울 자본이 없다.
 order_size_usd: 1.0          # fixed 모드 명목 / 릴레이 미설정(시뮬) 시 fallback
 balance_buffer: 0.98         # 전액의 98%만 진입(수수료·최소단위·슬리피지 여유)
 
@@ -72,12 +74,9 @@ replace_min_gain_ratio: 1.5  # 새 신호가 기존 '남은 수익' 의 이 배 
 # $0.14 였다. 엔진은 포지션이 없다고 믿고 계속 진입을 시도했고, 주문은 전부
 # 'not enough balance' 로 거부되며 초당 0.7건씩 무한 재시도가 돌았다.
 #
-# reconcile — 부팅/주기적으로 지갑 실보유를 읽어 DB 와 맞춘다. 체인에 있는데 DB 에
-#             없으면 복구(avgPrice 로 진입가 복원), DB 에 있는데 체인에 없으면 유령 정리.
 # raise_cash — 진입 금액이 최소 주문액에 못 미치면 보유분을 팔아 현금을 만든다.
 #              파는 순서는 '평가손익이 좋은 것부터' — 이익이 났다는 건 되돌림이 이미
 #              진행돼 남은 먹을 것이 적다는 뜻이라 기회비용이 가장 작다.
-reconcile_enabled: true
 min_order_usd: 5.0           # 폴리마켓 최소 주문액. 이 아래면 주문해봐야 거부된다.
 raise_cash_enabled: true
 

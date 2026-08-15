@@ -1423,14 +1423,109 @@ async def fade_positions(
     finally:
         db.close()
 
-    return JSONResponse({"positions": [
-        {"id": r.id, "condition_id": r.condition_id, "question": r.question,
-         "p0": r.p0, "entry_px": r.entry_px, "target_px": r.target_px, "stop_px": r.stop_px,
-         "entry_ts": r.entry_ts, "timeout_ts": r.timeout_ts, "status": r.status,
-         "exit_px": r.exit_px, "exit_ts": r.exit_ts, "exit_reason": r.exit_reason,
-         "ret_pct": r.ret_pct}
-        for r in rows
-    ]})
+    def _row(r):
+        sh = float(r.shares or 0)
+        # 페이드는 NO 매수 — 투입 = 주수 × (1−진입가), 손익 = 주수 × (진입가 − 청산가).
+        # ret_pct(퍼센트)만 보면 $13 짜리 +34% 와 $100 짜리 +1% 를 구분할 수 없다.
+        cost = sh * (1 - float(r.entry_px)) if r.entry_px is not None else None
+        pnl = (sh * (float(r.entry_px) - float(r.exit_px))
+               if (r.exit_px is not None and r.entry_px is not None) else None)
+        return {
+            "id": r.id, "condition_id": r.condition_id, "question": r.question,
+            "p0": r.p0, "entry_px": r.entry_px, "target_px": r.target_px, "stop_px": r.stop_px,
+            "entry_ts": r.entry_ts, "timeout_ts": r.timeout_ts, "status": r.status,
+            "exit_px": r.exit_px, "exit_ts": r.exit_ts, "exit_reason": r.exit_reason,
+            "ret_pct": r.ret_pct,
+            "shares": r.shares, "entry_usd": r.entry_usd, "order_status": r.order_status,
+            "cost_usd": round(cost, 4) if cost is not None else None,
+            "pnl_usd": round(pnl, 4) if pnl is not None else None,
+            "hold_s": (r.exit_ts - r.entry_ts) if (r.exit_ts and r.entry_ts) else None,
+        }
+
+    return JSONResponse({"positions": [_row(r) for r in rows]})
+
+
+@router.get("/fade/pnl")
+async def fade_pnl() -> JSONResponse:
+    """실현 손익 집계 — **금액 기준**.
+
+    퍼센트 평균은 전략을 과대평가한다. $13 포지션의 +34% 는 $1.3 이고, 알림은
+    이익 건수가 손실의 두 배로 오지만 금액 차이는 훨씬 좁다(실측 91건:
+    이익 54건 $+18.16 / 손실 27건 $−8.67 → 순 $+9.49).
+    같은 종목 반복 진입(회전)이 손실을 갉아먹는지도 여기서 드러난다.
+    """
+    from db.session import get_session
+    from db.models import PolymarketFadePosition
+    from sqlalchemy import select
+    from collections import defaultdict
+
+    db = get_session()
+    try:
+        rows = db.execute(select(PolymarketFadePosition)).scalars().all()
+    finally:
+        db.close()
+
+    closed = [r for r in rows
+              if r.status == "closed" and r.exit_px is not None and r.entry_px is not None]
+    def cost(r): return float(r.shares or 0) * (1 - float(r.entry_px))
+    def pnl(r):  return float(r.shares or 0) * (float(r.entry_px) - float(r.exit_px))
+
+    tot_pnl = sum(pnl(r) for r in closed)
+    # 주의: 이건 **누적 회전액**이지 투입 자본이 아니다. 같은 돈을 91번 굴리면
+    # 91번의 원가가 전부 더해진다(실측: 회전액 $797 인데 계좌는 $33 규모였다).
+    # 이걸 분모로 쓰면 '회전액 대비 수익률' 이 나오는데, 그건 자본 수익률이 아니다.
+    turnover = sum(cost(r) for r in closed)
+    # 동시에 물려 있던 최대 금액 — 자본 수익률의 분모로 이쪽이 맞다.
+    events = []
+    for r in closed:
+        events.append((int(r.entry_ts or 0), cost(r)))
+        events.append((int(r.exit_ts or 0), -cost(r)))
+    events.sort()
+    cur = peak = 0.0
+    for _, delta in events:
+        cur += delta
+        peak = max(peak, cur)
+    wins = [r for r in closed if pnl(r) > 0]
+    loss = [r for r in closed if pnl(r) < 0]
+
+    by_market = defaultdict(lambda: {"n": 0, "cost": 0.0, "pnl": 0.0})
+    for r in closed:
+        k = (r.question or r.condition_id or "")[:60]
+        by_market[k]["n"] += 1
+        by_market[k]["cost"] += cost(r)
+        by_market[k]["pnl"] += pnl(r)
+    markets = sorted(
+        ({"question": k, "n": v["n"], "cost_usd": round(v["cost"], 2),
+          "pnl_usd": round(v["pnl"], 4)} for k, v in by_market.items()),
+        key=lambda m: m["pnl_usd"])
+
+    by_reason = defaultdict(lambda: {"n": 0, "pnl": 0.0})
+    for r in closed:
+        k = r.exit_reason or "-"
+        by_reason[k]["n"] += 1
+        by_reason[k]["pnl"] += pnl(r)
+
+    return JSONResponse({
+        "n_closed": len(closed), "n_open": sum(1 for r in rows if r.status == "open"),
+        # 이름을 바꿔 오해를 막는다 — turnover 는 회전액, peak_exposure 가 자본이다.
+        "turnover_usd": round(turnover, 2),
+        "peak_exposure_usd": round(peak, 2),
+        "total_pnl_usd": round(tot_pnl, 4),
+        # 자본 수익률 = 손익 ÷ 동시 최대 노출. 회전액으로 나누지 않는다.
+        "return_on_peak_pct": round(100 * tot_pnl / peak, 2) if peak else None,
+        "pnl_per_trade_usd": round(tot_pnl / len(closed), 4) if closed else None,
+        # 퍼센트 단순평균 — 금액 가중과 얼마나 벌어지는지 대조용으로만 둔다
+        "avg_ret_pct": round(sum(float(r.ret_pct or 0) for r in closed) / len(closed), 3)
+                       if closed else None,
+        "n_win": len(wins), "n_loss": len(loss),
+        "win_pnl_usd": round(sum(pnl(r) for r in wins), 4),
+        "loss_pnl_usd": round(sum(pnl(r) for r in loss), 4),
+        "best_usd": round(max((pnl(r) for r in closed), default=0), 4),
+        "worst_usd": round(min((pnl(r) for r in closed), default=0), 4),
+        "markets": markets,
+        "reasons": [{"reason": k, "n": v["n"], "pnl_usd": round(v["pnl"], 4)}
+                    for k, v in sorted(by_reason.items(), key=lambda kv: kv[1]["pnl"])],
+    })
 
 
 @router.post("/fade/test-order")

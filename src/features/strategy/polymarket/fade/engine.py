@@ -57,10 +57,6 @@ _pending_confirm: dict[str, float] = {}
 # 마지막 매도 시각(condition_id → ts). 팔자마자 같은 종목을 되사는 걸 막는다.
 # 없으면: 현금 확보로 X 를 팔고 → 그 현금으로 X 를 다시 사는 순환이 생긴다.
 _last_exit: dict[str, float] = {}
-# 지갑에서 복구했지만 전략이 원해서 든 게 아닌 포지션 — **청산만** 한다.
-# 매도가 실패해 체인에 남은 잔재라, 새 진입처럼 다루면 타임아웃이 매번 갱신돼
-# 영원히 부활한다.
-_liquidate_only: set[str] = set()
 # 매도 주문을 방금 보낸 종목 → 재발주 금지 시각. 릴레이에 '미체결 주문 조회' API 가
 # 없어서 이미 걸어둔 주문을 알 수 없다. 모르고 또 걸면 폴리마켓이
 #   'sum of active orders: 9530000, order amount: 9530000, balance: 9537141'
@@ -89,7 +85,7 @@ _REQUIRED_CFG_KEYS = (
     "order_size_mode", "order_size_usd", "balance_buffer",
     "max_concurrent", "min_days_left", "glitch_filter",
     "replace_enabled", "replace_min_age_h", "replace_min_gain_ratio",
-    "reconcile_enabled", "min_order_usd", "raise_cash_enabled",
+    "min_order_usd", "raise_cash_enabled",
     "reentry_cooldown_h", "telegram_status_alerts",
 )
 
@@ -390,137 +386,6 @@ def _yes_token_of(condition_id: str) -> str | None:
 
 
 
-# ── 지갑 실보유 ↔ DB 동기화 ─────────────────────────────────────────────────
-
-
-_last_reconcile: float = 0.0
-_RECONCILE_INTERVAL_S = 900          # 15분
-
-
-async def _reconcile_if_due(force: bool = False) -> dict | None:
-    global _last_reconcile
-    if not _cfg.get("reconcile_enabled"):
-        return None
-    now = time.time()
-    if not force and now - _last_reconcile < _RECONCILE_INTERVAL_S:
-        return None
-    _last_reconcile = now
-    try:
-        return await reconcile_wallet()
-    except Exception as e:                                   # noqa: BLE001
-        log.warning("[fade] 지갑 동기화 예외(계속 진행): %s", e)
-        return {"error": str(e)}
-
-
-async def reconcile_wallet() -> dict[str, Any]:
-    """체인에 있는데 DB 에 없는 포지션을 되찾아온다.
-
-    왜 필요한가: 엔진이 '청산했다' 고 기록했는데 매도 주문이 실제로는 안 나간 경우가
-    있다. 그러면 DB 는 포지션 0 인데 지갑에는 토큰이 남아 현금이 묶인다. 엔진은 그걸
-    모른 채 계속 새로 진입하려 하고, 현금이 없으니 주문이 전부 거부된다.
-    (실측 2026-08-14: DB 열린 포지션 0건 / 지갑 보유 $32.77 4건 / 현금 $0.14 →
-     초당 0.7건씩 'not enough balance' 거부가 무한 반복)
-
-    data-api 는 avgPrice·size·conditionId 를 주므로 진입가를 복원할 수 있다.
-    복원한 행은 exit_reason 추적을 위해 order_status='reconciled' 로 표시한다.
-    """
-    from features.strategy.polymarket._data import live as poly_live
-
-    try:
-        held = await poly_live.fetch_open_positions()
-    except Exception as e:                                   # noqa: BLE001
-        log.warning("[fade] 지갑 조회 실패 — 동기화 건너뜀: %s", e)
-        return {"error": str(e)}
-
-    # 값이 남아있는 NO 포지션만 대상. redeemable(결과 확정)은 청산이 아니라 redeem 대상.
-    live_map = {p["condition_id"]: p for p in held
-                if p.get("condition_id") and not p.get("redeemable")
-                and float(p.get("current_value") or 0) > 0.01}
-
-    recovered = []
-    for cid, p in live_map.items():
-        if cid in _open_cids:
-            continue                                         # DB 와 일치 — 할 일 없음
-        watch = None
-        for w in _yes_map.values():
-            if w.condition_id == cid:
-                watch = w
-                break
-        # NO 평단 → YES 진입가. 페이드는 NO 매수라 entry_px(YES) = 1 − NO평단.
-        no_avg = float(p.get("avg_price") or 0)
-        if not (0 < no_avg < 1):
-            continue
-        entry_px = 1.0 - no_avg
-
-        # **복구분은 청산 대상이다.** 전략이 원해서 든 게 아니라 매도가 실패해
-        # 체인에 남은 잔재다. 새 진입처럼 목표가·타임아웃을 새로 주면
-        #   매도 실패 → 복구(타임아웃 24h 갱신) → 또 실패 → 또 복구 …
-        # 로 영원히 부활하고, 그 사이 슬롯을 계속 잡아먹는다.
-        # 그래서 timeout_ts 를 **과거**로 박아 다음 _timeout_sweep 이 즉시 팔게 한다.
-        _liquidate_only.add(cid)
-        row = PolymarketFadePosition(
-            condition_id=cid,
-            question=(p.get("question") or (watch.question if watch else "") or cid)[:500],
-            no_token_id=p.get("token_id") or (watch.no_token_id if watch else ""),
-            p0=round(entry_px, 4), entry_px=round(entry_px, 4),
-            target_px=round(entry_px, 4),      # 되돌림 목표를 만들지 않는다
-            stop_px=1.0,                       # 손절선도 두지 않는다 — 즉시 청산 대상
-            entry_ts=int(time.time()),
-            timeout_ts=int(time.time()) - 1,   # 이미 만료 → 다음 스윕에서 매도
-            status="open",
-            shares=float(p.get("size") or 0),
-            entry_usd=float(p.get("initial_value") or 0) or None,
-            order_status="reconciled",
-            last_leg_px=round(entry_px, 4),
-        )
-        db = get_session()
-        try:
-            db.add(row)
-            db.commit()
-            _open_cids.add(cid)
-            recovered.append({"cid": cid, "value": float(p.get("current_value") or 0),
-                              "entry_px": row.entry_px, "q": row.question[:40]})
-        except Exception as e:                               # noqa: BLE001
-            db.rollback()
-            log.warning("[fade] 포지션 복구 실패 %s: %s", cid[:12], e)
-        finally:
-            db.close()
-
-    # 반대 방향: DB 는 open 인데 지갑에 없다 → 유령. 닫는다.
-    ghosts = []
-    for cid in list(_open_cids):
-        if cid in live_map:
-            continue
-        pos = _open_position(cid)
-        if pos is None:
-            _open_cids.discard(cid)
-            continue
-        db = get_session()
-        try:
-            row = db.get(PolymarketFadePosition, pos.id)
-            if row and row.status == "open":
-                row.status = "closed"
-                row.exit_reason = "phantom_cleanup"
-                row.exit_ts = int(time.time())
-                db.commit()
-                ghosts.append(cid)
-        except Exception:                                     # noqa: BLE001
-            db.rollback()
-        finally:
-            db.close()
-        _open_cids.discard(cid)
-
-    if recovered or ghosts:
-        log.info("[fade] 지갑 동기화 — 복구 %d건(청산대기) · 유령정리 %d건",
-                 len(recovered), len(ghosts))
-        if recovered:
-            _tg("🔄 <b>[Polymarket Fade] 지갑 동기화 — 청산 대기</b>\n\n"
-                "매도가 안 나갔던 잔재를 찾았다. 다음 스윕에서 정리한다.\n\n"
-                + "\n".join(f"{r['q']} (${r['value']:.2f}, 평단 {r['entry_px']:.4f})"
-                             for r in recovered), kind="status")
-    return {"recovered": recovered, "ghosts": ghosts, "held": len(live_map)}
-
-
 
 async def _raise_cash(need_usd: float, exclude_cid: str | None = None) -> float:
     """현금이 모자라면 보유 포지션을 팔아 만든다. 확보한 금액을 돌려준다.
@@ -595,7 +460,6 @@ async def _raise_cash(need_usd: float, exclude_cid: str | None = None) -> float:
         _sell_fail.pop(cid, None)
         raised += val
         _last_exit[cid] = time.time()
-        _liquidate_only.discard(cid)
         # DB 에 열려 있던 포지션이면 같이 닫는다
         pos = _open_position(cid)
         if pos is not None:
@@ -858,6 +722,27 @@ async def _check_exit_price(pos: PolymarketFadePosition, current_mid: float) -> 
 
 
 async def _close_position(pos: PolymarketFadePosition, exit_px: float, reason: str) -> None:
+    """청산 — **매도가 체결된 뒤에만** DB 를 닫는다.
+
+    과거에는 순서가 거꾸로였다: DB 를 먼저 closed 로 커밋하고 → _open_cids 에서 빼고 →
+    텔레그램을 쏘고 → 마지막에 매도 주문을 넣고 결과를 보지 않았다. 그래서
+      · 매도가 실패해도 DB 는 '청산 완료' → 체인엔 남고 DB 엔 없는 유령이 생긴다
+      · 그 유령 때문에 현금이 묶인 채 엔진은 계속 새로 진입하려 한다
+      · 텔레그램은 체결 전에 발사되니 '계속 수익 보는 것처럼' 보인다
+    진입(_enter)은 이미 '체결 확인 후에만 기록' 이다. 청산도 같은 규칙을 쓴다.
+    """
+    res = await oracle_client.place_order(
+        side="NO", action="sell", condition_id=pos.condition_id, question=pos.question or "",
+        token_id=pos.no_token_id or "", price=1 - exit_px, size_usd=(pos.entry_usd or 1.0),
+        size_shares=pos.shares, reason=f"fade_exit_{reason}",
+    )
+    status = (res.get("status") or "").lower()
+    if status in ("failed", "skipped", "relay_failed"):
+        # DB 를 건드리지 않는다 — 포지션은 여전히 열려 있고 다음 틱에 다시 시도된다.
+        log.warning("[fade] 청산 매도 미체결 → 포지션 유지: %s | %s",
+                    (pos.question or pos.condition_id)[:40], res)
+        return
+
     now_ts = int(time.time())
     ret_pct = round((pos.entry_px - exit_px) / (1 - pos.entry_px) * 100, 2)
 
@@ -877,22 +762,18 @@ async def _close_position(pos: PolymarketFadePosition, exit_px: float, reason: s
         db.close()
 
     _open_cids.discard(pos.condition_id)
+    _last_exit[pos.condition_id] = time.time()
 
-    log.info("[fade] SIGNAL 청산 %s | %s | exit=%.4f ret=%.2f%% shares=%s",
+    log.info("[fade] 청산 체결 %s | %s | exit=%.4f ret=%.2f%% shares=%s",
              reason, pos.question[:50] if pos.question else pos.condition_id[:12],
              exit_px, ret_pct, pos.shares)
     pnl_e = "✅" if ret_pct >= 0 else "❌"
     _tg(
-        f"🔔 <b>[Polymarket Fade] 청산 신호 감지</b>\n\n"
+        f"🔔 <b>[Polymarket Fade] 청산 체결</b>\n\n"
         f"<b>{pos.question[:80] if pos.question else pos.condition_id[:12]}</b>\n\n"
         f"사유: <code>{reason}</code>\n"
         f"entry(YES): <code>{pos.entry_px:.4f}</code>  →  exit: <code>{exit_px:.4f}</code>\n"
         f"PnL: {pnl_e} <code>{ret_pct:+.2f}%</code>"
-    )
-    await oracle_client.place_order(
-        side="NO", action="sell", condition_id=pos.condition_id, question=pos.question or "",
-        token_id=pos.no_token_id or "", price=1 - exit_px, size_usd=(pos.entry_usd or 1.0),
-        size_shares=pos.shares, reason=f"fade_exit_{reason}",
     )
 
 
@@ -1080,10 +961,6 @@ async def run(ws_client=None) -> None:
         while True:
             try:
                 _refresh_open_cache()
-                # 지갑 ↔ DB 동기화. 부팅 직후 1회 + 이후 주기적으로.
-                # 이게 없으면 '체인엔 있는데 DB엔 없는' 포지션 때문에 현금이 묶인 채
-                # 진입만 무한 재시도한다(실측 2026-08-14).
-                await _reconcile_if_due()
                 await _run_screener_if_due()   # 워치리스트 갱신 → 아래 구독 반영까지 한 틱에
                 await _refresh_subscriptions(ws_client)
                 await _poll_book()
