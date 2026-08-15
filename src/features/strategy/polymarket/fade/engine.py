@@ -445,13 +445,18 @@ async def _raise_cash(need_usd: float, exclude_cid: str | None = None) -> float:
         log.info("[fade] 현금 확보 매도 — %s ($%.2f · 평가 %+.2f) 필요 $%.2f / 확보 $%.2f",
                  (p.get("question") or cid)[:40], val, pnl, need_usd, raised)
         _sell_inflight[cid] = now + _SELL_INFLIGHT_S     # 발주 전에 잠근다(중복 방지)
+        sell_sz = float(p.get("size") or 0)
+        sell_px = await _fill_price(p["token_id"], sell_sz, "sell",
+                                    _yes_token_of(cid) or "", 1 - cur)
         res = await oracle_client.place_order(
             side="NO", action="sell", condition_id=cid,
             question=p.get("question") or "", token_id=p["token_id"],
-            price=max(0.01, round(cur, 4)), size_usd=val,
-            size_shares=float(p.get("size") or 0), reason="fade_raise_cash",
+            price=max(0.01, sell_px), size_usd=val,
+            size_shares=sell_sz, reason="fade_raise_cash",
         )
-        if (res.get("status") or "").lower() in ("failed", "skipped", "relay_failed"):
+        # 'matched' 아니면 현금은 안 들어왔다. 호가에 얹힌 주문(live)을 확보로 세면
+        # 없는 현금을 있다고 믿고 진입을 시도해 'not enough balance' 가 무한 반복된다.
+        if (res.get("status") or "").lower() != "matched":
             n = _sell_fail.get(cid, 0) + 1
             _sell_fail[cid] = n
             log.warning("[fade] 현금 확보 매도 실패(%d/%d) %s: %s",
@@ -523,13 +528,56 @@ async def _size_for_entry(cid: str | None = None) -> float | None:
     return size
 
 
+async def _fill_price(no_token_id: str, shares: float, side: str,
+                      yes_token_id: str, yes_px: float) -> float:
+    """요청 수량 전부가 **즉시 체결되는** 지정가. side="buy" | "sell".
+
+    두 단계로 망가져 있었다.
+
+    1) 1 − mid 로 걸면 매수는 ask 아래, 매도는 bid 위라 즉시 체결이 구조적으로 불가능하다.
+       그렇게 남은 매수는 NO 가 내려와야, 즉 **YES 가 더 올라야만** 체결되므로 페이드가
+       틀린 경우만 골라 체결되는 역선택이 된다. 실측: 원장 99행 중 49행이 체결 없이
+       'live' 로 남았고 가격만 보고 청산 처리돼 승률 97.7% 짜리 유령 수익을 만들었다.
+    2) 최상단 호가에만 걸면 물량이 모자랄 때 잔량이 GTC 로 호가에 남아 담보를 잠근다.
+       실측(2026-08-15): 미체결 5건이 $30.32 = 계좌 전액을 잠가 청산도 진입도 전부
+       'not enough balance' 로 거부됐다. 하루 넘게 아무 거래도 못 했다.
+
+    그래서 사다리를 걸어 요청 수량을 덮는 레벨에 건다. 최우선호가부터 그 레벨까지
+    한 번에 쓸어담으므로 잔량이 남지 않는다. REST 실패 시 WS best 호가로 되돌린다.
+    """
+    try:
+        book = await poly_client.fetch_book(no_token_id)
+    except Exception as e:                                   # noqa: BLE001
+        log.warning("[fade] 호가 조회 실패 → WS best 로 대체: %s", e)
+        book = None
+
+    levels = (book or {}).get("asks" if side == "buy" else "bids") or []
+    cum = 0.0
+    for px, sz in levels:
+        cum += sz
+        if cum >= shares:
+            return round(px, 4)
+    if levels:          # 사다리 전체로도 부족 → 끝단까지 쓸어담는다
+        return round(levels[-1][0], 4)
+
+    level = ws.price_book.get(yes_token_id)
+    if level:
+        ref = level.best_bid if side == "buy" else level.best_ask
+        if ref:
+            return round(1 - float(ref), 4)
+    return round(1 - yes_px, 4)
+
+
 async def _enter(sig: fade_signal.FadeSignal) -> None:
     # full 모드는 1포지션만(호출부에서 _open_cids 게이트). fixed 모드는 다른 마켓 동시 진입 가능.
     # 이중지출은 _entry_lock(호출부 직렬화) + 주문 시 fetch_balance 재조회로 방지.
-    no_price = 1 - sig.entry_px
     size_usd = await _size_for_entry(sig.condition_id)
     if size_usd is None:
         return
+    # 살 수량을 먼저 잡아야 그 수량을 덮는 호가를 고를 수 있다.
+    est_shares = size_usd / max(1 - sig.entry_px, 0.01)
+    no_price = await _fill_price(sig.no_token_id, est_shares, "buy",
+                                 sig.yes_token_id, sig.entry_px)
 
     log.info(
         "[fade] SIGNAL 진입 NO | %s | p0=%.4f entry=%.4f no_px=%.4f size=$%.2f target=%.4f stop=%.4f",
@@ -541,8 +589,10 @@ async def _enter(sig: fade_signal.FadeSignal) -> None:
         reason="fade_entry_spike",
     )
     status = (result.get("status") or "").lower()
-    if status in ("failed", "skipped", "relay_failed"):
-        log.warning("[fade] 진입 주문 미체결 → 포지션 미기록: %s", result)
+    # 'matched' 만 체결이다. 'live' 는 호가에 얹혔을 뿐이고, 그걸 포지션으로 기록하면
+    # 체결된 적 없는 주문이 가격만 보고 청산돼 원장에 가짜 승리가 쌓인다.
+    if status != "matched":
+        log.warning("[fade] 진입 미체결(status=%s) → 포지션 미기록: %s", status or "-", result)
         return
     # 실체결 검증: order_id/shares 없으면 포지션 기록 안 함(과거 유령 포지션 재발 방지).
     if not result.get("order_id") or not result.get("shares"):
@@ -616,11 +666,13 @@ async def _add_on(condition_id: str, p0: float, add_px: float) -> None:
     if (cur.addon_count or 0) >= int(_cfg["addon_max_count"]):
         return
 
-    no_price = 1 - add_px
     size_usd = await _size_for_entry()
     if not size_usd or size_usd <= 0:
         log.info("[fade] add-on 스킵 — 가용 잔액 없음 %s", condition_id[:12])
         return
+    est_shares = size_usd / max(1 - add_px, 0.01)
+    no_price = await _fill_price(cur.no_token_id or "", est_shares, "buy",
+                                 _yes_token_of(condition_id) or "", add_px)
 
     log.info(
         "[fade] ADD-ON NO | %s | leg#%d add(YES)=%.4f no_px=%.4f size=$%.2f",
@@ -631,8 +683,8 @@ async def _add_on(condition_id: str, p0: float, add_px: float) -> None:
         token_id=cur.no_token_id or "", price=no_price, size_usd=size_usd, reason="fade_addon",
     )
     status = (result.get("status") or "").lower()
-    if status in ("failed", "skipped", "relay_failed"):
-        log.warning("[fade] add-on 미체결 → 평단 미반영: %s", result)
+    if status != "matched":
+        log.warning("[fade] add-on 미체결(status=%s) → 평단 미반영: %s", status or "-", result)
         return
     if not result.get("order_id") or not result.get("shares"):
         log.warning("[fade] add-on 응답에 order_id/shares 없음 → 미반영: %s", result)
@@ -731,18 +783,23 @@ async def _close_position(pos: PolymarketFadePosition, exit_px: float, reason: s
       · 텔레그램은 체결 전에 발사되니 '계속 수익 보는 것처럼' 보인다
     진입(_enter)은 이미 '체결 확인 후에만 기록' 이다. 청산도 같은 규칙을 쓴다.
     """
+    sell_px = await _fill_price(pos.no_token_id or "", float(pos.shares or 0), "sell",
+                                _yes_token_of(pos.condition_id) or "", exit_px)
     res = await oracle_client.place_order(
         side="NO", action="sell", condition_id=pos.condition_id, question=pos.question or "",
-        token_id=pos.no_token_id or "", price=1 - exit_px, size_usd=(pos.entry_usd or 1.0),
+        token_id=pos.no_token_id or "", price=sell_px, size_usd=(pos.entry_usd or 1.0),
         size_shares=pos.shares, reason=f"fade_exit_{reason}",
     )
     status = (res.get("status") or "").lower()
-    if status in ("failed", "skipped", "relay_failed"):
+    if status != "matched":
         # DB 를 건드리지 않는다 — 포지션은 여전히 열려 있고 다음 틱에 다시 시도된다.
-        log.warning("[fade] 청산 매도 미체결 → 포지션 유지: %s | %s",
-                    (pos.question or pos.condition_id)[:40], res)
+        log.warning("[fade] 청산 매도 미체결(status=%s) → 포지션 유지: %s | %s",
+                    status or "-", (pos.question or pos.condition_id)[:40], res)
         return
 
+    # 기록은 트리거가(exit_px)가 아니라 **체결가** 기준. 트리거로 적으면 실제로는
+    # 받지 못한 스프레드만큼 수익이 부풀려진다 — 유령 승리와 같은 종류의 거짓말이다.
+    exit_px = round(1 - sell_px, 4)
     now_ts = int(time.time())
     ret_pct = round((pos.entry_px - exit_px) / (1 - pos.entry_px) * 100, 2)
 

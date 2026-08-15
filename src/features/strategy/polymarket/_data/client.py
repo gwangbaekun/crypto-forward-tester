@@ -287,6 +287,11 @@ async def fetch_book(token_id: str) -> dict[str, Any] | None:
         "best_bid": float(best_bid["price"]) if best_bid else None,
         "bid_size": float(best_bid["size"]) if best_bid else 0.0,
         "tick":     float(d.get("tick_size") or 0.01),
+        # 사다리 전체 — 최상단만 보면 물량이 모자랄 때 잔량이 호가에 남아 담보를 잠근다.
+        # asks 는 싼 순(살 때 유리한 순), bids 는 비싼 순(팔 때 유리한 순).
+        "asks": sorted(((float(a["price"]), float(a["size"])) for a in asks), key=lambda x: x[0]),
+        "bids": sorted(((float(b["price"]), float(b["size"])) for b in bids),
+                       key=lambda x: x[0], reverse=True),
     }
 
 
