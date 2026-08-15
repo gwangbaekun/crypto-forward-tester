@@ -61,6 +61,15 @@ _last_exit: dict[str, float] = {}
 # 매도가 실패해 체인에 남은 잔재라, 새 진입처럼 다루면 타임아웃이 매번 갱신돼
 # 영원히 부활한다.
 _liquidate_only: set[str] = set()
+# 매도 주문을 방금 보낸 종목 → 재발주 금지 시각. 릴레이에 '미체결 주문 조회' API 가
+# 없어서 이미 걸어둔 주문을 알 수 없다. 모르고 또 걸면 폴리마켓이
+#   'sum of active orders: 9530000, order amount: 9530000, balance: 9537141'
+# 로 거부한다 — 전량이 이미 주문에 묶여 있는데 같은 양을 또 건 것이다(실측 249연속).
+_sell_inflight: dict[str, float] = {}
+_SELL_INFLIGHT_S = 120.0
+# 매도 연속 실패 횟수 → 백오프. 팔 수 없는 물량(보유 < 최소주문)을 무한 재시도하지 않는다.
+_sell_fail: dict[str, int] = {}
+_SELL_FAIL_MAX = 3
 _GLITCH_JUMP = 0.10          # 직전 대비 이만큼 튀면 확인 대기(10¢p)
 # 구독 세대 — _yes_map 의 키가 바뀔 때마다 +1. WS 샤드들이 이 값을 보고 일제히 재구독한다.
 _ws_generation: int = 0
@@ -81,7 +90,7 @@ _REQUIRED_CFG_KEYS = (
     "max_concurrent", "min_days_left", "glitch_filter",
     "replace_enabled", "replace_min_age_h", "replace_min_gain_ratio",
     "reconcile_enabled", "min_order_usd", "raise_cash_enabled",
-    "reentry_cooldown_h",
+    "reentry_cooldown_h", "telegram_status_alerts",
 )
 
 
@@ -109,7 +118,15 @@ def get_live_status() -> dict[str, dict]:
     return _live_status
 
 
-def _tg(msg: str) -> None:
+def _tg(msg: str, kind: str = "fill") -> None:
+    """텔레그램 발송. kind="status" 는 기본으로 막는다.
+
+    상태 알림(지갑 동기화·현금 확보 같은 내부 사정)은 거래가 아니다. 순회 구조에서는
+    이런 게 초당 단위로 쏟아져 정작 봐야 할 체결 알림을 덮는다.
+    체결(진입/청산/add-on)만 보낸다.
+    """
+    if kind == "status" and not _cfg.get("telegram_status_alerts", False):
+        return
     try:
         ok, err = TelegramService().send_message(msg)
         if not ok and "not configured" not in err:
@@ -500,7 +517,7 @@ async def reconcile_wallet() -> dict[str, Any]:
             _tg("🔄 <b>[Polymarket Fade] 지갑 동기화 — 청산 대기</b>\n\n"
                 "매도가 안 나갔던 잔재를 찾았다. 다음 스윕에서 정리한다.\n\n"
                 + "\n".join(f"{r['q']} (${r['value']:.2f}, 평단 {r['entry_px']:.4f})"
-                             for r in recovered))
+                             for r in recovered), kind="status")
     return {"recovered": recovered, "ghosts": ghosts, "held": len(live_map)}
 
 
@@ -523,11 +540,31 @@ async def _raise_cash(need_usd: float, exclude_cid: str | None = None) -> float:
         log.warning("[fade] 현금 확보 실패 — 지갑 조회 오류: %s", e)
         return 0.0
 
-    cands = [p for p in held
-             if not p.get("redeemable")
-             and float(p.get("current_value") or 0) > 0.01
-             and p.get("condition_id") != exclude_cid
-             and p.get("token_id")]
+    now = time.time()
+    min_shares = 5.0        # 폴리마켓 최소 주문 수량. 이보다 적게 보유하면 팔 수가 없다.
+    cands = []
+    for p in held:
+        cid = p.get("condition_id")
+        if p.get("redeemable") or not cid or not p.get("token_id"):
+            continue
+        if cid == exclude_cid:
+            continue                              # 사려는 종목 자신은 안 판다
+        if float(p.get("current_value") or 0) <= 0.01:
+            continue
+        if _sell_inflight.get(cid, 0) > now:
+            continue                              # 이미 매도 주문이 나가 있다
+        if _sell_fail.get(cid, 0) >= _SELL_FAIL_MAX:
+            continue                              # 반복 실패 — 포기(로그로 남김)
+        if float(p.get("size") or 0) < min_shares:
+            # 보유가 최소 주문 수량 미만이면 executor 가 5주로 올려 주문하고,
+            # 보유보다 많으니 폴리마켓이 매번 거부한다(실측: 1.58주 보유 → 5주 주문).
+            if _sell_fail.get(cid, 0) == 0:
+                log.warning("[fade] 매도 불가 — 보유 %.2f주 < 최소 %.0f주: %s",
+                            float(p.get("size") or 0), min_shares,
+                            (p.get("question") or cid)[:40])
+                _sell_fail[cid] = _SELL_FAIL_MAX
+            continue
+        cands.append(p)
     # 수익률 높은 순 — 남은 먹을 것이 적은 쪽부터 판다
     cands.sort(key=lambda p: -(float(p.get("unrealized_pnl") or 0)
                                / max(float(p.get("initial_value") or 1), 1e-9)))
@@ -542,6 +579,7 @@ async def _raise_cash(need_usd: float, exclude_cid: str | None = None) -> float:
         pnl = float(p.get("unrealized_pnl") or 0)
         log.info("[fade] 현금 확보 매도 — %s ($%.2f · 평가 %+.2f) 필요 $%.2f / 확보 $%.2f",
                  (p.get("question") or cid)[:40], val, pnl, need_usd, raised)
+        _sell_inflight[cid] = now + _SELL_INFLIGHT_S     # 발주 전에 잠근다(중복 방지)
         res = await oracle_client.place_order(
             side="NO", action="sell", condition_id=cid,
             question=p.get("question") or "", token_id=p["token_id"],
@@ -549,8 +587,12 @@ async def _raise_cash(need_usd: float, exclude_cid: str | None = None) -> float:
             size_shares=float(p.get("size") or 0), reason="fade_raise_cash",
         )
         if (res.get("status") or "").lower() in ("failed", "skipped", "relay_failed"):
-            log.warning("[fade] 현금 확보 매도 실패: %s", res)
+            n = _sell_fail.get(cid, 0) + 1
+            _sell_fail[cid] = n
+            log.warning("[fade] 현금 확보 매도 실패(%d/%d) %s: %s",
+                        n, _SELL_FAIL_MAX, (p.get("question") or cid)[:30], res)
             continue
+        _sell_fail.pop(cid, None)
         raised += val
         _last_exit[cid] = time.time()
         _liquidate_only.discard(cid)
@@ -564,7 +606,8 @@ async def _raise_cash(need_usd: float, exclude_cid: str | None = None) -> float:
     if raised:
         _tg(f"💰 <b>[Polymarket Fade] 현금 확보</b>\n\n"
             f"진입 자금이 모자라 보유분을 정리했다.\n"
-            f"확보: <code>${raised:.2f}</code>  |  필요: <code>${need_usd:.2f}</code>")
+            f"확보: <code>${raised:.2f}</code>  |  필요: <code>${need_usd:.2f}</code>",
+            kind="status")
     return raised
 
 

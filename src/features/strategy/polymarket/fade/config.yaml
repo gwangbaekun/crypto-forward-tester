@@ -87,6 +87,11 @@ raise_cash_enabled: true
 # 계속 되사는 순환이 됐다.
 reentry_cooldown_h: 6
 
+# 텔레그램 — 상태 알림(지갑 동기화·현금 확보 등 내부 사정)은 기본으로 막는다.
+# 순회 구조에서는 이런 게 쏟아져 정작 봐야 할 체결 알림을 덮는다.
+# 체결(진입/청산/add-on)은 이 값과 무관하게 항상 보낸다.
+telegram_status_alerts: false
+
 # ── 백테스트(/fade/sim)에서만 사용 — live 엔진은 재진입 허용으로 쿨다운 미사용 ──────────
 cooldown_hours: 12           # sim 순차 백테스트의 같은 마켓 재진입 간격
 
