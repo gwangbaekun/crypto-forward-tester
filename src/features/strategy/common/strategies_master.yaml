@@ -226,8 +226,8 @@ spot_perp_cvd:
     fn: get_state
 
 oi_accel_breakout_v2:
-  enabled: true
-  monitoring: true
+  enabled: false
+  monitoring: false
   symbol: "BTCUSDT"
   tick_interval: 60
   timeframes: ["15m"]
@@ -246,8 +246,8 @@ oi_accel_breakout_v2:
       strategy_key: oi_accel_breakout_v2
 
 eth_oi_accel_breakout_v2:
-  enabled: true
-  monitoring: true
+  enabled: false
+  monitoring: false
   symbol: "ETHUSDT"
   tick_interval: 60
   timeframes: ["15m"]
@@ -267,8 +267,8 @@ eth_oi_accel_breakout_v2:
       strategy_key: eth_oi_accel_breakout_v2
 
 sol_oi_accel_breakout_v2:
-  enabled: true
-  monitoring: true
+  enabled: false
+  monitoring: false
   symbol: "SOLUSDT"
   tick_interval: 60
   timeframes: ["15m"]
@@ -288,8 +288,8 @@ sol_oi_accel_breakout_v2:
       strategy_key: sol_oi_accel_breakout_v2
 
 bnb_oi_accel_breakout_v2:
-  enabled: true
-  monitoring: true
+  enabled: false
+  monitoring: false
   symbol: "BNBUSDT"
   tick_interval: 60
   timeframes: ["15m"]
