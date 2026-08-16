@@ -1,0 +1,203 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>US Options Gamma Wall — Forward Test</title>
+<link rel="stylesheet" href="/static/css/dashboard_common.css">
+<style>
+  body.gw-app { padding: 10px 12px 24px; }
+  .shell { max-width: 1280px; margin: 0 auto; display: flex; flex-direction: column; gap: 10px; }
+  .top { display:flex; align-items:center; justify-content:space-between; gap:12px;
+         padding:8px 12px; background:var(--card); border:1px solid var(--border); border-radius:8px; }
+  .top h1 { font-size:15px; margin:0; font-weight:600; }
+  .mech { font-size:11.5px; color:var(--muted); line-height:1.5; padding:8px 12px;
+          background:var(--card); border:1px solid var(--border); border-radius:8px; }
+  .mech b { color:var(--fg); font-weight:600; }
+  .grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(190px,1fr)); gap:8px; }
+  .card { background:var(--card); border:1px solid var(--border); border-radius:8px; padding:10px 12px; }
+  .card .k { font-size:10.5px; color:var(--muted); text-transform:uppercase; letter-spacing:.04em; }
+  .card .v { font-size:20px; font-weight:600; margin-top:3px; font-variant-numeric:tabular-nums; }
+  .card .s { font-size:11px; color:var(--muted); margin-top:2px; }
+  .up { color:#2e6fd4; } .dn { color:#c0553f; } .neutral { color:var(--muted); }
+  .sect { font-size:12px; font-weight:600; margin:6px 0 2px; }
+  .cohort { display:grid; grid-template-columns:1fr 1fr; gap:8px; }
+  @media (max-width:760px){ .cohort{grid-template-columns:1fr;} }
+  table { width:100%; border-collapse:collapse; font-size:11.5px; font-variant-numeric:tabular-nums; }
+  th,td { padding:4px 6px; text-align:right; border-bottom:1px solid var(--border); white-space:nowrap; }
+  th { color:var(--muted); font-weight:500; text-align:right; }
+  th:first-child, td:first-child { text-align:left; }
+  .tbl-wrap { overflow-x:auto; background:var(--card); border:1px solid var(--border); border-radius:8px; padding:6px 10px; }
+  .warn { font-size:11.5px; padding:8px 12px; border-radius:8px;
+          background:rgba(192,85,63,.08); border:1px solid rgba(192,85,63,.3); color:var(--fg); }
+  .foot { font-size:10.5px; color:var(--muted); line-height:1.55; }
+  button { font:inherit; font-size:12px; padding:5px 12px; border-radius:6px;
+           border:1px solid var(--border); background:var(--card); color:var(--fg); cursor:pointer; }
+  button:hover { border-color:#2e6fd4; }
+  svg text { font-size:9.5px; fill:var(--muted); }
+</style>
+</head>
+<body class="gw-app">
+<div class="shell">
+
+  <div class="top">
+    <h1>🧱 US Options Gamma Wall <span style="color:var(--muted);font-weight:400">· SPY → US500</span></h1>
+    <div style="display:flex;gap:8px;align-items:center">
+      <span id="lastrun" class="foot"></span>
+      <button id="runbtn">스캔 실행</button>
+    </div>
+  </div>
+
+  <div class="mech">
+    <b>메커니즘</b> — 딜러는 옵션 재고를 델타 헤지해야 하고, SPY 에서 그 규모는 1% 이동당 약 $10bn,
+    <b>하루 거래대금의 26%</b> 다. 그 헤지 주문이 몰리는 행사가가 지지·저항으로 작동한다.
+    (BTC 는 같은 값이 0.16% 라 이 논리가 성립하지 않는다 — 그래서 크립토가 아니라 미국 옵션이다.)
+    <br>
+    <b>이건 알림봇이 아니라 원장이다.</b> 벽을 매 세션 기록하고 다음 세션이 존중했는지 채점만 한다.
+    실거래 없음.
+  </div>
+
+  <div class="sect">오늘 쓸 레벨</div>
+  <div class="grid" id="levels"></div>
+
+  <div class="sect">벽 vs 다음 세션 실현 범위</div>
+  <div class="card"><div id="chart"></div></div>
+
+  <div class="sect">코호트별 성적 <span class="foot">— 합산하지 않는다</span></div>
+  <div class="cohort" id="cohorts"></div>
+
+  <div class="sect">원장</div>
+  <div class="tbl-wrap"><table id="ledger"></table></div>
+
+  <div class="foot" id="method"></div>
+</div>
+
+<script>
+const F = (n,d=2)=> n==null||Number.isNaN(n) ? "–" : Number(n).toFixed(d);
+const el = id => document.getElementById(id);
+
+async function load(){
+  const [st, lv, lg] = await Promise.all([
+    fetch("/quant/us_options_gamma_wall/stats").then(r=>r.json()),
+    fetch("/quant/us_options_gamma_wall/levels").then(r=>r.json()),
+    fetch("/quant/us_options_gamma_wall/ledger?limit=60").then(r=>r.json()),
+  ]);
+  renderLevels(lv);
+  renderCohorts(st);
+  renderLedger(lg.rows||[]);
+  renderChart(lg.rows||[]);
+  el("lastrun").textContent = st.last_run ? "마지막 스캔 " + st.last_run.slice(0,16).replace("T"," ") + "Z" : "";
+  el("method").innerHTML =
+    "방법 — 세션마다 <b>마지막 스냅샷</b>(미결제약정이 가장 신선한 것)에서 만기 30일 이내 계약의 "+
+    "행사가별 GEX = Σ γ·OI·100·S²·0.01·sign(콜+/풋−) 를 집계. 스팟 위 최대치 = call wall, 아래 최소치 = put wall.<br>"+
+    "대조군 — 같은 폭을 스팟 기준 대칭으로 놓은 밴드. 벽이 '폭'이 아니라 '위치' 정보를 담아야만 대조군을 이긴다. "+
+    "차이(edge)가 0 이면 벽은 아무 정보도 없는 것이다.";
+}
+
+function renderLevels(lv){
+  if(lv.error){ el("levels").innerHTML = `<div class="warn">${lv.error}</div>`; return; }
+  const up = (lv.call_wall/lv.spot-1)*100, dn = (1-lv.put_wall/lv.spot)*100;
+  el("levels").innerHTML = `
+    <div class="card"><div class="k">Call Wall (저항)</div><div class="v up">${F(lv.call_wall)}</div>
+      <div class="s">스팟 대비 +${F(up)}%</div></div>
+    <div class="card"><div class="k">Spot (SPY)</div><div class="v">${F(lv.spot)}</div>
+      <div class="s">세션 ${lv.session}</div></div>
+    <div class="card"><div class="k">Put Wall (지지)</div><div class="v dn">${F(lv.put_wall)}</div>
+      <div class="s">스팟 대비 −${F(dn)}%</div></div>
+    <div class="card"><div class="k">Total GEX</div><div class="v neutral">${F(lv.total_gex_bn,1)}<span style="font-size:12px">bn/1%</span></div>
+      <div class="s">부호는 구조적 상수 — 레짐 아님</div></div>`;
+}
+
+function renderCohorts(st){
+  const c = st.cohorts||{};
+  const box = (title, a, note) => {
+    if(!a || !a.n) return `<div class="card"><div class="k">${title}</div>
+      <div class="v neutral">–</div><div class="s">채점 완료 0건 (대기 ${a? a.n_pending||0 : 0})</div></div>`;
+    const edgeCls = a.edge_pp>0 ? "up" : (a.edge_pp<0 ? "dn":"neutral");
+    return `<div class="card">
+      <div class="k">${title} <span style="text-transform:none">· n=${a.n}</span></div>
+      <div class="v">${F(a.contained_pct,1)}%<span style="font-size:12px;color:var(--muted)"> 밴드 내 종가</span></div>
+      <div class="s">95% CI [${F(a.contained_ci[0],1)}, ${F(a.contained_ci[1],1)}]%</div>
+      <table style="margin-top:8px">
+        <tr><th>대조군(동일 폭 대칭)</th><td>${F(a.null_contained_pct,1)}%</td></tr>
+        <tr><th>edge</th><td class="${edgeCls}">${a.edge_pp>0?"+":""}${F(a.edge_pp,1)}pp</td></tr>
+        <tr><th>call 터치 / 반발</th><td>${F(a.touch_call_pct,0)}% / ${a.respect_call_pct==null?"–":F(a.respect_call_pct,0)+"%"}</td></tr>
+        <tr><th>put 터치 / 반발</th><td>${F(a.touch_put_pct,0)}% / ${a.respect_put_pct==null?"–":F(a.respect_put_pct,0)+"%"}</td></tr>
+        <tr><th>평균 밴드폭</th><td>${F(a.avg_band_pct,2)}%</td></tr>
+        <tr><th>평균 익일 레인지</th><td>${F(a.avg_next_range_pct,2)}%</td></tr>
+      </table>
+      <div class="s" style="margin-top:6px">${a.verdict||""}</div>
+      ${note?`<div class="s">${note}</div>`:""}
+    </div>`;
+  };
+  el("cohorts").innerHTML =
+    box("Out-of-sample (실시간 기록)", c.out_of_sample, "이것만이 포워드 테스트다") +
+    box("Backfilled (첫 실행 소급)", c.backfilled, "백테스트 — 참고용");
+}
+
+function renderLedger(rows){
+  const h = `<tr><th>세션</th><th>Spot</th><th>Put Wall</th><th>Call Wall</th><th>GEX bn</th>
+             <th>익일 저</th><th>익일 고</th><th>익일 종</th><th>밴드내</th><th>대조군</th><th>코호트</th></tr>`;
+  el("ledger").innerHTML = h + rows.map(r=>{
+    const q = r.result;
+    const ok = v => v==null ? "–" : (v ? "<span class='up'>O</span>" : "<span class='dn'>X</span>");
+    return `<tr>
+      <td>${r.session}</td><td>${F(r.spot)}</td><td class="dn">${F(r.put_wall)}</td>
+      <td class="up">${F(r.call_wall)}</td><td>${F(r.total_gex_bn,1)}</td>
+      <td>${q?F(q.next_low):"–"}</td><td>${q?F(q.next_high):"–"}</td><td>${q?F(q.next_close):"–"}</td>
+      <td>${ok(q?q.contained:null)}</td><td>${ok(q?q.null_contained:null)}</td>
+      <td>${r.backfilled?"backfill":"live"}</td></tr>`;
+  }).join("");
+}
+
+/* 리서치 차트 문법: 얇은 선, 낮은 채도, 범례 상자 대신 선 끝 직접 라벨, 8:5 */
+function renderChart(rows){
+  const d = rows.filter(r=>r.result).slice(0,40).reverse();
+  if(!d.length){ el("chart").innerHTML = '<div class="foot">채점 완료된 세션이 아직 없다.</div>'; return; }
+  const W=1180, H=Math.round(W*5/8), P={t:16,r:74,b:30,l:46};
+  const iw=W-P.l-P.r, ih=H-P.t-P.b;
+  const vals=[]; d.forEach(r=>{vals.push(r.call_wall,r.put_wall,r.spot,r.result.next_high,r.result.next_low);});
+  const lo=Math.min(...vals), hi=Math.max(...vals), pad=(hi-lo)*0.08||1;
+  const y=v=>P.t+ih-((v-(lo-pad))/((hi+pad)-(lo-pad)))*ih;
+  const x=i=>P.l+(d.length===1?iw/2:(i/(d.length-1))*iw);
+
+  let s=`<svg viewBox="0 0 ${W} ${H}" width="100%" preserveAspectRatio="xMidYMid meet">`;
+  for(let g=0;g<=4;g++){ const v=(lo-pad)+((hi+pad)-(lo-pad))*g/4;
+    s+=`<line x1="${P.l}" x2="${P.l+iw}" y1="${y(v)}" y2="${y(v)}" stroke="var(--border)" stroke-width="0.5"/>`;
+    s+=`<text x="${P.l-6}" y="${y(v)+3}" text-anchor="end">${v.toFixed(0)}</text>`; }
+
+  // 벽 밴드
+  d.forEach((r,i)=>{ s+=`<line x1="${x(i)}" x2="${x(i)}" y1="${y(r.call_wall)}" y2="${y(r.put_wall)}"
+      stroke="#2e6fd4" stroke-width="7" stroke-opacity="0.13" stroke-linecap="butt"/>`; });
+  // 익일 실현 고저 + 종가
+  d.forEach((r,i)=>{ const q=r.result;
+    s+=`<line x1="${x(i)}" x2="${x(i)}" y1="${y(q.next_high)}" y2="${y(q.next_low)}"
+        stroke="var(--fg)" stroke-width="1" stroke-opacity="0.45"/>`;
+    s+=`<circle cx="${x(i)}" cy="${y(q.next_close)}" r="2.2"
+        fill="${q.contained?'#2e6fd4':'#c0553f'}"/>`; });
+  // 벽 라인
+  const path=(k,col)=>d.map((r,i)=>`${i?'L':'M'}${x(i)},${y(r[k])}`).join(" ");
+  s+=`<path d="${path('call_wall')}" fill="none" stroke="#2e6fd4" stroke-width="1.1"/>`;
+  s+=`<path d="${path('put_wall')}" fill="none" stroke="#8a5cd0" stroke-width="1.1"/>`;
+  // 선 끝 직접 라벨
+  const last=d.length-1;
+  s+=`<text x="${x(last)+6}" y="${y(d[last].call_wall)+3}" fill="#2e6fd4">call wall</text>`;
+  s+=`<text x="${x(last)+6}" y="${y(d[last].put_wall)+3}" fill="#8a5cd0">put wall</text>`;
+  // x 라벨 (양 끝만)
+  s+=`<text x="${P.l}" y="${H-10}" text-anchor="start">${d[0].session}</text>`;
+  s+=`<text x="${P.l+iw}" y="${H-10}" text-anchor="end">${d[last].session}</text>`;
+  const nIn=d.filter(r=>r.result.contained).length;
+  s+=`<text x="${P.l}" y="${P.t+10}">세로선 = 다음 세션 고−저 · 점 = 종가(파랑 = 밴드 내) · n=${d.length}, 밴드 내 ${nIn}</text>`;
+  s+=`</svg>`;
+  el("chart").innerHTML=s;
+}
+
+el("runbtn").addEventListener("click", async ()=>{
+  el("runbtn").disabled=true; el("runbtn").textContent="실행 중…";
+  await fetch("/quant/us_options_gamma_wall/run",{method:"POST"});
+  setTimeout(async()=>{ await load(); el("runbtn").disabled=false; el("runbtn").textContent="스캔 실행"; }, 3000);
+});
+load();
+</script>
+</body>
+</html>
