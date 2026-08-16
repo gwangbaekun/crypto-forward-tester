@@ -773,6 +773,38 @@ async def _check_exit_price(pos: PolymarketFadePosition, current_mid: float) -> 
     await _close_position(pos, exit_px, reason)
 
 
+async def _wallet_shares(token_id: str) -> float:
+    """지갑이 실제로 들고 있는 수량. 조회 실패 시 -1 (판단 보류 → 재시도 유지)."""
+    if not token_id:
+        return 0.0
+    from features.strategy.polymarket._data import live as poly_live
+    try:
+        held = await poly_live.fetch_open_positions()
+    except Exception as e:                                   # noqa: BLE001
+        log.warning("[fade] 지갑 조회 실패 — 물량 판단 보류: %s", e)
+        return -1.0
+    for p in held:
+        if p.get("token_id") == token_id:
+            return float(p.get("size") or 0)
+    return 0.0
+
+
+def _mark_orphan(pos_id: int) -> None:
+    """지갑에 없는 원장 행을 닫는다. 손익은 기록하지 않는다 — 체결이 없었으므로
+    수익률을 적으면 그것 자체가 또 하나의 유령 통계가 된다."""
+    db = get_session()
+    try:
+        row = db.get(PolymarketFadePosition, pos_id)
+        if row and row.status == "open":
+            row.status = "closed"
+            row.exit_ts = int(time.time())
+            row.exit_reason = "지갑없음"
+            db.commit()
+    finally:
+        db.close()
+    _refresh_open_cache()
+
+
 async def _close_position(pos: PolymarketFadePosition, exit_px: float, reason: str) -> None:
     """청산 — **매도가 체결된 뒤에만** DB 를 닫는다.
 
@@ -792,6 +824,16 @@ async def _close_position(pos: PolymarketFadePosition, exit_px: float, reason: s
     )
     status = (res.get("status") or "").lower()
     if status != "matched":
+        # 팔 물건 자체가 없으면 재시도는 영원히 실패한다 — 슬롯만 잡아먹고 로그를 채운다.
+        # 실측(2026-08-16): 지갑에 0 주인 행 2건이 초당 수 회씩 매도를 재시도해 로그를
+        # 통째로 덮었고, 그 2건이 슬롯을 물고 있어 신규 진입이 한 건도 못 나갔다.
+        # 원장에 있는데 지갑에 없는 경우는 (a) 옛 코드가 미체결을 포지션으로 기록했거나
+        # (b) 외부에서 이미 팔렸거나 (c) 정산된 것이다. 셋 다 재시도로 풀리지 않는다.
+        if await _wallet_shares(pos.no_token_id or "") <= 0.01:
+            log.warning("[fade] 지갑에 물량 없음 → 원장 정리(슬롯 반납): %s",
+                        (pos.question or pos.condition_id)[:40])
+            _mark_orphan(pos.id)
+            return
         # DB 를 건드리지 않는다 — 포지션은 여전히 열려 있고 다음 틱에 다시 시도된다.
         log.warning("[fade] 청산 매도 미체결(status=%s) → 포지션 유지: %s | %s",
                     status or "-", (pos.question or pos.condition_id)[:40], res)
