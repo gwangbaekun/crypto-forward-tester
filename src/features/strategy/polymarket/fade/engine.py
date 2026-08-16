@@ -869,7 +869,8 @@ async def _close_position(pos: PolymarketFadePosition, exit_px: float, reason: s
         # 통째로 덮었고, 그 2건이 슬롯을 물고 있어 신규 진입이 한 건도 못 나갔다.
         # 원장에 있는데 지갑에 없는 경우는 (a) 옛 코드가 미체결을 포지션으로 기록했거나
         # (b) 외부에서 이미 팔렸거나 (c) 정산된 것이다. 셋 다 재시도로 풀리지 않는다.
-        if await _wallet_shares(pos.no_token_id or "") <= 0.01:
+        held = await _wallet_shares(pos.no_token_id or "")
+        if 0.0 <= held <= 0.01:      # 음수 = 조회 실패 → 판단 보류(원장 유지)
             log.warning("[fade] 지갑에 물량 없음 → 원장 정리(슬롯 반납): %s",
                         (pos.question or pos.condition_id)[:40])
             _mark_orphan(pos.id)
