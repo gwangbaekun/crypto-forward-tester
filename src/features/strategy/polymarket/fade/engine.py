@@ -529,7 +529,8 @@ async def _size_for_entry(cid: str | None = None) -> float | None:
 
 
 async def _fill_price(no_token_id: str, shares: float, side: str,
-                      yes_token_id: str, yes_px: float) -> float:
+                      yes_token_id: str, yes_px: float,
+                      worst: float | None = None) -> float | None:
     """요청 수량 전부가 **즉시 체결되는** 지정가. side="buy" | "sell".
 
     두 단계로 망가져 있었다.
@@ -544,6 +545,13 @@ async def _fill_price(no_token_id: str, shares: float, side: str,
 
     그래서 사다리를 걸어 요청 수량을 덮는 레벨에 건다. 최우선호가부터 그 레벨까지
     한 번에 쓸어담으므로 잔량이 남지 않는다. REST 실패 시 WS best 호가로 되돌린다.
+
+    3) 그런데 사다리를 **깊이 제한 없이** 파고들면 이번엔 값을 아무렇게나 치른다.
+       실측(2026-08-16): 청산 4건이 전부 '되돌림'(목표 도달)으로 나갔는데 체결가가
+       진입가보다 위였다 — 얇은 호가에서 한 레벨 내려가는 데 4.75센트가 들었고,
+       목표 이동폭(1~1.5센트)의 세 배였다. 이익 실현이 손실 확정이 됐다.
+       → `worst` 로 한도를 건다. 그 안에서 전량이 안 되면 None 을 돌려주고
+         호출부가 이번 틱을 건너뛴다. 손절·타임아웃 같은 강제 청산만 한도 없이 간다.
     """
     try:
         book = await poly_client.fetch_book(no_token_id)
@@ -551,21 +559,30 @@ async def _fill_price(no_token_id: str, shares: float, side: str,
         log.warning("[fade] 호가 조회 실패 → WS best 로 대체: %s", e)
         book = None
 
+    def ok(p: float) -> bool:
+        if worst is None:
+            return True
+        # 매수는 worst 이하로만, 매도는 worst 이상으로만 체결한다.
+        return p <= worst + 1e-9 if side == "buy" else p >= worst - 1e-9
+
     levels = (book or {}).get("asks" if side == "buy" else "bids") or []
     cum = 0.0
     for px, sz in levels:
         cum += sz
         if cum >= shares:
-            return round(px, 4)
-    if levels:          # 사다리 전체로도 부족 → 끝단까지 쓸어담는다
-        return round(levels[-1][0], 4)
+            return round(px, 4) if ok(px) else None
+    if levels:          # 사다리 전체로도 수량이 부족하다
+        p = levels[-1][0]
+        return round(p, 4) if ok(p) else None
 
     level = ws.price_book.get(yes_token_id)
     if level:
         ref = level.best_bid if side == "buy" else level.best_ask
         if ref:
-            return round(1 - float(ref), 4)
-    return round(1 - yes_px, 4)
+            p = round(1 - float(ref), 4)
+            return p if ok(p) else None
+    p = round(1 - yes_px, 4)
+    return p if ok(p) else None
 
 
 async def _enter(sig: fade_signal.FadeSignal) -> None:
@@ -576,8 +593,17 @@ async def _enter(sig: fade_signal.FadeSignal) -> None:
         return
     # 살 수량을 먼저 잡아야 그 수량을 덮는 호가를 고를 수 있다.
     est_shares = size_usd / max(1 - sig.entry_px, 0.01)
+    # 목표(NO 기준 1-target_px)까지 갔을 때 **의도한 이동폭의 절반 이상**이 남는
+    # 가격에서만 산다. 호가가 그보다 비싸면 스프레드가 먹을 것을 다 가져간다는 뜻이라
+    # 이번 틱은 건너뛴다 — 스파이크가 유지되면 다음 틱에 다시 시도된다.
+    move = sig.entry_px - sig.target_px
+    worst_buy = round((1 - sig.target_px) - 0.5 * move, 4)
     no_price = await _fill_price(sig.no_token_id, est_shares, "buy",
-                                 sig.yes_token_id, sig.entry_px)
+                                 sig.yes_token_id, sig.entry_px, worst=worst_buy)
+    if no_price is None:
+        log.info("[fade] 진입 보류 — 호가가 목표 대비 비싸다 (한도 %.4f): %s",
+                 worst_buy, sig.question[:44])
+        return
 
     log.info(
         "[fade] SIGNAL 진입 NO | %s | p0=%.4f entry=%.4f no_px=%.4f size=$%.2f target=%.4f stop=%.4f",
@@ -671,8 +697,12 @@ async def _add_on(condition_id: str, p0: float, add_px: float) -> None:
         log.info("[fade] add-on 스킵 — 가용 잔액 없음 %s", condition_id[:12])
         return
     est_shares = size_usd / max(1 - add_px, 0.01)
+    worst_buy = round((1 - float(cur.target_px)) - 0.5 * (add_px - float(cur.target_px)), 4)
     no_price = await _fill_price(cur.no_token_id or "", est_shares, "buy",
-                                 _yes_token_of(condition_id) or "", add_px)
+                                 _yes_token_of(condition_id) or "", add_px, worst=worst_buy)
+    if no_price is None:
+        log.info("[fade] add-on 보류 — 호가가 목표 대비 비싸다 %s", condition_id[:12])
+        return
 
     log.info(
         "[fade] ADD-ON NO | %s | leg#%d add(YES)=%.4f no_px=%.4f size=$%.2f",
@@ -815,8 +845,18 @@ async def _close_position(pos: PolymarketFadePosition, exit_px: float, reason: s
       · 텔레그램은 체결 전에 발사되니 '계속 수익 보는 것처럼' 보인다
     진입(_enter)은 이미 '체결 확인 후에만 기록' 이다. 청산도 같은 규칙을 쓴다.
     """
+    # 되돌림 청산은 **이익 실현**이다. 체결가가 진입가보다 나쁘면 실현이 아니라
+    # 손실 확정이므로 팔지 않고 기다린다(스파이크가 유지되면 다음 틱에 재시도).
+    # 손절·타임아웃·슬롯교체는 나가는 것 자체가 목적이라 한도를 걸지 않는다.
+    forced = reason not in ("되돌림",)
+    worst_sell = None if forced else round(1 - float(pos.entry_px), 4)
     sell_px = await _fill_price(pos.no_token_id or "", float(pos.shares or 0), "sell",
-                                _yes_token_of(pos.condition_id) or "", exit_px)
+                                _yes_token_of(pos.condition_id) or "", exit_px,
+                                worst=worst_sell)
+    if sell_px is None:
+        log.info("[fade] 청산 보류 — 호가가 진입가보다 나쁘다 (한도 %.4f): %s",
+                 worst_sell or 0, (pos.question or pos.condition_id)[:44])
+        return
     res = await oracle_client.place_order(
         side="NO", action="sell", condition_id=pos.condition_id, question=pos.question or "",
         token_id=pos.no_token_id or "", price=sell_px, size_usd=(pos.entry_usd or 1.0),
