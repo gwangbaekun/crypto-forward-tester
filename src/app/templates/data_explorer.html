@@ -1,0 +1,177 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>수집 데이터 탐색기</title>
+<link rel="stylesheet" href="/static/css/dashboard_common.css">
+<style>
+  body.dx { padding: 10px 12px 28px; }
+  .shell { max-width: 1240px; margin: 0 auto; display:flex; flex-direction:column; gap:10px; }
+  .card { background:var(--card); border:1px solid var(--border); border-radius:8px; padding:10px 12px; }
+  h1 { font-size:15px; margin:0 0 2px; font-weight:600; }
+  .sect { font-size:12px; font-weight:600; margin:8px 0 0; }
+  .note { font-size:11.5px; color:var(--muted); line-height:1.6; }
+  .note b { color:var(--fg); font-weight:600; }
+  table { width:100%; border-collapse:collapse; font-size:11.5px; font-variant-numeric:tabular-nums; }
+  th,td { padding:4px 7px; text-align:right; border-bottom:1px solid var(--border); white-space:nowrap; }
+  th { color:var(--muted); font-weight:500; }
+  th:first-child, td:first-child { text-align:left; }
+  .wrap { overflow-x:auto; }
+  .kv { display:grid; grid-template-columns:repeat(auto-fit,minmax(140px,1fr)); gap:8px; }
+  .kv div { background:var(--card); border:1px solid var(--border); border-radius:8px; padding:8px 10px; }
+  .kv .k { font-size:10.5px; color:var(--muted); text-transform:uppercase; letter-spacing:.04em; }
+  .kv .v { font-size:18px; font-weight:600; margin-top:2px; font-variant-numeric:tabular-nums; }
+  .cmp { display:grid; grid-template-columns:1fr 1fr; gap:10px; }
+  @media (max-width:820px){ .cmp{grid-template-columns:1fr;} }
+  code { font-size:11px; background:rgba(127,127,127,.12); padding:1px 5px; border-radius:4px; }
+  svg text { font-size:9.5px; fill:var(--muted); }
+  .err { color:#c0553f; }
+</style>
+</head>
+<body class="dx">
+<div class="shell">
+  <div class="card">
+    <h1>📦 수집 데이터 탐색기</h1>
+    <div class="note">
+      Oracle VM 이 parquet 으로 모으고, 워크스테이션 Postgres 로 내려받은 것을 그대로 읽는다.
+      <b>옵션 체인은 캔들이 아니다.</b> 캔들은 <code>시각 → 시가·고가·저가·종가</code> 한 줄이지만,
+      체인 스냅샷 하나는 <b>그 순간 살아있는 모든 계약의 목록</b>이다 —
+      한 행이 <code>(만기, 행사가, 콜/풋)</code> 하나에 대응하고, 거기에 호가·미결제약정·그릭스가 붙는다.
+      그래서 SPY 하나에 1만 4천 행이 나온다.
+    </div>
+  </div>
+
+  <div class="sect">수집 현황</div>
+  <div class="card wrap"><table id="inv"></table></div>
+
+  <div class="sect">미국 옵션 체인 — 최신 스냅샷 한 장</div>
+  <div class="kv" id="us-kv"></div>
+  <div class="cmp">
+    <div class="card">
+      <div class="note" style="margin-bottom:6px">만기별 계약 수와 미결제약정 — <b>만기가 매일 있다</b></div>
+      <div class="wrap"><table id="us-exp"></table></div>
+    </div>
+    <div class="card">
+      <div class="note" style="margin-bottom:6px">행사가별 미결제약정 (스팟 ±6%) — 콜 위, 풋 아래</div>
+      <div id="us-oi"></div>
+    </div>
+  </div>
+  <div class="card">
+    <div class="note" style="margin-bottom:6px">원시 행 그대로 (스팟 ±1%)</div>
+    <div class="wrap"><table id="us-raw"></table></div>
+  </div>
+
+  <div class="sect">Deribit BTC 체인 — 같은 구조, 15분마다</div>
+  <div class="kv" id="dx-kv"></div>
+  <div class="cmp">
+    <div class="card">
+      <div class="note" style="margin-bottom:6px">만기별 계약 수 / 미결제약정</div>
+      <div class="wrap"><table id="dx-exp"></table></div>
+    </div>
+    <div class="card">
+      <div class="note" style="margin-bottom:6px">근월 <span id="dx-fe"></span> 변동성 스마일 — 행사가별 IV</div>
+      <div id="dx-smile"></div>
+    </div>
+  </div>
+</div>
+
+<script>
+const $ = id => document.getElementById(id);
+const F = (n,d=2)=> n==null ? "–" : Number(n).toLocaleString(undefined,{minimumFractionDigits:d,maximumFractionDigits:d});
+const I = n => n==null ? "–" : Number(n).toLocaleString();
+
+function tbl(el, cols, rows, fmt){
+  el.innerHTML = "<tr>"+cols.map(c=>`<th>${c}</th>`).join("")+"</tr>" +
+    rows.map(r=>"<tr>"+fmt(r).map(v=>`<td>${v}</td>`).join("")+"</tr>").join("");
+}
+
+/* 가로 막대 — 라이브러리 없이 순수 SVG */
+function bars(el, rows, key, label, colorFn){
+  const W=520, rowH=15, H=rows.length*rowH+20, L=64;
+  const max=Math.max(...rows.map(r=>Math.abs(r[key])))||1;
+  let s=`<svg viewBox="0 0 ${W} ${H}" width="100%">`;
+  rows.forEach((r,i)=>{
+    const y=i*rowH+12, w=Math.abs(r[key])/max*(W-L-58);
+    s+=`<text x="${L-5}" y="${y+4}" text-anchor="end">${label(r)}</text>`;
+    s+=`<rect x="${L}" y="${y-5}" width="${w}" height="9" fill="${colorFn?colorFn(r):'#2e6fd4'}" opacity="0.72"/>`;
+    s+=`<text x="${L+w+5}" y="${y+4}">${I(Math.round(r[key]))}</text>`;
+  });
+  el.innerHTML=s+"</svg>";
+}
+
+/* OI 프로필: 행사가별 콜(파랑)/풋(보라) 양방향 */
+function oiProfile(el, rows, spot){
+  const W=520, rowH=13, H=rows.length*rowH+22, mid=W/2;
+  const max=Math.max(...rows.flatMap(r=>[r.C||0,r.P||0]))||1;
+  let s=`<svg viewBox="0 0 ${W} ${H}" width="100%">`;
+  rows.forEach((r,i)=>{
+    const y=i*rowH+14;
+    const wc=(r.C||0)/max*(mid-52), wp=(r.P||0)/max*(mid-52);
+    s+=`<rect x="${mid}" y="${y-4.5}" width="${wc}" height="8" fill="#2e6fd4" opacity="0.75"/>`;
+    s+=`<rect x="${mid-wp}" y="${y-4.5}" width="${wp}" height="8" fill="#8a5cd0" opacity="0.75"/>`;
+    const near = Math.abs(r.strike-spot) < 1.5;
+    s+=`<text x="${mid}" y="${y+3.5}" text-anchor="middle" style="font-size:8.5px;${near?'font-weight:700;fill:var(--fg)':''}">${r.strike}</text>`;
+  });
+  s+=`<text x="${mid+6}" y="9" fill="#2e6fd4">콜 OI →</text>`;
+  s+=`<text x="${mid-6}" y="9" text-anchor="end" fill="#8a5cd0">← 풋 OI</text>`;
+  el.innerHTML=s+"</svg>";
+}
+
+function smile(el, rows, spot){
+  const W=520,H=190,P={t:14,r:12,b:22,l:36};
+  const iw=W-P.l-P.r, ih=H-P.t-P.b;
+  const ks=rows.map(r=>r.strike), vs=rows.map(r=>r.mark_iv).filter(v=>v>0);
+  const kmin=Math.min(...ks),kmax=Math.max(...ks),vmin=Math.min(...vs),vmax=Math.max(...vs);
+  const x=k=>P.l+(k-kmin)/((kmax-kmin)||1)*iw, y=v=>P.t+ih-(v-vmin)/((vmax-vmin)||1)*ih;
+  let s=`<svg viewBox="0 0 ${W} ${H}" width="100%">`;
+  for(let g=0;g<=3;g++){const v=vmin+(vmax-vmin)*g/3;
+    s+=`<line x1="${P.l}" x2="${P.l+iw}" y1="${y(v)}" y2="${y(v)}" stroke="var(--border)" stroke-width=".5"/>`;
+    s+=`<text x="${P.l-5}" y="${y(v)+3}" text-anchor="end">${v.toFixed(0)}%</text>`;}
+  rows.filter(r=>r.mark_iv>0).forEach(r=>{
+    s+=`<circle cx="${x(r.strike)}" cy="${y(r.mark_iv)}" r="1.9" fill="${r.option_type==='C'?'#2e6fd4':'#8a5cd0'}" opacity=".85"/>`;});
+  s+=`<line x1="${x(spot)}" x2="${x(spot)}" y1="${P.t}" y2="${P.t+ih}" stroke="var(--fg)" stroke-width=".6" stroke-dasharray="3 3" opacity=".5"/>`;
+  s+=`<text x="${x(spot)}" y="${H-8}" text-anchor="middle">스팟 ${Math.round(spot)}</text>`;
+  s+=`<text x="${P.l}" y="${H-8}">${Math.round(kmin)}</text><text x="${P.l+iw}" y="${H-8}" text-anchor="end">${Math.round(kmax)}</text>`;
+  el.innerHTML=s+"</svg>";
+}
+
+async function load(){
+  const inv = await (await fetch("/data/api/inventory")).json();
+  tbl($("inv"), ["테이블","설명","행 수","시작","최근"], inv.tables,
+      r => r.error ? [r.table, r.label, `<span class="err">${r.error}</span>`,"–","–"]
+                   : [r.table, r.label, I(r.rows), (r.from||"").slice(0,16), (r.to||"").slice(0,16)]);
+
+  const us = await (await fetch("/data/api/chain-snapshot?underlying=SPY")).json();
+  if(!us.error){
+    $("us-kv").innerHTML = [
+      ["기초자산", us.underlying], ["스팟", F(us.spot)],
+      ["계약 수(=행 수)", I(us.n_contracts)], ["만기 종류", I(us.n_expiries)],
+      ["행사가 종류", I(us.n_strikes)], ["스냅 시각", us.snapshot_ts.slice(0,16)+"Z"],
+    ].map(([k,v])=>`<div><div class="k">${k}</div><div class="v">${v}</div></div>`).join("");
+    tbl($("us-exp"), ["만기","계약 수","미결제약정","거래량"], us.by_expiry,
+        r=>[r.expiry, I(r.contracts), I(r.oi), I(r.volume)]);
+    oiProfile($("us-oi"), us.oi_profile, us.spot);
+    tbl($("us-raw"), ["계약","만기","행사가","C/P","매수호가","매도호가","IV","델타","감마","미결제","거래량"],
+        us.sample_rows,
+        r=>[r.option, r.expiry, F(r.strike,0), r.option_type, F(r.bid), F(r.ask),
+            F(r.iv,3), F(r.delta,3), F(r.gamma,4), I(r.open_interest), I(r.volume)]);
+  }
+
+  const dx = await (await fetch("/data/api/deribit-snapshot?currency=BTC")).json();
+  if(!dx.error){
+    $("dx-kv").innerHTML = [
+      ["통화", dx.currency], ["스팟", F(dx.spot,0)],
+      ["계약 수", I(dx.n_contracts)], ["만기 종류", I(dx.n_expiries)],
+      ["오늘 스냅 수", I(dx.snapshots_today)], ["스냅 시각", dx.snapshot_ts.slice(0,16)+"Z"],
+    ].map(([k,v])=>`<div><div class="k">${k}</div><div class="v">${v}</div></div>`).join("");
+    tbl($("dx-exp"), ["만기","계약 수","미결제약정"], dx.by_expiry,
+        r=>[r.expiry, I(r.contracts), I(r.oi)]);
+    $("dx-fe").textContent = dx.front_expiry;
+    smile($("dx-smile"), dx.smile, dx.spot);
+  }
+}
+load();
+</script>
+</body>
+</html>

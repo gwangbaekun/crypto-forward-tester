@@ -26,6 +26,7 @@ from features.auth.config import get_auth_config
 from features.auth.middleware import AccessGateMiddleware
 from features.auth.router import router as access_auth_router
 from features.ctrader.router import router as ctrader_auth_router
+from features.data_explorer.router import router as data_explorer_router
 from features.site_index.router import router as site_index_router
 from features.strategy.router_registry import include_strategy_routers
 from features.strategy.router import router as strategy_router
@@ -236,6 +237,7 @@ async def health() -> dict:
 
 
 app.include_router(access_auth_router)
+app.include_router(data_explorer_router)   # /data/explorer — 수집 데이터 구조 보기
 app.include_router(site_index_router)      # "/" — 전체 페이지 인덱스
 app.include_router(master_dashboard_router)
 app.include_router(ctrader_auth_router)
