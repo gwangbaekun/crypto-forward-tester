@@ -184,24 +184,6 @@ btc_liq_sweep_reversal:
     module: features.strategy.btc_liq_sweep_reversal.realtime_feed
     fn: get_state
 
-btc_oi_accel_breakout:
-  enabled: false
-  monitoring: false
-  symbol: "BTCUSDT"
-  tick_interval: 60
-  timeframes: ["1h", "4h"]
-  entry_tf: "1h"
-  strategy_tag: btc_oi_accel_breakout
-  label: "BTC OI Accel Breakout"
-  emoji: "🚀"
-  telegram_alerts: false
-  discord_alerts: false
-  binance_live: false
-  binance_leverage: 3
-  tick:
-    module: features.strategy.btc_oi_accel_breakout.realtime_feed
-    fn: get_state
-
 spot_perp_cvd:
   enabled: true
   monitoring: true
@@ -244,69 +226,6 @@ oi_accel_breakout_v2:
     fn: get_state
     kwargs:
       strategy_key: oi_accel_breakout_v2
-
-eth_oi_accel_breakout_v2:
-  enabled: false
-  monitoring: false
-  symbol: "ETHUSDT"
-  tick_interval: 60
-  timeframes: ["15m"]
-  entry_tf: "15m"
-  strategy_tag: eth_oi_accel_breakout_v2
-  base_strategy: oi_accel_breakout_v2
-  label: "OI Accel Breakout v2 ETH 15m"
-  emoji: "🚀"
-  telegram_alerts: true
-  discord_alerts: true
-  binance_live: false
-  binance_leverage: 3
-  tick:
-    module: features.strategy.oi_accel_breakout_v2.realtime_feed
-    fn: get_state
-    kwargs:
-      strategy_key: eth_oi_accel_breakout_v2
-
-sol_oi_accel_breakout_v2:
-  enabled: false
-  monitoring: false
-  symbol: "SOLUSDT"
-  tick_interval: 60
-  timeframes: ["15m"]
-  entry_tf: "15m"
-  strategy_tag: sol_oi_accel_breakout_v2
-  base_strategy: oi_accel_breakout_v2
-  label: "OI Accel Breakout v2 SOL 15m"
-  emoji: "🚀"
-  telegram_alerts: true
-  discord_alerts: true
-  binance_live: false
-  binance_leverage: 3
-  tick:
-    module: features.strategy.oi_accel_breakout_v2.realtime_feed
-    fn: get_state
-    kwargs:
-      strategy_key: sol_oi_accel_breakout_v2
-
-bnb_oi_accel_breakout_v2:
-  enabled: false
-  monitoring: false
-  symbol: "BNBUSDT"
-  tick_interval: 60
-  timeframes: ["15m"]
-  entry_tf: "15m"
-  strategy_tag: bnb_oi_accel_breakout_v2
-  base_strategy: oi_accel_breakout_v2
-  label: "OI Accel Breakout v2 BNB 15m"
-  emoji: "🚀"
-  telegram_alerts: true
-  discord_alerts: true
-  binance_live: false
-  binance_leverage: 3
-  tick:
-    module: features.strategy.oi_accel_breakout_v2.realtime_feed
-    fn: get_state
-    kwargs:
-      strategy_key: bnb_oi_accel_breakout_v2
 
 deribit_gex_reversal:
   enabled: true
