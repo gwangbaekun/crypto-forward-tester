@@ -11,12 +11,11 @@
       background: #0d1117;
       color: #c9d1d9;
       font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-      min-height: 100vh;
+      height: 100vh;
       display: flex;
       flex-direction: column;
     }
 
-    /* ── Header ── */
     .header {
       background: #161b22;
       border-bottom: 1px solid #21262d;
@@ -26,14 +25,11 @@
       gap: 12px;
       flex-shrink: 0;
     }
-    .header-title {
-      font-size: 15px;
-      font-weight: 600;
-      color: #e6edf3;
-    }
+    .header-title { font-size: 15px; font-weight: 600; color: #e6edf3; }
     .header-sub {
       font-size: 12px;
       color: #7d8590;
+      font-family: "SF Mono", "Fira Code", monospace;
     }
     .header-actions {
       margin-left: auto;
@@ -52,26 +48,20 @@
     }
     .badge-enabled { background: #1a4731; color: #3fb950; border: 1px solid #238636; }
     .badge-total   { background: #161b22; color: #7d8590;  border: 1px solid #30363d; }
+    .badge-ro      { background: #161b22; color: #7d8590;  border: 1px solid #30363d; }
 
-    /* ── Layout ── */
-    .layout {
-      display: flex;
-      flex: 1;
-      min-height: 0;
-      overflow: hidden;
-    }
+    .layout { display: flex; flex: 1; min-height: 0; overflow: hidden; }
 
-    /* ── Sidebar ── */
     .sidebar {
-      width: 230px;
+      width: 290px;
       flex-shrink: 0;
       background: #161b22;
       border-right: 1px solid #21262d;
       overflow-y: auto;
-      padding: 12px 0;
+      padding: 10px 0 20px;
     }
     .sidebar-section {
-      padding: 6px 14px 4px;
+      padding: 12px 14px 5px;
       font-size: 11px;
       text-transform: uppercase;
       letter-spacing: .06em;
@@ -94,84 +84,114 @@
       border-left-color: #388bfd;
       color: #e6edf3;
     }
-    .dot {
-      width: 8px; height: 8px;
-      border-radius: 50%;
-      flex-shrink: 0;
-    }
+    .dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
     .dot-on  { background: #3fb950; }
     .dot-off { background: #484f58; }
     .strategy-label { flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
     .strategy-emoji { font-size: 14px; flex-shrink: 0; }
+    .strategy-open {
+      flex-shrink: 0;
+      color: #58a6ff;
+      text-decoration: none;
+      font-size: 12px;
+      padding: 0 3px;
+      opacity: .65;
+    }
+    .strategy-open:hover { opacity: 1; }
+    .strategy-nolink { flex-shrink: 0; color: #484f58; font-size: 12px; padding: 0 3px; }
 
-    /* ── Editor area ── */
-    .editor-area {
+    .main {
       flex: 1;
       display: flex;
       flex-direction: column;
       min-width: 0;
       overflow: hidden;
     }
-    .editor-toolbar {
+
+    .detail {
       background: #161b22;
       border-bottom: 1px solid #21262d;
-      padding: 8px 16px;
+      padding: 10px 16px;
+      flex-shrink: 0;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      flex-wrap: wrap;
+      min-height: 46px;
+    }
+    .detail-key {
+      font-family: "SF Mono", "Fira Code", monospace;
+      font-size: 13px;
+      color: #e6edf3;
+    }
+    .meta {
+      font-size: 11.5px;
+      color: #7d8590;
+      border: 1px solid #30363d;
+      border-radius: 4px;
+      padding: 2px 7px;
+      font-family: "SF Mono", "Fira Code", monospace;
+    }
+    .meta-live { color: #f0883e; border-color: #5a3a1a; }
+    .link-chip {
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      font-size: 12px;
+      color: #58a6ff;
+      text-decoration: none;
+      border: 1px solid #30363d;
+      border-radius: 6px;
+      padding: 3px 10px;
+      transition: background .12s, border-color .12s;
+    }
+    .link-chip:hover { background: #1c2128; border-color: #388bfd; }
+    .link-chip code {
+      color: #7d8590;
+      font-family: "SF Mono", "Fira Code", monospace;
+      font-size: 11px;
+    }
+    .detail-empty { font-size: 12px; color: #484f58; }
+    .detail-spacer { margin-left: auto; }
+
+    .toolbar {
+      background: #0d1117;
+      border-bottom: 1px solid #21262d;
+      padding: 7px 16px;
       display: flex;
       align-items: center;
       gap: 10px;
       flex-shrink: 0;
     }
     .toolbar-file {
-      font-size: 13px;
+      font-size: 12.5px;
       color: #7d8590;
       font-family: "SF Mono", "Fira Code", monospace;
     }
-    .toolbar-file span { color: #e6edf3; }
+    .toolbar-file span { color: #c9d1d9; }
 
     .btn {
-      padding: 5px 16px;
+      padding: 4px 14px;
       border-radius: 6px;
-      font-size: 13px;
+      font-size: 12.5px;
       font-weight: 500;
       cursor: pointer;
-      border: 1px solid transparent;
-      transition: opacity .15s;
-    }
-    .btn:disabled { opacity: .45; cursor: not-allowed; }
-    .btn-primary {
-      background: #238636;
-      color: #fff;
-      border-color: #2ea043;
-    }
-    .btn-primary:hover:not(:disabled) { background: #2ea043; }
-    .btn-secondary {
       background: transparent;
       color: #c9d1d9;
-      border-color: #30363d;
+      border: 1px solid #30363d;
+      transition: background .15s;
     }
-    .btn-secondary:hover:not(:disabled) { background: #1c2128; }
+    .btn:hover:not(:disabled) { background: #1c2128; }
+    .btn:disabled { opacity: .45; cursor: not-allowed; }
 
-    .save-status {
-      font-size: 12px;
-      padding: 3px 10px;
-      border-radius: 4px;
-      display: none;
-    }
-    .save-status.ok  { color: #3fb950; background: #1a4731; display: inline-block; }
-    .save-status.err { color: #f85149; background: #3d1f1f; display: inline-block; }
-
-    #editor-wrap {
-      flex: 1;
-      overflow: hidden;
-      position: relative;
-    }
-    #yaml-editor {
+    #yaml-wrap { flex: 1; overflow: hidden; }
+    #yaml-view {
       width: 100%;
       height: 100%;
       background: #0d1117;
-      color: #c9d1d9;
+      color: #8b949e;
       font-family: "SF Mono", "Fira Code", "Consolas", monospace;
-      font-size: 13.5px;
+      font-size: 13px;
       line-height: 1.6;
       border: none;
       outline: none;
@@ -179,9 +199,8 @@
       padding: 16px 20px;
       tab-size: 2;
     }
-    #yaml-editor:focus { outline: none; }
+    #yaml-view::selection { background: #1f6feb55; color: #e6edf3; }
 
-    /* ── Toast ── */
     .toast {
       position: fixed;
       bottom: 24px; right: 24px;
@@ -195,20 +214,10 @@
       transition: opacity .2s, transform .2s;
       pointer-events: none;
       z-index: 100;
+      background: #da3633;
+      color: #fff;
     }
     .toast.show { opacity: 1; transform: translateY(0); }
-    .toast-ok  { background: #238636; color: #fff; }
-    .toast-err { background: #da3633; color: #fff; }
-
-    /* ── Dirty indicator ── */
-    .dirty-dot {
-      display: none;
-      width: 7px; height: 7px;
-      background: #e3b341;
-      border-radius: 50%;
-      margin-left: 4px;
-    }
-    .dirty-dot.show { display: inline-block; }
   </style>
 </head>
 <body>
@@ -220,9 +229,10 @@
   </svg>
   <div>
     <div class="header-title">Strategies Master</div>
-    <div class="header-sub">strategies_master.yaml 직접 편집</div>
+    <div class="header-sub" id="header-path">—</div>
   </div>
   <div class="header-actions">
+    <span class="badge badge-ro">read-only</span>
     <span class="badge badge-enabled" id="badge-enabled">— enabled</span>
     <span class="badge badge-total"   id="badge-total">— total</span>
     <a href="/" style="color:#58a6ff;text-decoration:none;font-size:12.5px;">← Index</a>
@@ -230,219 +240,167 @@
 </div>
 
 <div class="layout">
-  <!-- Sidebar -->
   <div class="sidebar" id="sidebar">
-    <div class="sidebar-section">전략 목록</div>
-    <div id="strategy-list">
-      <div style="padding:10px 14px;font-size:12px;color:#484f58">로딩 중…</div>
-    </div>
+    <div style="padding:12px 14px;font-size:12px;color:#484f58">로딩 중…</div>
   </div>
 
-  <!-- Editor -->
-  <div class="editor-area">
-    <div class="editor-toolbar">
-      <div class="toolbar-file">
-        src/features/strategy/common/<span>strategies_master.yaml</span>
-        <span class="dirty-dot" id="dirty-dot" title="저장되지 않은 변경">●</span>
-      </div>
-      <div style="margin-left:auto;display:flex;align-items:center;gap:8px">
-        <span class="save-status" id="save-status"></span>
-        <button class="btn btn-secondary" id="btn-reload" title="서버에서 다시 불러오기">↺ Reload</button>
-        <button class="btn btn-primary"   id="btn-save">Save</button>
+  <div class="main">
+    <div class="detail" id="detail">
+      <span class="detail-empty">전략을 선택하세요</span>
+    </div>
+
+    <div class="toolbar">
+      <div class="toolbar-file">src/features/strategy/common/<span>strategies_master.yaml</span></div>
+      <div style="margin-left:auto">
+        <button class="btn" id="btn-reload">↺ Reload</button>
       </div>
     </div>
 
-    <div id="editor-wrap">
-      <textarea id="yaml-editor" spellcheck="false" autocomplete="off" autocorrect="off" autocapitalize="off"></textarea>
+    <div id="yaml-wrap">
+      <textarea id="yaml-view" readonly spellcheck="false"></textarea>
     </div>
   </div>
 </div>
 
-<!-- Toast -->
 <div class="toast" id="toast"></div>
 
 <script>
 (function () {
-  const textarea   = document.getElementById('yaml-editor');
-  const btnSave    = document.getElementById('btn-save');
-  const btnReload  = document.getElementById('btn-reload');
+  const view       = document.getElementById('yaml-view');
+  const sidebar    = document.getElementById('sidebar');
+  const detail     = document.getElementById('detail');
   const toast      = document.getElementById('toast');
-  const dirtyDot   = document.getElementById('dirty-dot');
-  const saveStatus = document.getElementById('save-status');
-  const sidebar    = document.getElementById('strategy-list');
+  const btnReload  = document.getElementById('btn-reload');
   const badgeEna   = document.getElementById('badge-enabled');
   const badgeTot   = document.getElementById('badge-total');
+  const headerPath = document.getElementById('header-path');
 
-  let originalContent = '';
-  let dirty = false;
+  let strategies = [];
 
-  // ── YAML minimal parser (for sidebar only) ─────────────────────────
-  function parseStrategies(yamlText) {
-    const strategies = [];
-    const lines = yamlText.split('\n');
-    let current = null;
-    for (const line of lines) {
-      if (!line.trim() || line.trim().startsWith('#')) continue;
-      const topKey = line.match(/^([a-zA-Z_][a-zA-Z0-9_]*):\s*$/);
-      if (topKey) {
-        if (current) strategies.push(current);
-        current = { key: topKey[1], enabled: false, label: topKey[1], emoji: '' };
-        continue;
-      }
-      if (!current) continue;
-      const enabled = line.match(/^\s+enabled:\s*(true|false)/);
-      if (enabled) current.enabled = enabled[1] === 'true';
-      const label = line.match(/^\s+label:\s*["']?(.+?)["']?\s*$/);
-      if (label) current.label = label[1];
-      const emoji = line.match(/^\s+emoji:\s*["']?(.+?)["']?\s*$/);
-      if (emoji) current.emoji = emoji[1];
-    }
-    if (current) strategies.push(current);
-    return strategies;
+  function esc(s) {
+    return String(s).replace(/[&<>"']/g, c => (
+      { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]
+    ));
   }
 
-  function renderSidebar(yamlText) {
-    const strategies = parseStrategies(yamlText);
-    const enabled = strategies.filter(s => s.enabled).length;
-    badgeEna.textContent = `${enabled} enabled`;
-    badgeTot.textContent = `${strategies.length} total`;
-
-    if (!strategies.length) {
-      sidebar.innerHTML = '<div style="padding:10px 14px;font-size:12px;color:#484f58">전략 없음</div>';
-      return;
-    }
-
-    sidebar.innerHTML = strategies.map(s => `
-      <div class="strategy-item" data-key="${s.key}" onclick="scrollToKey('${s.key}')">
-        <div class="dot ${s.enabled ? 'dot-on' : 'dot-off'}"></div>
-        <span class="strategy-emoji">${s.emoji || '•'}</span>
-        <span class="strategy-label">${s.label}</span>
-      </div>
-    `).join('');
-  }
-
-  window.scrollToKey = function (key) {
-    const lines = textarea.value.split('\n');
-    let charPos = 0;
-    for (let i = 0; i < lines.length; i++) {
-      if (lines[i].startsWith(key + ':')) {
-        textarea.focus();
-        textarea.setSelectionRange(charPos, charPos + lines[i].length);
-        // approximate line scroll
-        const lineH = parseFloat(getComputedStyle(textarea).lineHeight) || 22;
-        textarea.scrollTop = Math.max(0, i * lineH - 120);
-        // highlight sidebar item
-        document.querySelectorAll('.strategy-item').forEach(el => el.classList.remove('active'));
-        const item = document.querySelector(`.strategy-item[data-key="${key}"]`);
-        if (item) item.classList.add('active');
-        return;
-      }
-      charPos += lines[i].length + 1;
-    }
-  };
-
-  function markDirty() {
-    if (!dirty) {
-      dirty = true;
-      dirtyDot.classList.add('show');
-    }
-    renderSidebar(textarea.value);
-  }
-
-  textarea.addEventListener('input', markDirty);
-
-  // Tab key → insert 2 spaces
-  textarea.addEventListener('keydown', e => {
-    if (e.key === 'Tab') {
-      e.preventDefault();
-      const start = textarea.selectionStart;
-      const end   = textarea.selectionEnd;
-      textarea.value = textarea.value.slice(0, start) + '  ' + textarea.value.slice(end);
-      textarea.selectionStart = textarea.selectionEnd = start + 2;
-    }
-    // Ctrl/Cmd + S
-    if ((e.ctrlKey || e.metaKey) && e.key === 's') {
-      e.preventDefault();
-      saveYaml();
-    }
-  });
-
-  // ── Toast ───────────────────────────────────────────────────────────
   let toastTimer = null;
-  function showToast(msg, isOk) {
+  function showToast(msg) {
     toast.textContent = msg;
-    toast.className = `toast ${isOk ? 'toast-ok' : 'toast-err'} show`;
+    toast.classList.add('show');
     clearTimeout(toastTimer);
     toastTimer = setTimeout(() => toast.classList.remove('show'), 3000);
   }
 
-  // ── Load ────────────────────────────────────────────────────────────
-  async function loadYaml() {
+  function renderSidebar() {
+    if (!strategies.length) {
+      sidebar.innerHTML = '<div style="padding:12px 14px;font-size:12px;color:#484f58">전략 없음</div>';
+      return;
+    }
+
+    const groups = [
+      ['enabled', strategies.filter(s => s.enabled)],
+      ['disabled', strategies.filter(s => !s.enabled)],
+    ];
+
+    sidebar.innerHTML = groups.map(([name, list]) => {
+      if (!list.length) return '';
+      const rows = list.map(s => {
+        const primary = s.pages.length ? s.pages[0].path : '';
+        const open = primary
+          ? `<a class="strategy-open" href="${esc(primary)}" target="_blank" rel="noopener"
+                onclick="event.stopPropagation()" title="${esc(primary)}">↗</a>`
+          : '<span class="strategy-nolink" title="바인딩된 페이지 없음">·</span>';
+        return `
+          <div class="strategy-item" data-key="${esc(s.key)}">
+            <div class="dot ${s.enabled ? 'dot-on' : 'dot-off'}"></div>
+            <span class="strategy-emoji">${esc(s.emoji || '•')}</span>
+            <span class="strategy-label" title="${esc(s.key)}">${esc(s.label)}</span>
+            ${open}
+          </div>`;
+      }).join('');
+      return `<div class="sidebar-section">${name} · ${list.length}</div>${rows}`;
+    }).join('');
+
+    sidebar.querySelectorAll('.strategy-item').forEach(el => {
+      el.addEventListener('click', () => select(el.dataset.key));
+    });
+  }
+
+  function renderDetail(s) {
+    if (!s) {
+      detail.innerHTML = '<span class="detail-empty">전략을 선택하세요</span>';
+      return;
+    }
+
+    const metas = [];
+    if (s.symbol) metas.push(`<span class="meta">${esc(s.symbol)}</span>`);
+    if (s.timeframes.length) metas.push(`<span class="meta">${esc(s.timeframes.join(' · '))}</span>`);
+    metas.push(`<span class="meta">enabled: ${s.enabled}</span>`);
+    metas.push(`<span class="meta">monitoring: ${s.monitoring}</span>`);
+    if (s.binance_live) metas.push('<span class="meta meta-live">binance_live</span>');
+    if (s.ctrader_live) metas.push('<span class="meta meta-live">ctrader_live</span>');
+    if (s.base !== s.key) metas.push(`<span class="meta">base: ${esc(s.base)}</span>`);
+
+    const links = s.pages.length
+      ? s.pages.map(p => `
+          <a class="link-chip" href="${esc(p.path)}" target="_blank" rel="noopener">
+            ${esc(p.label)} <code>${esc(p.path)}</code>
+          </a>`).join('')
+      : '<span class="detail-empty">바인딩된 페이지 없음</span>';
+
+    detail.innerHTML = `
+      <span class="detail-key">${esc(s.emoji)} ${esc(s.key)}</span>
+      ${metas.join('')}
+      <span class="detail-spacer"></span>
+      ${links}`;
+  }
+
+  function scrollToKey(key) {
+    const lines = view.value.split('\n');
+    let charPos = 0;
+    for (let i = 0; i < lines.length; i++) {
+      if (lines[i].startsWith(key + ':')) {
+        view.focus();
+        view.setSelectionRange(charPos, charPos + lines[i].length);
+        const lineH = parseFloat(getComputedStyle(view).lineHeight) || 22;
+        view.scrollTop = Math.max(0, i * lineH - 120);
+        return;
+      }
+      charPos += lines[i].length + 1;
+    }
+  }
+
+  function select(key) {
+    const s = strategies.find(x => x.key === key);
+    sidebar.querySelectorAll('.strategy-item').forEach(el => {
+      el.classList.toggle('active', el.dataset.key === key);
+    });
+    renderDetail(s);
+    if (s) scrollToKey(key);
+  }
+
+  async function load() {
     btnReload.disabled = true;
     try {
-      const res = await fetch('/api/strategies-master');
+      const res = await fetch('/api/strategies-master', { headers: { 'Accept': 'application/json' } });
       const data = await res.json();
-      if (!data.ok) throw new Error(data.error || 'load failed');
-      originalContent = data.content;
-      textarea.value = data.content;
-      dirty = false;
-      dirtyDot.classList.remove('show');
-      renderSidebar(data.content);
+      if (!data.ok) throw new Error(data.error || `HTTP ${res.status}`);
+      strategies = data.strategies || [];
+      view.value = data.content || '';
+      headerPath.textContent = data.path || '';
+      badgeEna.textContent = `${data.enabled} enabled`;
+      badgeTot.textContent = `${data.total} total`;
+      renderSidebar();
+      renderDetail(null);
     } catch (err) {
-      showToast('로드 실패: ' + err.message, false);
+      showToast('로드 실패: ' + err.message);
     } finally {
       btnReload.disabled = false;
     }
   }
 
-  // ── Save ────────────────────────────────────────────────────────────
-  async function saveYaml() {
-    if (btnSave.disabled) return;
-    btnSave.disabled = true;
-    btnSave.textContent = 'Saving…';
-    saveStatus.className = 'save-status';
-    saveStatus.style.display = 'none';
-
-    try {
-      const res = await fetch('/api/strategies-master', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ content: textarea.value }),
-      });
-      const data = await res.json();
-      if (!data.ok) throw new Error(data.error || 'save failed');
-      originalContent = textarea.value;
-      dirty = false;
-      dirtyDot.classList.remove('show');
-      showToast(`저장 완료 — ${data.enabled}/${data.strategies} 전략 활성`, true);
-      saveStatus.textContent = '✓ 저장됨';
-      saveStatus.className = 'save-status ok';
-      renderSidebar(textarea.value);
-    } catch (err) {
-      showToast('저장 실패: ' + err.message, false);
-      saveStatus.textContent = '✗ ' + err.message;
-      saveStatus.className = 'save-status err';
-    } finally {
-      btnSave.disabled = false;
-      btnSave.textContent = 'Save';
-    }
-  }
-
-  btnSave.addEventListener('click', saveYaml);
-  btnReload.addEventListener('click', () => {
-    if (dirty && !confirm('저장되지 않은 변경이 있습니다. 버리고 다시 불러올까요?')) return;
-    loadYaml();
-  });
-
-  // warn on close
-  window.addEventListener('beforeunload', e => {
-    if (dirty) {
-      e.preventDefault();
-      e.returnValue = '';
-    }
-  });
-
-  loadYaml();
+  btnReload.addEventListener('click', load);
+  load();
 })();
 </script>
 </body>

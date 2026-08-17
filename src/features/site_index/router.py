@@ -122,7 +122,7 @@ def _describe(path: str, name: str, master: Dict[str, Dict[str, Any]]) -> Dict[s
     if path in _ADMIN_ONLY:
         meta = {
             "/admin/access":     ("🔑", "접근 패스", "게스트 코드 발급 · 연장 · 폐기"),
-            "/admin/strategies": ("⚙️", "전략 설정", "strategies_master.yaml 편집"),
+            "/admin/strategies": ("⚙️", "전략 설정", "strategies_master.yaml (read-only)"),
         }[path]
         item.update(emoji=meta[0], title=meta[1], subtitle=meta[2])
         return item
