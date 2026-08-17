@@ -179,7 +179,8 @@ def _mid_lookback_ago(hist: list[tuple[int, float]], now: int, lookback_s: int) 
     return p0
 
 
-def _record_live(condition_id: str, hist: list[tuple[int, float]], has_position: bool) -> None:
+def _record_live(condition_id: str, hist: list[tuple[int, float]], has_position: bool,
+                 bid: float | None) -> None:
     if not hist:
         return
     now, px = hist[-1]
@@ -192,11 +193,17 @@ def _record_live(condition_id: str, hist: list[tuple[int, float]], has_position:
             "abs_change": 0.0, "spike_now": False, "ts": now,
         }
         return
-    spike = (_cfg["p0_lo"] <= p0 <= _cfg["p0_hi"]) and px >= p0 * _cfg["spike_rel"] \
-        and (px - p0) >= _cfg["spike_abs"]
+    # 판정은 **체결 가능한 값**으로 한다. NO 를 사는 값이 1−bid 라 YES 환산은 bid 다.
+    # mid 로 판정하면 ask 만 벌어진 순간이 스파이크로 잡히고(유령), 그 값으로는 살 수도
+    # 없다. bid 를 못 읽으면 판정하지 않는다 — 못 사는 값으로 스파이크를 외치지 않는다.
+    spike = (bid is not None
+             and (_cfg["p0_lo"] <= p0 <= _cfg["p0_hi"])
+             and bid >= p0 * _cfg["spike_rel"]
+             and (bid - p0) >= _cfg["spike_abs"])
     _live_status[condition_id] = {
         "last_scan_ts": now, "has_position": has_position,
         "p0": round(p0, 4), "price": round(px, 4),
+        "bid": round(bid, 4) if bid is not None else None,
         "rel_pct": round((px / p0 - 1) * 100, 1) if p0 else 0.0,
         "abs_change": round(px - p0, 4), "spike_now": spike, "ts": now,
     }
@@ -215,6 +222,9 @@ async def _on_update(token_id: str) -> None:
     if level is None or level.mid is None:
         return
     mid = float(level.mid)
+    # bid = NO 를 지금 사는 값(1−bid)의 YES 환산. 진입 판정·기록은 전부 이 값으로 한다.
+    # 버퍼(hist)는 mid 를 그대로 쌓는다 — p0 가 mid 면 조건이 더 엄격해지는 쪽이라 안전.
+    bid = float(level.best_bid) if level.best_bid is not None else None
     now = time.time()
 
     # 토큰당 throttle — 초당 수백 업데이트를 최대 1회/_THROTTLE_S 로 제한(감지/DB skip)
@@ -243,7 +253,7 @@ async def _on_update(token_id: str) -> None:
         del hist[:max(0, i - 1)]
 
     has_pos = watch.condition_id in _open_cids
-    _record_live(watch.condition_id, hist, has_position=has_pos)
+    _record_live(watch.condition_id, hist, has_position=has_pos, bid=bid)
 
     if has_pos:
         open_pos = _open_position(watch.condition_id)   # DB 조회는 포지션 보유 종목만(≤1)
@@ -252,8 +262,8 @@ async def _on_update(token_id: str) -> None:
             # 청산 안 됐으면(여전히 open) 피라미딩 add-on 판정.
             # full(전액) 모드는 자본을 최초 진입에 전부 투입 → add-on 여력이 없으므로 skip.
             if (watch.condition_id in _open_cids and _cfg["addon_enabled"]
-                    and _cfg["order_size_mode"] != "full"):
-                await _maybe_addon(watch, open_pos, hist, now, mid)
+                    and _cfg["order_size_mode"] != "full" and bid is not None):
+                await _maybe_addon(watch, open_pos, hist, now, bid)
         return
 
     # 방금 판 종목은 다시 사지 않는다. 현금 확보로 X 를 팔고 그 현금으로 X 를 되사면
@@ -271,14 +281,17 @@ async def _on_update(token_id: str) -> None:
         if (watch.end_ts - now) / 86400.0 <= min_days:
             return
 
-    # 신규 진입 판정
+    # 신규 진입 판정 — 기준가는 mid(버퍼), 현재가는 bid(체결 가능한 값).
+    # bid 가 없으면 살 값을 모른다는 뜻이라 판정하지 않는다.
+    if bid is None:
+        return
     lookback = _cfg["lookback_s"]
     p0 = _mid_lookback_ago(hist, now, lookback)
     if p0 is None:
         return
     if not (_cfg["p0_lo"] <= p0 <= _cfg["p0_hi"]):
         return
-    if mid < p0 * _cfg["spike_rel"] or mid - p0 < _cfg["spike_abs"]:
+    if bid < p0 * _cfg["spike_rel"] or bid - p0 < _cfg["spike_abs"]:
         return
 
     # 슬롯 상한 — 스파이크 검증을 **통과한 뒤** 판정한다. 새 신호가 얼마나 좋은지
@@ -290,12 +303,12 @@ async def _on_update(token_id: str) -> None:
     if len(_open_cids) >= limit:
         if not _cfg["replace_enabled"]:
             return
-        if not await _free_slot_for(watch.condition_id, now, _upside(p0, mid)):
+        if not await _free_slot_for(watch.condition_id, now, _upside(p0, bid)):
             return
 
     market = {"condition_id": watch.condition_id, "question": watch.question or "",
               "yes_token_id": watch.yes_token_id, "no_token_id": watch.no_token_id}
-    sig = fade_signal.build_signal(market, p0, mid, now, _cfg)
+    sig = fade_signal.build_signal(market, p0, bid, now, _cfg)
     async with _entry_lock:              # 사이징 이중지출 방지(직렬화)
         await _enter(sig)
 
@@ -662,7 +675,7 @@ def _open_new_position(sig: fade_signal.FadeSignal, order_result: dict) -> None:
 # ── 피라미딩 add-on (열린 포지션에 새 스파이크 시 평단·SL 상향) ────────────────
 
 async def _maybe_addon(watch: PolymarketFadeWatch, pos: PolymarketFadePosition,
-                       hist: list[tuple[int, float]], now: int, mid: float) -> None:
+                       hist: list[tuple[int, float]], now: int, bid: float) -> None:
     """열린 포지션 마켓에 새 스파이크 → add-on 판정.
 
     게이트: (1) 최대 횟수, (2) 신규 진입과 동일한 스파이크 기준(p0 대비 상대/절대),
@@ -675,13 +688,13 @@ async def _maybe_addon(watch: PolymarketFadeWatch, pos: PolymarketFadePosition,
     p0 = _mid_lookback_ago(hist, now, lookback)
     if p0 is None or not (_cfg["p0_lo"] <= p0 <= _cfg["p0_hi"]):
         return
-    if mid < p0 * _cfg["spike_rel"] or mid - p0 < _cfg["spike_abs"]:
+    if bid < p0 * _cfg["spike_rel"] or bid - p0 < _cfg["spike_abs"]:
         return
     last_leg = pos.last_leg_px if pos.last_leg_px is not None else pos.entry_px
-    if mid < last_leg * (1 + _cfg["addon_min_rise_pct"]):
+    if bid < last_leg * (1 + _cfg["addon_min_rise_pct"]):
         return
     async with _entry_lock:
-        await _add_on(pos.condition_id, p0, mid)
+        await _add_on(pos.condition_id, p0, bid)
 
 
 async def _add_on(condition_id: str, p0: float, add_px: float) -> None:
@@ -986,13 +999,22 @@ async def _seed_hist(yes_token_id: str) -> None:
         _price_hist[yes_token_id] = [(int(p["ts"]), float(p["price"])) for p in pts[-_cfg["seed_points"]:]]
         w = _yes_map.get(yes_token_id)
         if w:
+            lvl = ws.price_book.get(yes_token_id)
             _record_live(w.condition_id, _price_hist[yes_token_id],
-                         has_position=_open_position(w.condition_id) is not None)
+                         has_position=_open_position(w.condition_id) is not None,
+                         bid=float(lvl.best_bid) if lvl and lvl.best_bid is not None else None)
 
 
-async def _apply_book(token_id: str, mid: float) -> None:
-    """WS 로 받은 mid 를 버퍼에 반영 + 감지(콜백 본체)."""
-    ws.price_book.setdefault(token_id, ws.PriceLevel(token_id=token_id)).mid = mid
+async def _apply_book(token_id: str, best_bid: float, best_ask: float) -> None:
+    """WS 로 받은 호가를 버퍼에 반영 + 감지(콜백 본체).
+
+    mid 만 저장하면 진입 판정도 체결가 산출도 살 수 없는 값으로 하게 된다.
+    bid/ask 를 그대로 들고 있어야 `1−bid` 로 NO 를 살 수 있다.
+    """
+    level = ws.price_book.setdefault(token_id, ws.PriceLevel(token_id=token_id))
+    level.best_bid = best_bid
+    level.best_ask = best_ask
+    level.refresh_mid()
     await _on_update(token_id)
 
 
@@ -1045,7 +1067,7 @@ async def _ws_shard(tokens: list[str], generation: int) -> None:
                                 if tid and bids and asks:
                                     bb = max(float(b["price"]) for b in bids if b.get("price"))
                                     ba = min(float(a["price"]) for a in asks if a.get("price"))
-                                    await _apply_book(tid, (bb + ba) / 2)
+                                    await _apply_book(tid, bb, ba)
                             elif ev == "price_change":
                                 for ch in m.get("price_changes", []):
                                     tid = ch.get("asset_id")
@@ -1053,7 +1075,7 @@ async def _ws_shard(tokens: list[str], generation: int) -> None:
                                         continue
                                     bb, ba = ch.get("best_bid"), ch.get("best_ask")
                                     if bb and ba:
-                                        await _apply_book(tid, (float(bb) + float(ba)) / 2)
+                                        await _apply_book(tid, float(bb), float(ba))
                         if _ws_generation != generation:
                             break
         except Exception as e:

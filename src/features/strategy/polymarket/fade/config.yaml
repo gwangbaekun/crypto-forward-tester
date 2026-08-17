@@ -38,8 +38,8 @@ timeout_hours: 8760.0        # 사실상 끔(1년). 0 은 '즉시 청산'이라 
                              # NO 전손은 31,501건 중 7건(0.02%).
 stop_loss_pct: 0.10          # 손실 -10% 도달 시 즉시 손절
 
-# ── 피라미딩 add-on: 열린 포지션에 새 스파이크가 더 오르면 추가 진입 → 평단·SL 라인 상향 ──
-addon_enabled: true
+# ── add-on: 한 번 진입 → 익절/손절 로 고정. 추가 진입 없음 ──
+addon_enabled: false
 addon_max_count: 2           # 포지션당 최대 add-on 횟수(초기 진입 제외 → 최대 3레그)
 addon_min_rise_pct: 0.15     # 직전 레그 진입가 대비 +15% 더 올라야 add (10분창 매틱 폭주 방지)
 
