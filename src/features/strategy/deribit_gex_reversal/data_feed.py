@@ -1,11 +1,11 @@
 """Deribit Expiry GEX Reversal — Data Feed (자체 포함).
 
 deribit_chain(자체 수집 옵션체인)을 읽는다. 이 테이블은 forward DB(btc_forwardtest)가
-아니라 btc_backtest DB 에 oracle_sync.py 로 적재된다. 그래서 별도 커넥션을 쓴다.
+아니라 backtest_quant DB 에 oracle_sync.py 로 적재된다. 그래서 별도 커넥션을 쓴다.
 
 우선순위:
   1) 환경변수 DERIBIT_CHAIN_PG_URL 이 있으면 그대로
-  2) 없으면 DATABASE_URL 의 DB 이름만 btc_backtest 로 바꿔 파생
+  2) 없으면 DATABASE_URL 의 DB 이름만 backtest_quant 로 바꿔 파생
      (도커: host.docker.internal, 로컬: localhost 자동 대응)
 """
 from __future__ import annotations
@@ -24,7 +24,7 @@ def _pg_url() -> str:
     if url:
         return url
     base = os.getenv("DATABASE_URL", "postgresql://btc:btc@localhost:5432/btc_forwardtest")
-    return base.rsplit("/", 1)[0] + "/btc_backtest"
+    return base.rsplit("/", 1)[0] + "/backtest_quant"
 
 
 def _get_engine():
