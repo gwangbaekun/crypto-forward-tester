@@ -62,6 +62,19 @@ async def levels():
         return JSONResponse({"error": str(e)}, status_code=500)
 
 
+@router.get("/datasource", response_class=JSONResponse)
+async def datasource():
+    """DB 연결·테이블 신선도·원장 상태. 조회가 수 초 걸려 별도 캐시 키를 쓴다."""
+    try:
+        from features.strategy.us_options_gamma_wall.cache import gw_cache
+        from features.strategy.us_options_gamma_wall.engine import datasource_status
+
+        return JSONResponse(gw_cache.get("datasource", _TTL, datasource_status))
+    except Exception as e:
+        logger.exception("gamma_wall datasource error")
+        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+
+
 @router.post("/run", response_class=JSONResponse)
 async def run_now(background: BackgroundTasks, dry: bool = False):
     """수동 스캔. 스케줄러 틱과 락을 공유하므로 동시에 원장을 덮지 않는다."""

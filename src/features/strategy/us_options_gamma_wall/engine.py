@@ -15,7 +15,7 @@
 **매 세션 벽을 기록하고 다음 세션이 그 벽을 존중했는지 채점해 표본을 쌓는 것**이다.
 첫 실행이 과거를 소급 계산하므로 `backfilled` 코호트를 반드시 분리한다.
 
-데이터: us_options_chain (자체 수집, Cboe) + us_etf_daily — 둘 다 btc_backtest DB.
+데이터: us_options_chain (자체 수집, Cboe) + us_etf_daily — 둘 다 backtest_quant DB.
 실거래 없음.
 """
 from __future__ import annotations
@@ -25,7 +25,9 @@ import json
 import logging
 import os
 import pathlib
+import re
 import threading
+import time
 
 import numpy as np
 import pandas as pd
@@ -48,8 +50,7 @@ def _pg_url() -> str:
     if url:
         return url
     base = os.getenv("DATABASE_URL", "postgresql://btc:btc@localhost:5432/btc_forwardtest")
-    # 수집 아카이브가 적재되는 DB. (`us_options_gex_pin` 은 아직 'btc_backtest' 로
-    # 파생하는데 그런 DB 는 없다 — 그 모듈은 env 없이는 데이터를 못 읽는다.)
+    # 수집 아카이브가 적재되는 DB.
     return base.rsplit("/", 1)[0] + "/backtest_quant"
 
 
@@ -58,6 +59,82 @@ def _get_engine():
     if _engine is None:
         _engine = create_engine(_pg_url(), pool_pre_ping=True)
     return _engine
+
+
+def _redact(url: str) -> str:
+    return re.sub(r"://([^:/@]+):[^@]*@", r"://\1:***@", url)
+
+
+PROBE_TIMEOUT_MS = 20000
+
+
+def datasource_status() -> dict:
+    """대시보드용 데이터 소스 점검 — 원장이 왜 비어있는지 화면에서 보이게 한다.
+
+    조회는 인덱스 없는 테이블 전수 스캔이라 수 초 걸린다. 라우터에서 캐시하고
+    대시보드는 비동기로 채운다.
+    """
+    started = time.monotonic()
+    today = dt.datetime.now(dt.timezone.utc).date()
+
+    def _age(d: dt.date | None) -> int | None:
+        return (today - d).days if d else None
+
+    out: dict = {
+        "db_url": _redact(_pg_url()),
+        "ok": False,
+        "error": None,
+        "chain": None,
+        "daily": None,
+        "ledger": None,
+        "running": is_running(),
+        "elapsed_ms": 0,
+    }
+
+    try:
+        with _get_engine().connect() as c:
+            c.execute(text(f"SET statement_timeout = {PROBE_TIMEOUT_MS}"))
+            row = c.execute(text(
+                "SELECT count(*), min(snapshot_ts), max(snapshot_ts) "
+                "FROM us_options_chain WHERE underlying = :u"
+            ), {"u": UNDERLYING}).fetchone()
+            out["chain"] = {
+                "table": "us_options_chain",
+                "underlying": UNDERLYING,
+                "rows": int(row[0] or 0),
+                "oldest": row[1].date().isoformat() if row[1] else None,
+                "latest": row[2].date().isoformat() if row[2] else None,
+                "days_old": _age(row[2].date() if row[2] else None),
+            }
+            row = c.execute(text(
+                "SELECT count(*), min(date), max(date) FROM us_etf_daily WHERE symbol = :s"
+            ), {"s": UNDERLYING}).fetchone()
+            out["daily"] = {
+                "table": "us_etf_daily",
+                "symbol": UNDERLYING,
+                "rows": int(row[0] or 0),
+                "oldest": row[1].isoformat() if row[1] else None,
+                "latest": row[2].isoformat() if row[2] else None,
+                "days_old": _age(row[2]),
+            }
+        out["ok"] = True
+    except Exception as exc:
+        out["error"] = str(exc).strip().split("\n")[0]
+
+    try:
+        led = load_ledger()
+        sessions = led.get("sessions") or {}
+        out["ledger"] = {
+            "store": "db" if _db_enabled() else "file",
+            "sessions": len(sessions),
+            "scored": sum(1 for r in sessions.values() if isinstance(r, dict) and "result" in r),
+            "last_run": led.get("last_run"),
+        }
+    except Exception as exc:
+        out["ledger"] = {"error": str(exc).strip().split("\n")[0]}
+
+    out["elapsed_ms"] = int((time.monotonic() - started) * 1000)
+    return out
 
 
 def load_chain(days: int = 400) -> pd.DataFrame:

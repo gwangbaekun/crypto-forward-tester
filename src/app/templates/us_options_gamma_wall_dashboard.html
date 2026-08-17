@@ -35,6 +35,20 @@
            border:1px solid var(--border); background:var(--card); color:var(--fg); cursor:pointer; }
   button:hover { border-color:#2e6fd4; }
   svg text { font-size:9.5px; fill:var(--muted); }
+  .ds { display:flex; flex-wrap:wrap; gap:8px 14px; align-items:center; font-size:11px;
+        background:var(--card); border:1px solid var(--border); border-radius:8px; padding:8px 12px; }
+  .ds.bad { border-color:rgba(192,85,63,.45); background:rgba(192,85,63,.07); }
+  .ds-led { width:7px; height:7px; border-radius:50%; background:#7a7a7a; flex-shrink:0; }
+  .ds-led.on   { background:#3fa45b; }
+  .ds-led.off  { background:#c0553f; }
+  .ds-led.busy { background:#c9a227; animation:dspulse 1s ease-in-out infinite; }
+  @keyframes dspulse { 0%,100%{opacity:1} 50%{opacity:.25} }
+  .ds-item { color:var(--muted); }
+  .ds-item b { color:var(--fg); font-weight:500; }
+  .ds-item.stale b { color:#c9a227; }
+  .ds-item.err { color:#c0553f; }
+  .ds-src { font-family:"SF Mono","Fira Code",monospace; font-size:10.5px; color:var(--muted); }
+  .ds-sep { margin-left:auto; }
 </style>
 </head>
 <body class="gw-app">
@@ -55,6 +69,11 @@
     <br>
     <b>이건 알림봇이 아니라 원장이다.</b> 벽을 매 세션 기록하고 다음 세션이 존중했는지 채점만 한다.
     실거래 없음.
+  </div>
+
+  <div class="ds" id="ds">
+    <span class="ds-led busy"></span>
+    <span class="ds-item">데이터 소스 확인 중…</span>
   </div>
 
   <div class="sect">오늘 쓸 레벨</div>
@@ -192,12 +211,63 @@ function renderChart(rows){
   el("chart").innerHTML=s;
 }
 
+function dsBusy(msg){
+  const n=el("ds"); n.className="ds";
+  n.innerHTML=`<span class="ds-led busy"></span><span class="ds-item">${msg}</span>`;
+}
+
+function renderDatasource(d){
+  const n=el("ds");
+  if(!d || d.ok===false && !d.chain){
+    n.className="ds bad";
+    n.innerHTML=`<span class="ds-led off"></span>`+
+      `<span class="ds-item err">데이터 소스 연결 실패 — ${d&&d.error?d.error:"알 수 없음"}</span>`+
+      (d&&d.db_url?`<span class="ds-src ds-sep">${d.db_url}</span>`:"");
+    return;
+  }
+  const parts=[];
+  const t=(o,label)=>{
+    if(!o) return;
+    const stale = o.days_old!=null && o.days_old>3;
+    parts.push(`<span class="ds-item ${stale?'stale':''}">${label} <b>${o.rows.toLocaleString()}행</b>`+
+      ` · 최신 <b>${o.latest||"–"}</b>${o.days_old!=null?` (${o.days_old}일 전)`:""}</span>`);
+  };
+  t(d.chain,"us_options_chain");
+  t(d.daily,"us_etf_daily");
+
+  const L=d.ledger||{};
+  if(L.error){
+    parts.push(`<span class="ds-item err">원장 ${L.error}</span>`);
+  }else{
+    parts.push(`<span class="ds-item">원장(${L.store}) <b>${L.sessions}세션</b> · 채점 <b>${L.scored}</b></span>`);
+  }
+  parts.push(`<span class="ds-item">스캔 <b>${d.running?"실행 중":(L.last_run?L.last_run.slice(0,16).replace("T"," ")+"Z":"기록 없음")}</b></span>`);
+  parts.push(`<span class="ds-src ds-sep">${d.db_url} · ${d.elapsed_ms}ms</span>`);
+
+  n.className = "ds" + (d.ok ? "" : " bad");
+  n.innerHTML = `<span class="ds-led ${d.running?"busy":(d.ok?"on":"off")}"></span>` + parts.join("");
+}
+
+async function loadDatasource(){
+  dsBusy("데이터 소스 확인 중…");
+  try{
+    renderDatasource(await fetch("/quant/us_options_gamma_wall/datasource").then(r=>r.json()));
+  }catch(e){
+    renderDatasource({ok:false, error:String(e)});
+  }
+}
+
 el("runbtn").addEventListener("click", async ()=>{
   el("runbtn").disabled=true; el("runbtn").textContent="실행 중…";
+  dsBusy("스캔 실행 중 — 체인 집계·채점");
   await fetch("/quant/us_options_gamma_wall/run",{method:"POST"});
-  setTimeout(async()=>{ await load(); el("runbtn").disabled=false; el("runbtn").textContent="스캔 실행"; }, 3000);
+  setTimeout(async()=>{
+    await load(); await loadDatasource();
+    el("runbtn").disabled=false; el("runbtn").textContent="스캔 실행";
+  }, 3000);
 });
 load();
+loadDatasource();
 </script>
 </body>
 </html>
