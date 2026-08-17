@@ -274,12 +274,13 @@ function drawPositions(positions) {
   $('#closed_tbl tbody').innerHTML = closed.map(p => `<tr class="${p.ret_pct>0?'':'out'}">
       <td class="l"><div class="qname" title="${p.question||''}">${p.question || p.condition_id.slice(0,14)+'…'}</div></td>
       <td class="l">${fmtTs(p.entry_ts)}</td>
-      <td class="mut">${p.p0}</td><td>${p.entry_px}</td><td>${p.exit_px}</td>
+      <td class="mut">${p.p0}</td><td>${p.entry_px}</td><td>${p.exit_px ?? '—'}</td>
       <td class="mut">${p.cost_usd != null ? '$'+p.cost_usd.toFixed(2) : '—'}</td>
-      <td class="${p.pnl_usd >= 0 ? 'up' : 'dn'}">${p.pnl_usd != null
+      <td class="${p.pnl_usd == null ? 'mut' : p.pnl_usd >= 0 ? 'up' : 'dn'}">${p.pnl_usd != null
           ? (p.pnl_usd >= 0 ? '+$' : '-$') + Math.abs(p.pnl_usd).toFixed(3) : '—'}</td>
       <td class="l ${p.exit_reason==='되돌림'?'mut':'dn'}">${p.exit_reason||''}</td>
-      <td class="${p.ret_pct>=0?'up':'dn'}">${p.ret_pct>=0?'+':''}${p.ret_pct}%</td>
+      <td class="${p.ret_pct == null ? 'mut' : p.ret_pct >= 0 ? 'up' : 'dn'}">${p.ret_pct != null
+          ? (p.ret_pct >= 0 ? '+' : '') + p.ret_pct + '%' : '—'}</td>
     </tr>`).join('') || '<tr><td colspan="9" class="mut l">청산 내역 없음</td></tr>';
 }
 
