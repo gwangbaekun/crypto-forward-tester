@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import math
 import time
 from pathlib import Path
 
@@ -66,6 +67,7 @@ _SELL_INFLIGHT_S = 120.0
 # 매도 연속 실패 횟수 → 백오프. 팔 수 없는 물량(보유 < 최소주문)을 무한 재시도하지 않는다.
 _sell_fail: dict[str, int] = {}
 _SELL_FAIL_MAX = 3
+_SELL_HAIRCUT = 0.995
 _GLITCH_JUMP = 0.10          # 직전 대비 이만큼 튀면 확인 대기(10¢p)
 # 구독 세대 — _yes_map 의 키가 바뀔 때마다 +1. WS 샤드들이 이 값을 보고 일제히 재구독한다.
 _ws_generation: int = 0
@@ -858,12 +860,28 @@ async def _close_position(pos: PolymarketFadePosition, exit_px: float, reason: s
       · 텔레그램은 체결 전에 발사되니 '계속 수익 보는 것처럼' 보인다
     진입(_enter)은 이미 '체결 확인 후에만 기록' 이다. 청산도 같은 규칙을 쓴다.
     """
+    ledger_shares = float(pos.shares or 0)
+    held = await _wallet_shares(pos.no_token_id or "")
+    if held < 0:
+        sell_shares = ledger_shares * _SELL_HAIRCUT
+    elif held <= 0.01:
+        log.warning("[fade] 지갑에 물량 없음 → 원장 정리(슬롯 반납): %s",
+                    (pos.question or pos.condition_id)[:40])
+        _mark_orphan(pos.id)
+        return
+    else:
+        sell_shares = min(ledger_shares, held)
+    sell_shares = math.floor(sell_shares * 100 + 1e-9) / 100
+    if sell_shares <= 0:
+        log.warning("[fade] 청산 수량 0 → 발주 생략: %s", (pos.question or pos.condition_id)[:40])
+        return
+
     # 되돌림 청산은 **이익 실현**이다. 체결가가 진입가보다 나쁘면 실현이 아니라
     # 손실 확정이므로 팔지 않고 기다린다(스파이크가 유지되면 다음 틱에 재시도).
     # 손절·타임아웃·슬롯교체는 나가는 것 자체가 목적이라 한도를 걸지 않는다.
     forced = reason not in ("되돌림",)
     worst_sell = None if forced else round(1 - float(pos.entry_px), 4)
-    sell_px = await _fill_price(pos.no_token_id or "", float(pos.shares or 0), "sell",
+    sell_px = await _fill_price(pos.no_token_id or "", sell_shares, "sell",
                                 _yes_token_of(pos.condition_id) or "", exit_px,
                                 worst=worst_sell)
     if sell_px is None:
@@ -873,7 +891,7 @@ async def _close_position(pos: PolymarketFadePosition, exit_px: float, reason: s
     res = await oracle_client.place_order(
         side="NO", action="sell", condition_id=pos.condition_id, question=pos.question or "",
         token_id=pos.no_token_id or "", price=sell_px, size_usd=(pos.entry_usd or 1.0),
-        size_shares=pos.shares, reason=f"fade_exit_{reason}",
+        size_shares=sell_shares, reason=f"fade_exit_{reason}",
     )
     status = (res.get("status") or "").lower()
     if status != "matched":

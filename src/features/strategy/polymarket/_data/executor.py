@@ -100,7 +100,8 @@ async def place_order(
     _side = Side.SELL if str(side).upper() == "SELL" else Side.BUY
 
     if size_shares is not None and size_shares > 0:
-        shares = math.ceil(size_shares * 100) / 100   # 2dp 올림
+        shares = (math.floor(size_shares * 100 + 1e-9) / 100 if _side == Side.SELL
+                  else math.ceil(size_shares * 100 - 1e-9) / 100)
         effective_usd = round(shares * price, 4)
     else:
         shares, effective_usd = _min_order(price)
