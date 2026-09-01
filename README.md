@@ -8,15 +8,20 @@
 
 `PYTHONPATH`는 **`src`** 를 가리키면 `common`, `features`, `app` 패키지가 그대로 import 됩니다.
 
-## 문서 (에이전트·개발 참고)
+## 문서
+
+**규칙**은 `.claude/` 에, **기록**은 레포 밖 `../DOCS/` 에 있다. 시작점은 `.claude/CLAUDE.md`.
 
 | 문서 | 용도 |
 |------|------|
-| **`CLAUDE.md`** (루트) | 스택, 디렉터리, 데이터 흐름, 키 파일 — `tradingview_mcp/CLAUDE.md` 의 btc 버전 |
-| **`.claude/QUANT_STRATEGIES.md`** | 새 quant 전략 추가 시 체크리스트·폴더 규칙 (`features/strategy/`) |
-| **`.claude/README.md`** | 위 문서 인덱스 |
-
-> `tradingview_mcp/.claude` 아래에는 설정만 있고, 본문 가이드는 **`tradingview_mcp/CLAUDE.md`** 에 있었다. 여기서는 루트 + `.claude/` 로 나눔.
+| `.claude/CLAUDE.md` | 허브 — 어떤 작업에 무엇을 읽는가 |
+| `.claude/ARCHITECTURE.md` | 스택·레이아웃·데이터 흐름·Gotchas |
+| `.claude/STRATEGY_RULES.md` | 전략 생성·수정, backtest 동기화 |
+| `.claude/STRATEGIES.md` | 현재 전략 현황 |
+| `.claude/LEDGER.md` | 원장 무결성·측정 프로토콜 |
+| `.claude/ACCESS.md` | 접근 게이트 |
+| `.claude/POLYMARKET.md` | fade · logic_arb |
+| `../DOCS/` | 검정 기록·로드맵·진단 — 분류 기준은 `../DOCS/README.md` |
 
 ## 빠른 시작
 
