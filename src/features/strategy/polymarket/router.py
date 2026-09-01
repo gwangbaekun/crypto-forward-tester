@@ -1469,6 +1469,8 @@ async def fade_pnl() -> JSONResponse:
               if r.status == "closed" and r.exit_px is not None and r.entry_px is not None]
     def cost(r): return float(r.shares or 0) * (1 - float(r.entry_px))
     def pnl(r):  return float(r.shares or 0) * (float(r.entry_px) - float(r.exit_px))
+    orphan = [r for r in rows if r.status == "closed" and r.exit_px is None]
+    opens = [r for r in rows if r.status == "open"]
 
     tot_pnl = sum(pnl(r) for r in closed)
     # 주의: 이건 **누적 회전액**이지 투입 자본이 아니다. 같은 돈을 91번 굴리면
@@ -1506,7 +1508,10 @@ async def fade_pnl() -> JSONResponse:
         by_reason[k]["pnl"] += pnl(r)
 
     return JSONResponse({
-        "n_closed": len(closed), "n_open": sum(1 for r in rows if r.status == "open"),
+        "n_closed": len(closed), "n_open": len(opens),
+        "n_orphan": len(orphan),
+        "orphan_cost_usd": round(sum(cost(r) for r in orphan), 2),
+        "open_cost_usd": round(sum(cost(r) for r in opens), 2),
         # 이름을 바꿔 오해를 막는다 — turnover 는 회전액, peak_exposure 가 자본이다.
         "turnover_usd": round(turnover, 2),
         "peak_exposure_usd": round(peak, 2),
