@@ -149,21 +149,23 @@ drawdown_signal:
     fn: is_due
 
 oi_cvd_surge:
-  enabled: false
-  monitoring: false
+  enabled: true
+  monitoring: true
   symbol: "BTCUSDT"
-  tick_interval: 60
+  tick_interval: 10
+  exit_tick_interval: 1.0
   timeframes: ["1h"]
   entry_tf: "1h"
   strategy_tag: oi_cvd_surge
-  label: "OI CVD Surge"
+  label: "OI CVD Surge BTC 1h"
   emoji: "📈"
-  telegram_alerts: false
-  discord_alerts: false
-  binance_live: false
+  telegram_alerts: true
+  discord_alerts: true
+  binance_live: true
   binance_leverage: 3
+  ctrader_live: false
   tick:
-    module: features.strategy.oi_cvd_surge.realtime_feed
+    module: features.strategy.oi_cvd_surge.forward_test_runner
     fn: get_state
 
 btc_liq_sweep_reversal:

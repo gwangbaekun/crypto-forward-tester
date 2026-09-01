@@ -13,7 +13,7 @@ signal:
   confidence_threshold: 1
 
 tpsl:
-  mode: fixed_rr
-  rr_ratio: 3.0
-  sl_max_pct: 2.0
+  mode: swing_rr
+  rr_ratio: 2.5
+  sl_max_pct: 2.5
   slippage_pct: 0.05
