@@ -28,10 +28,7 @@ _engine = None
 def _eng():
     global _engine
     if _engine is None:
-        url = os.getenv("US_OPTIONS_PG_URL") or os.getenv("DERIBIT_CHAIN_PG_URL")
-        if not url:
-            base = os.getenv("DATABASE_URL", "postgresql://btc:btc@localhost:5432/btc_forwardtest")
-            url = base.rsplit("/", 1)[0] + "/backtest_quant"
+        url = os.getenv("DATABASE_URL", "postgresql://btc:btc@localhost:5432/btc_forwardtest")
         _engine = create_engine(url, pool_pre_ping=True)
     return _engine
 
