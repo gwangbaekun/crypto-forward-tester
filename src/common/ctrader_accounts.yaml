@@ -1,46 +1,7 @@
-# cTrader prop firm 계좌 목록 — 단일 진실 소스
-#
-# [새 계좌 추가 순서]
-# 1. .env에 CTRADER_CLIENT_ID/SECRET/REDIRECT_URI 세팅 후 앱 기동 → GET /auth/ctrader/login 으로 OAuth 완료 (CTRADER_ACCESS_TOKEN 발급)
-# 2. python scripts/ctrader_list_symbols.py → account_id 선택 + symbol_id 확인 (.env 자동 저장)
-# 3. 아래 해당 firm 블록에 account_id·symbol_id 기입 후 enabled: true
-#
-# enabled: true  → 앱 시작 시 자동 연결 + combine fan-out 대상
-# enabled: false → 연결 안 함
-#
-# symbol_id:     브로커마다 독립적인 ID. 같은 숫자라도 브로커가 다르면 다른 종목일 수 있음
-#                (실측 사례: 어떤 브로커는 symbol_id 323 = USDHUFp, ETHUSD는 102였음) → 반드시
-#                scripts/ctrader_list_symbols.py 로 심볼명까지 확인할 것.
-# lot_size:      prop firm 계좌 크기·룰에 맞게 조정. 브로커별 minVolume(ProtoOASymbol) 이상이어야 함.
-# units_per_lot: 1 lot → volume 환산 배수. cTrader Open API의 volume 필드는 항상 lot의 1/100
-#                단위(centilot)이므로 100 고정 (실측: units_per_lot=1로 두면 볼륨이 100배 작게
-#                나가 TRADING_BAD_VOLUME 거부됨).
-# env:           "live" 또는 "demo"
-
 accounts:
-  ftmo:
-    label: "FTMO"
-    enabled: true
+  "48577750":
     env: live
-    account_id: 47821667   # ctidTraderAccountId (traderLogin 17147778) — 이전 47729078은 RET_ACCOUNT_DISABLED로 교체
-    symbol_id: 323        # ETHUSD on FTMO live (실측 확인됨)
-    lot_size: 0.10        # FTMO 심볼323 minVolume=10(=0.10lot) 미만이면 TRADING_BAD_VOLUME 거부됨. 기존 0.05는 최소치 미달.
-    units_per_lot: 100    # 기존 1은 오설정 — 실주문 시 볼륨이 100배 작게 나가 거부됨(실측)
-
-  funding_pips:
-    label: "Funding Pips"
-    enabled: false
-    env: live
-    account_id: 0         # TODO
-    symbol_id: 323
-    lot_size: 0.05
-    units_per_lot: 1      # TODO
-
-  funded_next:
-    label: "FundedNext"
-    enabled: false
-    env: live
-    account_id: 0         # TODO
-    symbol_id: 0          # TODO
-    lot_size: 0.05
-    units_per_lot: 1      # TODO
+    symbol_id: 324
+    initial_balance: 100000
+    target_mdd: 10
+    units_per_lot: 100

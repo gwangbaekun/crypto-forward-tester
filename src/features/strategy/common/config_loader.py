@@ -138,6 +138,35 @@ def get_ctrader_config(strategy_id: str) -> dict:
     strat = get_master_config().get(strategy_id)
     if not isinstance(strat, dict):
         return {}
+
+    key = strat.get("ctrader_account")
+    if key:
+        if not isinstance(key, (str, int)) or isinstance(key, bool):
+            raise TypeError(
+                f"[{strategy_id}] ctrader_account 는 문자열 또는 정수여야 합니다. "
+                f"got {type(key).__name__}"
+            )
+        from common.ctrader_account_loader import get_all_accounts
+        acct = get_all_accounts().get(str(key)) or {}
+        if not acct:
+            raise ValueError(
+                f"[{strategy_id}] ctrader_account='{key}' 가 "
+                f"ctrader_accounts.yaml 에 없습니다."
+            )
+        balance      = acct.get("initial_balance")
+        target_mdd   = acct.get("target_mdd")
+        backtest_mdd = strat.get("ctrader_backtest_mdd")
+        notional = None
+        if balance and target_mdd and backtest_mdd:
+            notional = float(balance) * float(target_mdd) / float(backtest_mdd)
+        return {
+            "ctrader_account_id":    int(key),
+            "ctrader_env":           acct.get("env"),
+            "ctrader_symbol_id":     acct.get("symbol_id"),
+            "ctrader_units_per_lot": acct.get("units_per_lot"),
+            "ctrader_notional_usd":  notional,
+        }
+
     accounts = strat.get("ctrader_accounts")
     if isinstance(accounts, dict):
         mode = strat.get("ctrader_mode", "demo")

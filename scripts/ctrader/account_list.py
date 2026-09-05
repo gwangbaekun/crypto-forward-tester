@@ -7,14 +7,14 @@ ctidTraderAccountId / traderLogin / isLive 를 뽑는다.
 ctrader_accounts.yaml 의 account_id 는 traderLogin 이 아니라
 반드시 여기 나오는 ctidTraderAccountId 값이어야 한다.
 
-    PYTHONPATH=src python scripts/ctrader_account_list.py
+    PYTHONPATH=src python scripts/ctrader/account_list.py
 """
 from __future__ import annotations
 
 import pathlib
 import sys
 
-ROOT = pathlib.Path(__file__).parent.parent
+ROOT = pathlib.Path(__file__).parents[2]
 sys.path.insert(0, str(ROOT / "src"))
 
 

@@ -2,13 +2,13 @@
 cTrader 심볼 목록 조회 → ctrader_accounts.yaml 자동 저장.
 
 사용법:
-    python scripts/ctrader_list_symbols.py <firm_key>
+    python scripts/ctrader/list_symbols.py <firm_key>
 
     firm_key: ctrader_accounts.yaml 의 accounts 키 (예: ftmo, funded_next, funding_pips ...)
     생략하면 accounts 목록을 보여주고 선택하게 함.
 
 예:
-    python scripts/ctrader_list_symbols.py ftmo
+    python scripts/ctrader/list_symbols.py ftmo
 """
 
 from __future__ import annotations
@@ -16,7 +16,7 @@ from __future__ import annotations
 import pathlib
 import sys
 
-ROOT = pathlib.Path(__file__).parent.parent
+ROOT = pathlib.Path(__file__).parents[2]
 sys.path.insert(0, str(ROOT / "src"))
 
 ENV_PATH      = ROOT / ".env"
@@ -54,7 +54,7 @@ def _save_symbol_id(firm_key: str, symbol_id: int) -> None:
     for line in lines:
         stripped = line.lstrip()
         # firm 블록 진입 감지 (2-space indent key)
-        if line.startswith("  ") and not line.startswith("   ") and stripped.startswith(f"{firm_key}:"):
+        if line.startswith("  ") and not line.startswith("   ") and stripped.split(":", 1)[0].strip().strip('"\'') == firm_key:
             in_firm = True
             depth   = 0
             out.append(line)
@@ -140,7 +140,7 @@ def run() -> None:
         return
     firm_key, acfg = pick
 
-    target_account_id = int(acfg.get("account_id") or 0)
+    target_account_id = int(acfg.get("account_id") or firm_key or 0)
     is_live           = str(acfg.get("env", "demo")).strip().lower() == "live"
     env_label         = "live" if is_live else "demo"
 

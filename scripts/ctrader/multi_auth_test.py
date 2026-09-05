@@ -7,7 +7,7 @@ ctrader_accounts.yaml 의 enabled 계좌 전체를 실제 CTraderExecutor 로
   2) TcpProtocol 클래스 레벨 큐가 섞여 응답이 깨지지 않는지 (각자 reconcile 성공)
 를 확인한다.
 
-    PYTHONPATH=src python scripts/ctrader_multi_auth_test.py
+    PYTHONPATH=src python scripts/ctrader/multi_auth_test.py
 """
 from __future__ import annotations
 
@@ -15,7 +15,7 @@ import asyncio
 import pathlib
 import sys
 
-ROOT = pathlib.Path(__file__).parent.parent
+ROOT = pathlib.Path(__file__).parents[2]
 sys.path.insert(0, str(ROOT / "src"))
 
 
