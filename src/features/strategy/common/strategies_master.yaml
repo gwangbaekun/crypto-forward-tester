@@ -132,7 +132,7 @@ us_options_gamma_wall:
   binance_live: false
   tick:
     module: features.strategy.us_options_gamma_wall.engine
-    fn: is_due
+    fn: get_state
 
 drawdown_signal:
   enabled: false
@@ -146,7 +146,7 @@ drawdown_signal:
   binance_live: false
   tick:
     module: features.strategy.drawdown_signal.engine
-    fn: is_due
+    fn: get_state
 
 oi_cvd_surge:
   enabled: true

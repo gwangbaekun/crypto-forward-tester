@@ -20,6 +20,7 @@
 """
 from __future__ import annotations
 
+import asyncio
 import datetime as dt
 import json
 import logging
@@ -348,3 +349,9 @@ def run_exclusive(dry: bool = False) -> dict | None:
         return run(dry=dry)
     finally:
         _LOCK.release()
+
+
+async def get_state(symbol: str = "SPY", tfs: str = "1d") -> dict | None:
+    if not is_due():
+        return None
+    return await asyncio.to_thread(run_exclusive)
