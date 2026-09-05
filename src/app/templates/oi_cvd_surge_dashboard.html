@@ -56,6 +56,21 @@
         <ul class="reasons-list" id="reasons-list"><li>—</li></ul>
     </div>
 
+    <div class="card" id="ctrader-card">
+        <div class="step-label">cTrader (manual)</div>
+        <div class="card-header">
+            <span id="ct-label" style="font-size:0.75rem;color:var(--text-secondary);">Fetching…</span>
+            <button type="button" onclick="refreshCtrader()" style="font-size:0.72rem;padding:3px 8px;">Refresh</button>
+        </div>
+        <div id="ct-status" style="font-size:0.8rem;margin:8px 0;color:var(--text-secondary);">Fetching…</div>
+        <div style="display:flex;gap:6px;margin-top:10px;">
+            <button type="button" id="ct-buy"   onclick="ctOrder('long')"  style="font-size:0.78rem;padding:5px 14px;">BUY</button>
+            <button type="button" id="ct-sell"  onclick="ctOrder('short')" style="font-size:0.78rem;padding:5px 14px;">SELL</button>
+            <button type="button" id="ct-close" onclick="ctClose()"        style="font-size:0.78rem;padding:5px 14px;">CLOSE</button>
+        </div>
+        <div id="ct-result" style="font-size:0.75rem;margin-top:8px;color:var(--text-secondary);"></div>
+    </div>
+
     <div class="card">
         <div class="step-label">Forward Test</div>
         <div class="card-header">
@@ -80,6 +95,7 @@
 <script>
 (function() {
     var SYMBOL = 'BTCUSDT';
+    var STRATEGY = 'oi_cvd_surge';
     var timer = null;
     var running = false;
 
@@ -159,6 +175,73 @@
             ? reasons.map(function(r) { return '<li>' + r + '</li>'; }).join('')
             : '<li>—</li>';
     }
+
+    var lastSide = null;
+
+    function refreshCtrader() {
+        var label = document.getElementById('ct-label');
+        var box   = document.getElementById('ct-status');
+        fetch('/auth/ctrader/order/status?strategy=' + STRATEGY + '&symbol=' + SYMBOL, { cache: 'no-store' })
+            .then(function(r) { return r.json(); })
+            .then(function(d) {
+                if (!d.ready) {
+                    label.textContent = 'Not ready';
+                    label.style.color = 'var(--text-secondary)';
+                    box.textContent = '⚠️ ' + (d.reason || 'unknown');
+                    return;
+                }
+                label.textContent = '🔴 ' + (d.env || '').toUpperCase() + ' · account ' + d.account_id;
+                label.style.color = 'var(--accent-red)';
+                box.innerHTML =
+                    'notional $' + Number(d.notional_usd || 0).toLocaleString() +
+                    ' &nbsp;|&nbsp; price ' + _fmtPrice(d.price) +
+                    ' &nbsp;|&nbsp; volume <strong>' + (d.volume != null ? d.volume : '—') + '</strong>' +
+                    ' (' + (d.volume != null ? (d.volume / 100).toFixed(2) : '—') + ' lots)';
+            })
+            .catch(function(e) { box.textContent = '조회 실패: ' + e; });
+    }
+    window.refreshCtrader = refreshCtrader;
+
+    function _ctBusy(on) {
+        ['ct-buy', 'ct-sell', 'ct-close'].forEach(function(id) {
+            document.getElementById(id).disabled = on;
+        });
+    }
+
+    function ctOrder(side) {
+        if (!confirm('cTrader 실주문: ' + side.toUpperCase() + ' — 진행할까요?')) return;
+        var out = document.getElementById('ct-result');
+        out.textContent = '주문 중…';
+        _ctBusy(true);
+        fetch('/auth/ctrader/order?strategy=' + STRATEGY + '&side=' + side + '&symbol=' + SYMBOL, { method: 'POST' })
+            .then(function(r) { return r.json(); })
+            .then(function(d) {
+                if (d.ok) { lastSide = side; out.textContent = '✅ ' + side + ' 체결 ' + JSON.stringify(d.result); }
+                else      { out.textContent = '❌ ' + (d.error || 'failed'); }
+                refreshCtrader();
+            })
+            .catch(function(e) { out.textContent = '❌ ' + e; })
+            .finally(function() { _ctBusy(false); });
+    }
+    window.ctOrder = ctOrder;
+
+    function ctClose() {
+        var side = lastSide || (confirm('LONG 청산이면 확인, SHORT 청산이면 취소') ? 'long' : 'short');
+        var out = document.getElementById('ct-result');
+        out.textContent = '청산 중…';
+        _ctBusy(true);
+        fetch('/auth/ctrader/order/close?strategy=' + STRATEGY + '&side=' + side + '&symbol=' + SYMBOL, { method: 'POST' })
+            .then(function(r) { return r.json(); })
+            .then(function(d) {
+                out.textContent = d.ok ? '✅ 청산 완료' : ('❌ ' + (d.error || 'failed'));
+                refreshCtrader();
+            })
+            .catch(function(e) { out.textContent = '❌ ' + e; })
+            .finally(function() { _ctBusy(false); });
+    }
+    window.ctClose = ctClose;
+
+    refreshCtrader();
 
     if (window.OI_CVD_SURGE_MONITORING_START !== false) {
         toggleMonitor();

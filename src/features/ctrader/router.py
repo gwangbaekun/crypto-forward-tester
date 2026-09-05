@@ -177,6 +177,101 @@ def _update_env(updates: dict) -> None:
     _ENV_PATH.write_text("\n".join(out) + "\n")
 
 
+# ── 전략별 수동 주문 (대시보드 버튼) ─────────────────────────────────────────
+
+
+def _executor_for(strategy: str):
+    """전략 설정으로 executor 를 만든다. (executor, config, 불가 사유) 반환."""
+    from features.strategy.common.config_loader import get_ctrader_config
+    from common.ctrader_executor import get_executor, get_executor_unavailable_reason
+
+    cfg = get_ctrader_config(strategy)
+    if not cfg:
+        return None, {}, f"'{strategy}' 에 cTrader 설정이 없습니다."
+    reason = get_executor_unavailable_reason(
+        account_id=cfg.get("ctrader_account_id"),
+        symbol_id=cfg.get("ctrader_symbol_id"),
+    )
+    if reason:
+        return None, cfg, reason
+    ex = get_executor(
+        account_id=cfg.get("ctrader_account_id"),
+        env=cfg.get("ctrader_env"),
+        symbol_id=cfg.get("ctrader_symbol_id"),
+        lot_size=cfg.get("ctrader_lot_size"),
+        units_per_lot=cfg.get("ctrader_units_per_lot"),
+        notional_usd=cfg.get("ctrader_notional_usd"),
+    )
+    return ex, cfg, None
+
+
+async def _market_price(symbol: str) -> float:
+    from common.binance_executor import get_executor as get_binance
+    ex = get_binance()
+    if not ex:
+        return 0.0
+    return float(await ex.get_market_price(symbol) or 0)
+
+
+@router.get("/order/status")
+async def ctrader_order_status(
+    strategy: str = Query(...),
+    symbol: str = Query("BTCUSDT"),
+):
+    """준비 상태 + 현재가 + 지금 누르면 나갈 volume. 주문은 내지 않는다."""
+    ex, cfg, reason = _executor_for(strategy)
+    price    = await _market_price(symbol)
+    notional = cfg.get("ctrader_notional_usd")
+    upl      = cfg.get("ctrader_units_per_lot") or 1
+    volume   = int(notional / price * upl) if (notional and price > 0) else None
+    return JSONResponse({
+        "ready":        ex is not None,
+        "reason":       reason,
+        "strategy":     strategy,
+        "account_id":   cfg.get("ctrader_account_id"),
+        "env":          cfg.get("ctrader_env"),
+        "symbol_id":    cfg.get("ctrader_symbol_id"),
+        "notional_usd": notional,
+        "price":        price,
+        "volume":       volume,
+    })
+
+
+@router.post("/order")
+async def ctrader_order(
+    strategy: str = Query(...),
+    side: str = Query(..., pattern="^(long|short)$"),
+    symbol: str = Query("BTCUSDT"),
+):
+    """수동 진입. 사이징은 전략 설정을 그대로 쓴다."""
+    ex, _cfg, reason = _executor_for(strategy)
+    if ex is None:
+        return JSONResponse({"ok": False, "error": reason}, status_code=503)
+    price = await _market_price(symbol)
+    if price <= 0:
+        return JSONResponse({"ok": False, "error": "현재가 조회 실패"}, status_code=502)
+    result = await ex.open_position(symbol, side, price)
+    if result is None:
+        return JSONResponse({"ok": False, "error": "주문 실패 — 서버 로그 확인"}, status_code=502)
+    return JSONResponse({"ok": True, "side": side, "price": price, "result": result})
+
+
+@router.post("/order/close")
+async def ctrader_order_close(
+    strategy: str = Query(...),
+    side: str = Query(..., pattern="^(long|short)$"),
+    symbol: str = Query("BTCUSDT"),
+):
+    """수동 청산."""
+    ex, _cfg, reason = _executor_for(strategy)
+    if ex is None:
+        return JSONResponse({"ok": False, "error": reason}, status_code=503)
+    result = await ex.close_position(symbol, side)
+    if result is None:
+        return JSONResponse({"ok": False, "error": "청산 실패 — 서버 로그 확인"}, status_code=502)
+    return JSONResponse({"ok": True, "side": side, "result": result})
+
+
 # ── OAuth 흐름 ───────────────────────────────────────────────────────────────
 
 @router.get("/login")
