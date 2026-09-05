@@ -15,7 +15,7 @@ enabled 계좌(ctrader_accounts.yaml) 전부에 대해 순차 실행:
 
 실행:
     docker exec -e CTRADER_ALLOW_LOCAL=1 btc-forwardtest-api \
-        python scripts/ctrader_buy_sell_live_test.py
+        python scripts/ctrader/buy_sell_live_test.py
 """
 import asyncio
 import concurrent.futures

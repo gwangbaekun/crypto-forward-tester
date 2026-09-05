@@ -1,14 +1,14 @@
 """
 cTrader 계좌 잔고 + 레버리지 + 최대 포지션 크기 조회.
 
-python scripts/ctrader_account_info.py
+python scripts/ctrader/account_info.py
 """
 from __future__ import annotations
 
 import pathlib
 import sys
 
-ROOT = pathlib.Path(__file__).parent.parent
+ROOT = pathlib.Path(__file__).parents[2]
 sys.path.insert(0, str(ROOT / "src"))
 
 

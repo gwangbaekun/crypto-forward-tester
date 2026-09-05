@@ -129,7 +129,7 @@ def _build_yaml_suggestion(accounts: list) -> str:
             f"#     enabled: false\n"
             f'#     env: {"live" if a["isLive"] else "demo"}\n'
             f"#     account_id: {a['ctidTraderAccountId']}   # traderLogin={a['traderLogin']}\n"
-            f"#     symbol_id: 0   # TODO scripts/ctrader_list_symbols.py 로 확인\n"
+            f"#     symbol_id: 0   # TODO scripts/ctrader/list_symbols.py 로 확인\n"
             f"#     lot_size: 0.05\n"
             f"#     units_per_lot: 1"
         )
