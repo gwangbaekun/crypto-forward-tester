@@ -1,4 +1,4 @@
-enabled: false
+enabled: false               # LEGACY (2026-09-05): 폴리마켓 전략 전면 중단.
 
 poll_interval_sec: 120      # REST 스캔 주기 (2분)
 max_scan_hours: 72          # 종료까지 최대 72시간 이내 전체 스캔

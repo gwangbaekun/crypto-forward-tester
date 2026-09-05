@@ -1,7 +1,7 @@
 # Fade 전략 설정 — 모든 튜닝 수치는 이 파일에서만 관리한다.
 # 코드는 값을 하드코딩하지 않고 여기서 필수 조회하며, 키가 없으면 부팅 시 즉시 터진다(fail-fast).
 
-enabled: true
+enabled: false               # LEGACY (2026-09-05): 폴리마켓 전략 전면 중단 — 국내 접근 불가(451) + 외부 수신 557 KB/s.
 
 # ── 실시간 엔진 타이밍 ────────────────────────────────────────────────────────
 sweep_interval_sec: 30       # 주기 루프: 구독 갱신 + 타임아웃 청산 체크 (감지 주기 아님)
@@ -104,7 +104,7 @@ cooldown_hours: 12           # sim 순차 백테스트의 같은 마켓 재진�
 # ── 워치리스트 자동 스크리너 — 이름이 아니라 가격 거동으로 종목을 뽑는다 ──────────────
 # 전수 열거 원리와 실측치는 screener.py / _data/client.py:screen_band_markets 주석 참조.
 screener:
-  enabled: true
+  enabled: false             # LEGACY (2026-09-05): Gamma 전수 페이징 중단.
   interval_hours: 1            # 스캔 주기. 실측 1회 26s/58요청이라 1h면 부하 무시 가능
   band_lo: 0.05                # 밴드 하한 — "5~15%대에 머무는" 종목
   band_hi: 0.15                # 밴드 상한

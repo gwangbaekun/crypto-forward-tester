@@ -1,4 +1,4 @@
-enabled: false
+enabled: false               # LEGACY (2026-09-05): 폴리마켓 전략 전면 중단.
 
 # --- 수집 ---
 poll_interval_sec: 180        # REST 스캔 주기 (3분). BTC 가격 마켓은 주/월 단위 → 여유
