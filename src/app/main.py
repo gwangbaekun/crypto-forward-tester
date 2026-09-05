@@ -172,6 +172,32 @@ async def _value_scan_scheduler() -> None:
         await asyncio.sleep(_VALUE_SCAN_POLL_SEC)
 
 
+async def _us_options_chain_scheduler() -> None:
+    from features.collectors import us_options_chain
+
+    await asyncio.sleep(20)
+    while True:
+        try:
+            result = await asyncio.to_thread(us_options_chain.collect)
+            print(f"[Collector] us_options_chain {result}")
+        except Exception as exc:
+            print(f"[Collector] us_options_chain 실패: {exc}")
+        await asyncio.sleep(900)
+
+
+async def _us_etf_daily_scheduler() -> None:
+    from features.collectors import us_etf_daily
+
+    await asyncio.sleep(60)
+    while True:
+        try:
+            result = await asyncio.to_thread(us_etf_daily.collect)
+            print(f"[Collector] us_etf_daily {result}")
+        except Exception as exc:
+            print(f"[Collector] us_etf_daily 실패: {exc}")
+        await asyncio.sleep(21600)
+
+
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
     init_db()
@@ -196,9 +222,13 @@ async def lifespan(_app: FastAPI):
 
     scan_task = asyncio.create_task(_value_scan_scheduler())
     drawdown_task = asyncio.create_task(_drawdown_scheduler())
+    options_task = asyncio.create_task(_us_options_chain_scheduler())
+    etf_task = asyncio.create_task(_us_etf_daily_scheduler())
     yield
     scan_task.cancel()
     drawdown_task.cancel()
+    options_task.cancel()
+    etf_task.cancel()
     try:
         await scan_task
     except asyncio.CancelledError:

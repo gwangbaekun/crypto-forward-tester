@@ -15,7 +15,7 @@
 **매 세션 벽을 기록하고 다음 세션이 그 벽을 존중했는지 채점해 표본을 쌓는 것**이다.
 첫 실행이 과거를 소급 계산하므로 `backfilled` 코호트를 반드시 분리한다.
 
-데이터: us_options_chain (자체 수집, Cboe) + us_etf_daily — 둘 다 backtest_quant DB.
+데이터: us_options_chain + us_etf_daily — forward DB 에 자체 수집.
 실거래 없음.
 """
 from __future__ import annotations
@@ -46,12 +46,7 @@ _engine = None
 
 # ────────────────────────────── 데이터 ──────────────────────────────
 def _pg_url() -> str:
-    url = os.getenv("US_OPTIONS_PG_URL") or os.getenv("DERIBIT_CHAIN_PG_URL")
-    if url:
-        return url
-    base = os.getenv("DATABASE_URL", "postgresql://btc:btc@localhost:5432/btc_forwardtest")
-    # 수집 아카이브가 적재되는 DB.
-    return base.rsplit("/", 1)[0] + "/backtest_quant"
+    return os.getenv("DATABASE_URL", "postgresql://btc:btc@localhost:5432/btc_forwardtest")
 
 
 def _get_engine():

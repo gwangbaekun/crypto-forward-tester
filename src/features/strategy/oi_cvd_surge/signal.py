@@ -1,7 +1,7 @@
 """
 OI CVD Surge — Signal (Forward Test).
 
-백테스트 engine.py 의 벡터화 로직을 단일 봉(완성봉 마지막 행)에 적용.
+백테스트 engine.py 의 벡터화 로직을 단일 봉(forming 봉 = 진입 봉)에 적용.
 
 신호 조건:
   LONG:  직전 lookback봉 CVD합 > 0  AND  직전 oi_lookback봉 OI 변화율 >= oi_min_pct
@@ -41,11 +41,11 @@ def compute_signal(
     tpsl_overrides:   Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     """
-    df: 완성봉만 포함된 DataFrame (형성 중 봉 제거 후 전달).
-        마지막 행(iloc[-1])이 방금 마감된 봉.
+    df: forming 봉을 마지막 행(iloc[-1])으로 포함한 DataFrame.
+        current_price = forming 봉 close (backtest c[i]).
 
     백테스트 shift(1) 패턴 재현:
-      roll 계산 구간 = [i-lookback : i]  (마지막 봉 자체는 제외)
+      roll 계산 구간 = [i-lookback : i]  (진입 봉 자체는 제외)
       oi_pct        = oi[i-1] vs oi[i-1-oi_lookback]
     """
     _none = {"signal": "none", "confidence": 0, "tp": None, "sl": None, "reasons": []}
@@ -70,7 +70,7 @@ def compute_signal(
     sl_max_pct  = tp_params.get("sl_max_pct")
 
     n = len(df)
-    i = n - 1  # 마지막 완성봉
+    i = n - 1  # forming 봉 = 진입 봉 (backtest index i)
 
     # lookback + oi_lookback 봉 이상 필요
     if i < lookback + oi_lookback:

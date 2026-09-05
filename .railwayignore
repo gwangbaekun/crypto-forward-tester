@@ -4,3 +4,4 @@ docker-compose.yml
 logs/
 data/
 docs/
+oracle/
