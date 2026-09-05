@@ -68,6 +68,11 @@
             <button type="button" id="ct-sell"  onclick="ctOrder('short')" style="font-size:0.78rem;padding:5px 14px;">SELL</button>
             <button type="button" id="ct-close" onclick="ctClose()"        style="font-size:0.78rem;padding:5px 14px;">CLOSE</button>
         </div>
+        <div style="display:flex;gap:6px;margin-top:6px;align-items:center;">
+            <span style="font-size:0.72rem;color:var(--text-secondary);">min test</span>
+            <button type="button" id="ct-tbuy"  onclick="ctOrder('long', 1)"  style="font-size:0.72rem;padding:3px 10px;">BUY vol 1</button>
+            <button type="button" id="ct-tsell" onclick="ctOrder('short', 1)" style="font-size:0.72rem;padding:3px 10px;">SELL vol 1</button>
+        </div>
         <div id="ct-result" style="font-size:0.75rem;margin-top:8px;color:var(--text-secondary);"></div>
     </div>
 
@@ -203,17 +208,20 @@
     window.refreshCtrader = refreshCtrader;
 
     function _ctBusy(on) {
-        ['ct-buy', 'ct-sell', 'ct-close'].forEach(function(id) {
+        ['ct-buy', 'ct-sell', 'ct-close', 'ct-tbuy', 'ct-tsell'].forEach(function(id) {
             document.getElementById(id).disabled = on;
         });
     }
 
-    function ctOrder(side) {
-        if (!confirm('cTrader 실주문: ' + side.toUpperCase() + ' — 진행할까요?')) return;
+    function ctOrder(side, vol) {
+        var label = vol ? (side.toUpperCase() + ' volume ' + vol) : side.toUpperCase();
+        if (!confirm('cTrader 실주문: ' + label + ' — 진행할까요?')) return;
         var out = document.getElementById('ct-result');
         out.textContent = '주문 중…';
         _ctBusy(true);
-        fetch('/auth/ctrader/order?strategy=' + STRATEGY + '&side=' + side + '&symbol=' + SYMBOL, { method: 'POST' })
+        var url = '/auth/ctrader/order?strategy=' + STRATEGY + '&side=' + side + '&symbol=' + SYMBOL
+                + (vol ? '&volume=' + vol : '');
+        fetch(url, { method: 'POST' })
             .then(function(r) { return r.json(); })
             .then(function(d) {
                 if (d.ok) { lastSide = side; out.textContent = '✅ ' + side + ' 체결 ' + JSON.stringify(d.result); }

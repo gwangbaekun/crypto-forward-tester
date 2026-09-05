@@ -242,15 +242,16 @@ async def ctrader_order(
     strategy: str = Query(...),
     side: str = Query(..., pattern="^(long|short)$"),
     symbol: str = Query("BTCUSDT"),
+    volume: int = Query(default=0, ge=0),
 ):
-    """수동 진입. 사이징은 전략 설정을 그대로 쓴다."""
+    """수동 진입. volume 을 주면 그 값으로, 없으면 전략 설정 사이징으로 나간다."""
     ex, _cfg, reason = _executor_for(strategy)
     if ex is None:
         return JSONResponse({"ok": False, "error": reason}, status_code=503)
     price = await _market_price(symbol)
     if price <= 0:
         return JSONResponse({"ok": False, "error": "현재가 조회 실패"}, status_code=502)
-    result = await ex.open_position(symbol, side, price)
+    result = await ex.open_position(symbol, side, price, volume=volume or None)
     if result is None:
         return JSONResponse({"ok": False, "error": "주문 실패 — 서버 로그 확인"}, status_code=502)
     return JSONResponse({"ok": True, "side": side, "price": price, "result": result})
