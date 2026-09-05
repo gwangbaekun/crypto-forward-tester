@@ -41,6 +41,7 @@ def _tg(msg: str) -> None:
 
 _CTRADER_TOKEN_URL = "https://openapi.ctrader.com/apps/token"
 CTRADER_IDLE_DISCONNECT_SEC = float(os.environ.get("CTRADER_IDLE_DISCONNECT_SEC", "60"))
+CTRADER_MAX_CONSECUTIVE_FAILURES = int(os.environ.get("CTRADER_MAX_FAILURES", "5"))
 
 
 def _lots_to_volume(lots: float, units_per_lot: int = 1, max_volume: Optional[int] = None) -> int:
@@ -145,6 +146,8 @@ class CTraderExecutor:
         self._position_cache_ts: float                 = 0.0
         self._position_fetch_lock: Optional[asyncio.Lock] = None
         self._idle_call: Any                           = None
+        self._consecutive_failures                     = 0
+        self._disabled                                 = False
 
         self._reactor = _ensure_reactor()
 
@@ -317,6 +320,8 @@ class CTraderExecutor:
         _start_client_service()
 
     def _ensure_connected(self, timeout: float = 10.0) -> bool:
+        if self._disabled:
+            return False
         if self._authed and self._client is not None:
             self._bump_idle()
             return True
@@ -331,8 +336,26 @@ class CTraderExecutor:
                 self._reactor.callWhenRunning(self._setup_client)
             ok = self._ready_event.wait(timeout=timeout)
             if ok:
+                self._consecutive_failures = 0
                 self._bump_idle()
-            return ok
+                return True
+
+            # 인증 실패 — ClientService 를 멈추지 않으면 영원히 재접속을 반복한다.
+            self._consecutive_failures += 1
+            self._reactor.callFromThread(
+                self._teardown_client,
+                f"인증 실패 {self._consecutive_failures}/{CTRADER_MAX_CONSECUTIVE_FAILURES}",
+            )
+            if self._consecutive_failures >= CTRADER_MAX_CONSECUTIVE_FAILURES:
+                self._disabled = True
+                msg = (
+                    f"⛔ <b>[cTrader {self._env}]</b> 연결 {self._consecutive_failures}회 연속 실패 — "
+                    f"account <code>{self._account_id}</code> 비활성화\n"
+                    f"재-OAuth 후 서비스 재시작 필요"
+                )
+                print(f"[cTrader] ⛔ {self._consecutive_failures}회 연속 실패 — account={self._account_id} 비활성화")
+                _tg(msg)
+            return False
 
     def _bump_idle(self) -> None:
         if getattr(self._reactor, "running", False):
@@ -345,10 +368,17 @@ class CTraderExecutor:
 
     def _idle_disconnect(self) -> None:
         self._idle_call = None
+        self._teardown_client(f"유휴 {CTRADER_IDLE_DISCONNECT_SEC:.0f}s 초과")
+
+    def _teardown_client(self, why: str) -> None:
+        """reactor 스레드에서 실행. ClientService 를 멈춰 자동 재접속을 끊는다."""
+        if self._idle_call is not None and self._idle_call.active():
+            self._idle_call.cancel()
+        self._idle_call = None
         client = self._client
         if client is None:
             return
-        print(f"[cTrader] 유휴 {CTRADER_IDLE_DISCONNECT_SEC:.0f}s 초과 — 연결 해제 (account={self._account_id})")
+        print(f"[cTrader] 연결 해제 ({why}) — account={self._account_id}")
         self._client = None
         self._authed = False
         self._ready_event.clear()
@@ -489,11 +519,14 @@ class CTraderExecutor:
         side: str,
         current_price: float = 0,
         leverage: Optional[int] = None,
+        volume: Optional[int] = None,
     ) -> Optional[Dict]:
         if not self._ready():
             return None
 
-        if self._notional_usd and current_price > 0:
+        if volume is not None and volume > 0:
+            print(f"[cTrader] 볼륨 직접 지정: volume={volume}")
+        elif self._notional_usd and current_price > 0:
             volume = int(self._notional_usd / current_price * self._units_per_lot)
             print(
                 f"[cTrader] 사이징: ${self._notional_usd:,.0f} / {current_price:,.2f} "
