@@ -163,8 +163,9 @@ oi_cvd_surge:
   discord_alerts: true
   binance_live: true
   binance_leverage: 3
-  ctrader_live: false
+  ctrader_live: true
   ctrader_account: "48577750"
+  ctrader_backtest_mdd: 20
   tick:
     module: features.strategy.oi_cvd_surge.forward_test_runner
     fn: get_state

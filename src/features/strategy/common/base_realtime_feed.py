@@ -333,6 +333,8 @@ async def _execute_verify_notify(
                 env=_ct_cfg.get("ctrader_env"),
                 symbol_id=_ct_cfg.get("ctrader_symbol_id"),
                 lot_size=_ct_cfg.get("ctrader_lot_size"),
+                units_per_lot=_ct_cfg.get("ctrader_units_per_lot"),
+                notional_usd=_ct_cfg.get("ctrader_notional_usd"),
             )
         except Exception as e:
             print(f"[{strategy_key}] cTrader executor 없음: {e}")

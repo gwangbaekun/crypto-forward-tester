@@ -2,5 +2,6 @@ accounts:
   "48577750":
     env: live
     symbol_id: 324
-    lot_size: 0.10
+    initial_balance: 100000
+    target_mdd: 10
     units_per_lot: 100

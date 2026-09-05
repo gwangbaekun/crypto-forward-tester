@@ -109,6 +109,7 @@ class CTraderExecutor:
         symbol_id: Optional[int] = None,
         lot_size: Optional[float] = None,
         units_per_lot: Optional[int] = None,
+        notional_usd: Optional[float] = None,
     ) -> None:
         self._client_id     = os.environ.get("CTRADER_CLIENT_ID", "").strip()
         self._client_secret = os.environ.get("CTRADER_CLIENT_SECRET", "").strip()
@@ -127,6 +128,7 @@ class CTraderExecutor:
         self._symbol_id     = symbol_id or 0
         self._lot_size      = lot_size or 0.01
         self._units_per_lot = units_per_lot if units_per_lot and units_per_lot > 0 else 1
+        self._notional_usd  = float(notional_usd) if notional_usd else None
         self._is_live       = self._env == "live"
 
         self._client: Any                              = None
@@ -491,6 +493,15 @@ class CTraderExecutor:
         if not self._ready():
             return None
 
+        if self._notional_usd and current_price > 0:
+            volume = int(self._notional_usd / current_price * self._units_per_lot)
+            print(
+                f"[cTrader] 사이징: ${self._notional_usd:,.0f} / {current_price:,.2f} "
+                f"-> volume={volume}"
+            )
+        else:
+            volume = _lots_to_volume(self._lot_size, self._units_per_lot)
+
         def _send():
             from ctrader_open_api.messages.OpenApiMessages_pb2 import ProtoOANewOrderReq
             from ctrader_open_api.messages.OpenApiModelMessages_pb2 import (
@@ -502,7 +513,7 @@ class CTraderExecutor:
             req.symbolId            = self._symbol_id
             req.orderType           = ProtoOAOrderType.MARKET
             req.tradeSide           = ProtoOATradeSide.BUY if side == "long" else ProtoOATradeSide.SELL
-            req.volume              = _lots_to_volume(self._lot_size, self._units_per_lot)
+            req.volume              = volume
             return self._send_and_wait(req)
 
         result = await self._run_in_executor(_send)
@@ -802,6 +813,7 @@ def get_executor(
     symbol_id: Optional[int] = None,
     lot_size: Optional[float] = None,
     units_per_lot: Optional[int] = None,
+    notional_usd: Optional[float] = None,
 ) -> Optional[CTraderExecutor]:
     if get_executor_unavailable_reason(account_id=account_id, symbol_id=symbol_id):
         return None
@@ -816,6 +828,7 @@ def get_executor(
             symbol_id=_symbol_id,
             lot_size=lot_size,
             units_per_lot=units_per_lot,
+            notional_usd=notional_usd,
         )
         print(f"[cTrader] 새 executor 생성 — account={_account_id} env={env or 'env_default'} symbol={_symbol_id}")
     return _executors[_account_id]
