@@ -586,6 +586,16 @@ class CTraderExecutor:
         print(f"[cTrader] reconcile — 청산 확인됨 positionId={position_id} (account={self._account_id})")
         return {"avgPrice": 0.0, "positionId": position_id, "reconciled": True, "closed": True}
 
+    async def _fetch_open_volume(self, position_id: int) -> Optional[int]:
+        result = await self.get_position(symbol="", cache_ttl=0.0)
+        if not result:
+            return None
+        for p in result.get("positions", []):
+            if p.get("positionId") == position_id:
+                vol = int(p.get("volume") or 0)
+                return vol if vol > 0 else None
+        return None
+
     async def close_position(self, symbol: str, side: str) -> Optional[Dict]:
         if not self._ready():
             return None
@@ -593,12 +603,22 @@ class CTraderExecutor:
             print("[cTrader] close_position — positionId 없음, 스킵")
             return None
 
+        volume = await self._fetch_open_volume(self._open_position_id)
+        if volume is None:
+            volume = _lots_to_volume(self._lot_size, self._units_per_lot)
+            print(
+                f"[cTrader] ⚠️ 보유 volume 조회 실패 — lot_size 기준 volume={volume} 로 청산 시도 "
+                f"(positionId={self._open_position_id})"
+            )
+        else:
+            print(f"[cTrader] 청산 볼륨 — positionId={self._open_position_id} volume={volume} (전량)")
+
         def _send():
             from ctrader_open_api.messages.OpenApiMessages_pb2 import ProtoOAClosePositionReq
             req = ProtoOAClosePositionReq()
             req.ctidTraderAccountId = self._account_id
             req.positionId          = self._open_position_id
-            req.volume              = _lots_to_volume(self._lot_size, self._units_per_lot)
+            req.volume              = volume
             return self._send_and_wait(req)
 
         result = await self._run_in_executor(_send)
