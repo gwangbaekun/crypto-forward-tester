@@ -141,7 +141,8 @@ class CTraderExecutor:
         self._connect_lock                             = threading.Lock()
         self._pending: Optional[concurrent.futures.Future] = None
         self._open_position_id: Optional[int]          = None
-        self._refresh_attempted                         = False
+        self._last_fill: Optional[Dict]                = None
+        self._refresh_attempted                        = False
         self._position_cache: Optional[Dict]           = None
         self._position_cache_ts: float                 = 0.0
         self._position_fetch_lock: Optional[asyncio.Lock] = None
@@ -458,6 +459,11 @@ class CTraderExecutor:
             pos_id     = getattr(position, "positionId", None)
             if pos_id:
                 self._open_position_id = pos_id
+            self._last_fill = {
+                "positionId": pos_id,
+                "volume":     getattr(order, "executedVolume", None),
+                "price":      fill_price,
+            }
             print(f"[cTrader] ✅ 체결 — fill={fill_price:.4f} positionId={pos_id}")
             _tg(
                 f"✅ <b>[cTrader {self._env}]</b> 체결\n"
@@ -680,6 +686,9 @@ class CTraderExecutor:
 
     def get_cached_position(self) -> Optional[Dict]:
         return self._position_cache
+
+    def get_last_fill(self) -> Optional[Dict]:
+        return self._last_fill
 
     async def get_position(self, symbol: str, cache_ttl: float = 8.0) -> Optional[Dict]:
         """오픈 포지션 조회. cache_ttl 초 이내 재요청은 캐시를 반환해 cTrader 부하를 방지.

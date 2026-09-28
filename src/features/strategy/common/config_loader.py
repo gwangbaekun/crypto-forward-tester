@@ -165,6 +165,9 @@ def get_ctrader_config(strategy_id: str) -> dict:
             "ctrader_symbol_id":     acct.get("symbol_id"),
             "ctrader_units_per_lot": acct.get("units_per_lot"),
             "ctrader_notional_usd":  notional,
+            "ctrader_initial_balance": balance,
+            "ctrader_target_mdd":      target_mdd,
+            "ctrader_backtest_mdd":    backtest_mdd,
         }
 
     accounts = strat.get("ctrader_accounts")

@@ -224,6 +224,7 @@ async def ctrader_order_status(
     notional = cfg.get("ctrader_notional_usd")
     upl      = cfg.get("ctrader_units_per_lot") or 1
     volume   = int(notional / price * upl) if (notional and price > 0) else None
+    last_fill = ex.get_last_fill() if ex else None
     return JSONResponse({
         "ready":        ex is not None,
         "reason":       reason,
@@ -234,6 +235,11 @@ async def ctrader_order_status(
         "notional_usd": notional,
         "price":        price,
         "volume":       volume,
+        "initial_balance": cfg["ctrader_initial_balance"],
+        "target_mdd":      cfg["ctrader_target_mdd"],
+        "backtest_mdd":    cfg["ctrader_backtest_mdd"],
+        "units_per_lot":   cfg["ctrader_units_per_lot"],
+        "last_fill":       last_fill,
     })
 
 

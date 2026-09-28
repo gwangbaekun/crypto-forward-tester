@@ -192,16 +192,24 @@
                 if (!d.ready) {
                     label.textContent = 'Not ready';
                     label.style.color = 'var(--text-secondary)';
-                    box.textContent = '⚠️ ' + (d.reason || 'unknown');
-                    return;
+                } else {
+                    label.textContent = '🔴 ' + (d.env || '').toUpperCase() + ' · account ' + d.account_id;
+                    label.style.color = 'var(--accent-red)';
                 }
-                label.textContent = '🔴 ' + (d.env || '').toUpperCase() + ' · account ' + d.account_id;
-                label.style.color = 'var(--accent-red)';
+                var f = d.last_fill;
                 box.innerHTML =
-                    'notional $' + Number(d.notional_usd || 0).toLocaleString() +
-                    ' &nbsp;|&nbsp; price ' + _fmtPrice(d.price) +
-                    ' &nbsp;|&nbsp; volume <strong>' + (d.volume != null ? d.volume : '—') + '</strong>' +
-                    ' (' + (d.volume != null ? (d.volume / 100).toFixed(2) : '—') + ' lots)';
+                    (d.ready ? '' : '⚠️ ' + d.reason + '<br>') +
+                    'balance ' + Number(d.initial_balance).toLocaleString() +
+                    '<br>target_mdd ' + d.target_mdd +
+                    '<br>backtest_mdd ' + d.backtest_mdd +
+                    '<br>notional ' + Number(d.notional_usd || 0).toLocaleString() +
+                    '<br>price ' + _fmtPrice(d.price) +
+                    '<br>units_per_lot ' + d.units_per_lot +
+                    '<br>volume <strong>' + (d.volume != null ? d.volume : '—') + '</strong>' +
+                    '<hr style="border:none;border-top:1px solid var(--border, #333);margin:6px 0;">' +
+                    'last fill ' + (f
+                        ? 'positionId ' + f.positionId + '<br>volume ' + (f.volume != null ? f.volume : '—') + ' @ ' + f.price
+                        : '—');
             })
             .catch(function(e) { box.textContent = '조회 실패: ' + e; });
     }
