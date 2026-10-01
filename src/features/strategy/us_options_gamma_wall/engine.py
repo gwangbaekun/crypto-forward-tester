@@ -1,4 +1,3 @@
-"""US Options Gamma Wall (SPY→US500) — 엔진."""
 from __future__ import annotations
 
 import asyncio
@@ -6,7 +5,6 @@ import datetime as dt
 import json
 import logging
 import os
-import pathlib
 import re
 import threading
 import time
@@ -15,20 +13,21 @@ import numpy as np
 import pandas as pd
 from sqlalchemy import create_engine, text
 
+from features.collectors.retention import LOCK_KEY
+
 logger = logging.getLogger(__name__)
 
 UNDERLYING = "SPY"
-EXEC_SYMBOL = "US500"          # 참고용 — 실거래 없음
-MAX_DTE_DAYS = 30              # 벽 집계에 넣을 만기 범위
+EXEC_SYMBOL = "US500"
+MAX_DTE_DAYS = 30
 CONTRACT_MULTIPLIER = 100
-LEDGER = pathlib.Path(__file__).resolve().parents[4] / "data" / "gamma_wall_ledger.json"
 _LOCK = threading.Lock()
 _engine = None
 
 
-# ────────────────────────────── 데이터 ──────────────────────────────
 def _pg_url() -> str:
-    return os.getenv("DATABASE_URL", "postgresql://btc:btc@localhost:5432/btc_forwardtest")
+    url = os.environ["DATABASE_URL"]
+    return url
 
 
 def _get_engine():
@@ -46,11 +45,6 @@ PROBE_TIMEOUT_MS = 20000
 
 
 def datasource_status() -> dict:
-    """대시보드용 데이터 소스 점검 — 원장이 왜 비어있는지 화면에서 보이게 한다.
-
-    조회는 인덱스 없는 테이블 전수 스캔이라 수 초 걸린다. 라우터에서 캐시하고
-    대시보드는 비동기로 채운다.
-    """
     started = time.monotonic()
     today = dt.datetime.now(dt.timezone.utc).date()
 
@@ -114,46 +108,49 @@ def datasource_status() -> dict:
     return out
 
 
-def load_chain(days: int = 400) -> pd.DataFrame:
+def load_chain() -> pd.DataFrame:
     q = text(
-        "SELECT snapshot_ts, last_trade_time, expiry, strike, option_type, "
-        "       open_interest, gamma, underlying_price "
-        "FROM us_options_chain "
-        "WHERE underlying = :u AND open_interest > 0 AND gamma > 0 "
-        "  AND snapshot_ts >= now() - ((:d)::text || ' days')::interval"
+        "SELECT s.session, s.snapshot_ts, p.option, p.expiry, p.strike, p.option_type, "
+        "       p.open_interest, p.gamma, s.underlying_price "
+        "FROM us_options_chain_pending_snapshots s "
+        "LEFT JOIN us_options_chain_pending p ON p.session = s.session AND p.snapshot_ts = s.snapshot_ts "
+        "ORDER BY s.session"
     )
-    df = pd.read_sql(q, _get_engine(), params={"u": UNDERLYING, "d": int(days)})
+    df = pd.read_sql(q, _get_engine())
     if df.empty:
         return df
     df["snapshot_ts"] = pd.to_datetime(df["snapshot_ts"], utc=True)
     df["expiry"] = pd.to_datetime(df["expiry"]).dt.date
+    df["session"] = pd.to_datetime(df["session"]).dt.date
     return df
 
 
-def load_daily(days: int = 400) -> pd.DataFrame:
+def load_daily(sessions: list[dt.date]) -> pd.DataFrame:
+    if not sessions:
+        df = pd.DataFrame(columns=["open", "high", "low", "close"])
+        return df
     q = text(
-        "SELECT date, open, high, low, close FROM us_etf_daily "
-        "WHERE symbol = :s AND date >= now()::date - :d ORDER BY date"
+        "SELECT DISTINCT d.date, d.open, d.high, d.low, d.close "
+        "FROM unnest(CAST(:sessions AS date[])) AS wanted(session) "
+        "CROSS JOIN LATERAL ("
+        "  SELECT date, open, high, low, close FROM us_etf_daily "
+        "  WHERE symbol = :s AND date > wanted.session ORDER BY date LIMIT 1"
+        ") d ORDER BY d.date"
     )
-    df = pd.read_sql(q, _get_engine(), params={"s": UNDERLYING, "d": int(days)})
+    df = pd.read_sql(q, _get_engine(), params={"s": UNDERLYING, "sessions": sessions})
     if df.empty:
         return df
     df["date"] = pd.to_datetime(df["date"]).dt.date
-    return df.drop_duplicates("date").set_index("date")
+    df = df.set_index("date")
+    return df
 
 
-# ────────────────────────────── 벽 계산 ──────────────────────────────
 def compute_walls(snap: pd.DataFrame, session: dt.date) -> dict | None:
-    """한 스냅샷 → 행사가별 GEX 집계 → call/put 벽.
-
-    만기 가중은 따로 하지 않는다 — GEX 가 이미 OI 로 가중되므로 OI 40만짜리
-    일일 만기와 298만짜리 월물이 자동으로 제 몫만큼만 기여한다.
-    """
     if snap.empty:
         return None
     S = float(snap.underlying_price.iloc[0])
     if not np.isfinite(S) or S <= 0:
-        return None
+        raise ValueError("Gamma Wall underlying_price는 유효한 양수여야 합니다")
 
     dte = np.array([(e - session).days for e in snap.expiry])
     g = snap[(dte >= 0) & (dte <= MAX_DTE_DAYS)]
@@ -167,8 +164,8 @@ def compute_walls(snap: pd.DataFrame, session: dt.date) -> dict | None:
     above, below = per_k[per_k.index > S], per_k[per_k.index < S]
     if above.empty or below.empty:
         return None
-    call_wall = float(above.idxmax())   # 스팟 위 최대 (+)GEX = 저항
-    put_wall = float(below.idxmin())    # 스팟 아래 최소 (−)GEX = 지지
+    call_wall = float(above.idxmax())
+    put_wall = float(below.idxmin())
     if not (put_wall < S < call_wall):
         return None
 
@@ -188,12 +185,6 @@ def compute_walls(snap: pd.DataFrame, session: dt.date) -> dict | None:
 
 
 def score(rec: dict, nxt: pd.Series) -> dict:
-    """다음 세션의 OHLC 로 벽이 지켜졌는지 채점.
-
-    귀무 대조군을 반드시 같이 계산한다: 벽과 **같은 폭**을 스팟 기준 대칭으로
-    놓은 밴드. 벽이 '폭'이 아니라 '위치' 정보를 담고 있어야만 실제 벽이 대조군을
-    이긴다. 이게 없으면 단순히 밴드가 넓어서 잘 담긴 것과 구분되지 않는다.
-    """
     S, cw, pw = rec["spot"], rec["call_wall"], rec["put_wall"]
     hi, lo, cl = float(nxt.high), float(nxt.low), float(nxt.close)
     half = ((cw - S) + (S - pw)) / 2.0
@@ -202,7 +193,6 @@ def score(rec: dict, nxt: pd.Series) -> dict:
         "next_high": hi, "next_low": lo, "next_close": cl,
         "touched_call": bool(hi >= cw),
         "touched_put": bool(lo <= pw),
-        # 벽을 찍고 되돌아왔는가 (관통이 아니라 반발)
         "respected_call": bool(hi >= cw and cl < cw),
         "respected_put": bool(lo <= pw and cl > pw),
         "contained": bool(pw <= cl <= cw),
@@ -211,51 +201,35 @@ def score(rec: dict, nxt: pd.Series) -> dict:
     }
 
 
-# ────────────────────────────── 원장 ──────────────────────────────
 def _db_enabled() -> bool:
     return bool(os.getenv("DATABASE_URL", "").strip())
 
 
-def _fwd_engine():
-    return create_engine(os.environ["DATABASE_URL"], pool_pre_ping=True)
-
-
 def load_ledger() -> dict:
-    """DATABASE_URL 이 있으면 DB 가 정본 — 컨테이너 파일시스템은 재배포마다 날아간다."""
-    if _db_enabled():
-        try:
-            with _fwd_engine().begin() as c:
-                c.execute(text("CREATE TABLE IF NOT EXISTS gamma_wall_ledger "
-                               "(id INT PRIMARY KEY, blob JSONB NOT NULL, updated_at TIMESTAMPTZ)"))
-                row = c.execute(text("SELECT blob FROM gamma_wall_ledger WHERE id=1")).fetchone()
-            if row and row[0]:
-                return row[0] if isinstance(row[0], dict) else json.loads(row[0])
-        except Exception:
-            logger.exception("gamma_wall 원장 DB 읽기 실패 — 파일로 폴백하지 않는다")
-            raise
-        return {"sessions": {}, "last_run": None}
-    if LEDGER.exists():
-        return json.loads(LEDGER.read_text())
-    return {"sessions": {}, "last_run": None}
+    with _get_engine().connect() as c:
+        row = c.execute(text("SELECT blob FROM gamma_wall_ledger WHERE id=1")).fetchone()
+    if row is None:
+        ledger = {"sessions": {}, "last_run": None}
+    else:
+        ledger = row[0]
+    return ledger
 
 
-def save_ledger(led: dict) -> None:
-    if _db_enabled():
-        with _fwd_engine().begin() as c:
-            c.execute(text("CREATE TABLE IF NOT EXISTS gamma_wall_ledger "
-                           "(id INT PRIMARY KEY, blob JSONB NOT NULL, updated_at TIMESTAMPTZ)"))
-            c.execute(text("INSERT INTO gamma_wall_ledger (id, blob, updated_at) "
-                           "VALUES (1, CAST(:b AS JSONB), now()) "
-                           "ON CONFLICT (id) DO UPDATE SET blob=EXCLUDED.blob, updated_at=now()"),
-                      {"b": json.dumps(led, ensure_ascii=False)})
-        return
-    LEDGER.parent.mkdir(parents=True, exist_ok=True)
-    LEDGER.write_text(json.dumps(led, ensure_ascii=False, indent=1))
+def save_ledger(led: dict, processed: list[dict]) -> None:
+    with _get_engine().begin() as c:
+        c.execute(text("SELECT pg_advisory_xact_lock(:key)"), {"key": LOCK_KEY})
+        c.execute(text("INSERT INTO gamma_wall_ledger (id, blob, updated_at) "
+                       "VALUES (1, CAST(:b AS JSONB), now()) "
+                       "ON CONFLICT (id) DO UPDATE SET blob=EXCLUDED.blob, updated_at=now()"),
+                  {"b": json.dumps(led, ensure_ascii=False)})
+        if processed:
+            c.execute(text(
+                "DELETE FROM us_options_chain_pending_snapshots "
+                "WHERE session = :session AND snapshot_ts = :snapshot_ts"
+            ), processed)
 
 
-# ────────────────────────────── 실행 ──────────────────────────────
 def is_due() -> bool:
-    """하루 1회. 미국 세션 마감 + OI 갱신 이후를 노린다 (13:00 UTC 이후)."""
     led = load_ledger()
     last = led.get("last_run")
     now = dt.datetime.now(dt.timezone.utc)
@@ -266,39 +240,43 @@ def is_due() -> bool:
     return dt.datetime.fromisoformat(last).date() < now.date()
 
 
-def run(dry: bool = False) -> dict:
-    chain = load_chain()
-    if chain.empty:
-        return {"error": "us_options_chain 비어있음 (수집 대기)", "added": 0, "scored": 0}
-    daily = load_daily()
-
+def _run(dry: bool) -> dict:
     led = load_ledger()
-    sessions: dict = led.setdefault("sessions", {})
+    sessions: dict = led["sessions"]
     first_run = not sessions
-
-    # 세션 = 그 스냅이 담고 있는 **미국 거래일**. snapshot_ts 의 UTC 날짜를 쓰면 안 된다:
-    # 00:17 UTC 수집은 20:17 ET 라 이미 닫힌 전날 세션을 담고, 주말 재수집은 금요일을
-    # 담는다. 수집기 `fetch_session_date` 와 같은 규칙 — 기초자산 마지막 체결(ET)이
-    # 그 파일이 어느 세션인지 말해준다.
-    lt = pd.to_datetime(chain["last_trade_time"], errors="coerce")
-    sess_of = lt.groupby(chain.snapshot_ts).transform("max").dt.date
-    if sess_of.isna().all():
-        raise RuntimeError("last_trade_time 이 전부 비어있다 — 세션을 특정할 수 없다")
-    chain["session"] = sess_of
+    chain = load_chain()
+    processed = []
     added = 0
+    no_signal = 0
     for sess, grp in chain.groupby("session"):
         key = sess.isoformat()
-        if key in sessions:
-            continue
         last_ts = grp.snapshot_ts.max()
-        rec = compute_walls(grp[grp.snapshot_ts == last_ts], sess)
-        if rec is None:
+        identity = {"session": sess, "snapshot_ts": last_ts.to_pydatetime()}
+        if key in sessions and pd.Timestamp(sessions[key]["snapshot_ts"]) >= last_ts:
+            processed.append(identity)
             continue
-        rec["backfilled"] = first_run      # 사후 소급분과 실시간 기록분을 영구히 분리
+        snap = grp[grp.snapshot_ts == last_ts]
+        spot = float(snap.underlying_price.iloc[0])
+        if not np.isfinite(spot) or spot <= 0:
+            raise ValueError("Gamma Wall underlying_price는 유효한 양수여야 합니다")
+        contracts = snap[snap["option"].notna()]
+        rec = compute_walls(contracts, sess)
+        if rec is None:
+            if key in sessions:
+                del sessions[key]
+            processed.append(identity)
+            no_signal += 1
+            continue
+        if key in sessions:
+            rec["backfilled"] = sessions[key]["backfilled"]
+        else:
+            rec["backfilled"] = first_run
+            added += 1
         sessions[key] = rec
-        added += 1
+        processed.append(identity)
 
-    # 채점: 다음 거래일 OHLC 가 도착한 것만
+    unscored = [dt.date.fromisoformat(key) for key, rec in sessions.items() if "result" not in rec]
+    daily = load_daily(unscored)
     scored = 0
     if not daily.empty:
         idx = list(daily.index)
@@ -314,8 +292,19 @@ def run(dry: bool = False) -> dict:
 
     led["last_run"] = dt.datetime.now(dt.timezone.utc).isoformat()
     if not dry:
-        save_ledger(led)
-    return {"added": added, "scored": scored, "total": len(sessions), "first_run": first_run}
+        save_ledger(led, processed)
+    result = {
+        "added": added, "scored": scored, "total": len(sessions),
+        "first_run": first_run, "no_signal": no_signal,
+    }
+    return result
+
+
+def run(dry: bool = False) -> dict:
+    with _get_engine().begin() as c:
+        c.execute(text("SELECT pg_advisory_xact_lock(:key)"), {"key": LOCK_KEY + 1})
+        result = _run(dry)
+    return result
 
 
 def is_running() -> bool:
@@ -323,7 +312,6 @@ def is_running() -> bool:
 
 
 def run_exclusive(dry: bool = False) -> dict | None:
-    """스케줄러 틱과 대시보드 수동 실행이 원장을 동시에 덮는 것을 막는다."""
     if not _LOCK.acquire(blocking=False):
         return None
     try:

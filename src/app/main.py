@@ -1,4 +1,3 @@
-# pyright: reportMissingImports=false
 import asyncio
 import logging
 from contextlib import asynccontextmanager
@@ -10,7 +9,6 @@ import uvicorn
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 
-# access log 에서 폴링성 엔드포인트 필터링 (Railway 로그 절약)
 _MUTE_PATHS = {"/health", "/execute/status"}
 
 class _AccessLogFilter(logging.Filter):
@@ -98,7 +96,7 @@ async def _ctrader_token_healthcheck() -> None:
         print(f"[cTrader][healthcheck] 예외: {e}")
 
 
-_VALUE_SCAN_POLL_SEC = 600  # 10분마다 catch-up 확인 (하루 1회 보장)
+_VALUE_SCAN_POLL_SEC = 600
 
 
 async def _run_market_scan_if_due(market: str) -> bool:
@@ -121,12 +119,6 @@ _DRAWDOWN_POLL_SEC = 1800
 
 
 async def _drawdown_scheduler() -> None:
-    """드로다운 매수 신호 — 일봉 기준 하루 1회 (Railway 배포본에서 그대로 동작).
-
-    cron 대신 앱 안에 두는 이유: 배포 환경이 Docker 라 호스트 crontab 이 없고,
-    컨테이너가 재시작돼도 원장의 last_run 을 보고 catch-up 하면 하루 1회가 보장된다.
-    일봉이라 30분 폴링으로 충분하다.
-    """
     from features.strategy.drawdown_signal.cache import dd_cache
     from features.strategy.drawdown_signal.engine import is_due, run_exclusive
 
@@ -134,7 +126,6 @@ async def _drawdown_scheduler() -> None:
     while True:
         try:
             if is_due():
-                # 대시보드 수동 실행과 겹치면 원장이 서로 덮어써진다 → run_exclusive
                 r = await asyncio.to_thread(run_exclusive)
                 if r is not None:
                     dd_cache.invalidate()
@@ -146,7 +137,6 @@ async def _drawdown_scheduler() -> None:
 
 
 async def _value_scan_scheduler() -> None:
-    """장 마감 시각 이후, 시장별 거래일 기준 하루 1회 스캔."""
     from features.strategy.value_scan.scan_schedule import build_schedule_status
 
     await asyncio.sleep(15)
@@ -182,7 +172,7 @@ async def _us_options_chain_scheduler() -> None:
             print(f"[Collector] us_options_chain {result}")
         except Exception as exc:
             print(f"[Collector] us_options_chain 실패: {exc}")
-        await asyncio.sleep(900)
+        await asyncio.sleep(1800)
 
 
 async def _us_etf_daily_scheduler() -> None:
@@ -201,8 +191,11 @@ async def _us_etf_daily_scheduler() -> None:
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
     init_db()
+    from features.collectors.retention import maintain_storage
+    cleanup = await asyncio.to_thread(maintain_storage)
+    print(f"[Retention] us_options_chain {cleanup}")
     from features.strategy.polymarket.fade.watchlist_seed import seed_watchlist_from_config
-    seed_watchlist_from_config()  # watchlist.yaml → DB 비파괴적 upsert (local/Railway 동기화)
+    seed_watchlist_from_config()
     await startup_binance_price_ws()
     await startup_ctrader()
     try:
@@ -213,7 +206,6 @@ async def lifespan(_app: FastAPI):
         strategy_task = None
 
     try:
-        # 항상 시작 — run_polymarket 가 내부에서 게이트(enabled 전략 있거나 LIVE면 가동).
         from features.strategy.polymarket.runner import run_polymarket
         polymarket_task = asyncio.create_task(run_polymarket())
     except Exception as exc:
@@ -249,7 +241,6 @@ async def lifespan(_app: FastAPI):
 
 app = FastAPI(title="BTC Forward Test API", lifespan=lifespan)
 
-# 접근 게이트 — env 가 잘못되면 여기서 즉시 예외 (부팅 실패 > 무방비 공개)
 _auth_cfg = get_auth_config()
 app.add_middleware(AccessGateMiddleware)
 if _auth_cfg.enabled:
@@ -267,13 +258,13 @@ async def health() -> dict:
 
 
 app.include_router(access_auth_router)
-app.include_router(data_explorer_router)   # /data/explorer — 수집 데이터 구조 보기
-app.include_router(site_index_router)      # "/" — 전체 페이지 인덱스
+app.include_router(data_explorer_router)
+app.include_router(site_index_router)
 app.include_router(master_dashboard_router)
 app.include_router(ctrader_auth_router)
 app.include_router(strategy_router)
 app.include_router(polymarket_router)
-include_strategy_routers(app)  # strategies_master.yaml 기반 자동 등록
+include_strategy_routers(app)
 
 _project_root = Path(__file__).resolve().parents[2]
 _static_dir = _project_root / "static"
