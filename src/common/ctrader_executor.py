@@ -27,7 +27,6 @@ from typing import Any, Dict, Optional
 import httpx
 from twisted.python.failure import Failure
 from common.ctrader_token_store import get_tokens, save_tokens
-from common.redis.ctrader_position import delete_position_id, get_position_id, save_position_id
 
 
 def _tg(msg: str) -> None:
@@ -152,29 +151,6 @@ class CTraderExecutor:
         self._disabled                                 = False
 
         self._reactor = _ensure_reactor()
-        self._load_open_position_id()
-
-    def _load_open_position_id(self) -> None:
-        try:
-            self._open_position_id = get_position_id(self._account_id)
-        except Exception as e:
-            msg = f"[cTrader] Redis positionId 로드 실패 (account={self._account_id}): {e}"
-            print(msg)
-            _tg(msg)
-            return
-        print(f"[cTrader] Redis positionId 로드 — positionId={self._open_position_id} (account={self._account_id})")
-
-    def _set_open_position_id(self, position_id: Optional[int]) -> None:
-        self._open_position_id = position_id
-        try:
-            if position_id is None:
-                delete_position_id(self._account_id)
-            else:
-                save_position_id(self._account_id, position_id)
-        except Exception as e:
-            msg = f"[cTrader] Redis positionId 저장 실패 (account={self._account_id} positionId={position_id}): {e}"
-            print(msg)
-            _tg(msg)
 
     def _ready(self) -> bool:
         return bool(
@@ -482,7 +458,7 @@ class CTraderExecutor:
             fill_price = float(getattr(order, "executionPrice", 0) or 0)
             pos_id     = getattr(position, "positionId", None)
             if pos_id:
-                self._set_open_position_id(pos_id)
+                self._open_position_id = pos_id
             self._last_fill = {
                 "positionId": pos_id,
                 "volume":     getattr(order, "executedVolume", None),
@@ -597,7 +573,7 @@ class CTraderExecutor:
             if p.get("symbolId") == self._symbol_id and p.get("side") == want:
                 pid = p.get("positionId")
                 if pid:
-                    self._set_open_position_id(pid)
+                    self._open_position_id = pid
                 print(f"[cTrader] reconcile — 진입 확인됨 positionId={pid} (account={self._account_id})")
                 return {"avgPrice": float(p.get("price") or 0), "positionId": pid, "reconciled": True}
         print(f"[cTrader] reconcile — 진입 안 됨 (account={self._account_id})")
@@ -616,23 +592,13 @@ class CTraderExecutor:
         print(f"[cTrader] reconcile — 청산 확인됨 positionId={position_id} (account={self._account_id})")
         return {"avgPrice": 0.0, "positionId": position_id, "reconciled": True, "closed": True}
 
-    async def _fetch_open_volume(self, position_id: int) -> Optional[int]:
-        result = await self.get_position(symbol="", cache_ttl=0.0)
-        if not result:
-            return None
-        for p in result.get("positions", []):
-            if p.get("positionId") == position_id:
-                vol = int(p.get("volume") or 0)
-                return vol if vol > 0 else None
-        return None
-
-    async def _restore_open_position_id(self, side: str) -> None:
+    async def _find_open_position(self, side: str) -> Optional[Dict]:
         result = await self.get_position(symbol="", cache_ttl=0.0)
         if result is None:
-            msg = f"[cTrader] positionId 복원 실패 — 포지션 조회 응답 없음, 청산 스킵 (account={self._account_id} side={side})"
+            msg = f"[cTrader] 포지션 조회 응답 없음, 청산 스킵 (account={self._account_id} side={side})"
             print(msg)
             _tg(msg)
-            return
+            return None
         want = "BUY" if side == "long" else "SELL"
         matches = [
             p for p in result["positions"]
@@ -641,47 +607,40 @@ class CTraderExecutor:
         if len(matches) != 1:
             ids = [p["positionId"] for p in matches]
             msg = (
-                f"[cTrader] positionId 복원 실패 — 일치 포지션 {len(matches)}개 {ids}, 청산 스킵 "
+                f"[cTrader] 일치 포지션 {len(matches)}개 {ids}, 청산 스킵 "
                 f"(account={self._account_id} symbol={self._symbol_id} side={side})"
             )
             print(msg)
             _tg(msg)
-            return
-        self._set_open_position_id(matches[0]["positionId"])
-        print(f"[cTrader] positionId 복원 — positionId={self._open_position_id} (account={self._account_id} side={side})")
+            return None
+        position = matches[0]
+        return position
 
     async def close_position(self, symbol: str, side: str) -> Optional[Dict]:
         if not self._ready():
             return None
-        if not self._open_position_id:
-            await self._restore_open_position_id(side)
-            if not self._open_position_id:
-                return None
+        position = await self._find_open_position(side)
+        if position is None:
+            return None
 
-        volume = await self._fetch_open_volume(self._open_position_id)
-        if volume is None:
-            volume = _lots_to_volume(self._lot_size, self._units_per_lot)
-            print(
-                f"[cTrader] ⚠️ 보유 volume 조회 실패 — lot_size 기준 volume={volume} 로 청산 시도 "
-                f"(positionId={self._open_position_id})"
-            )
-        else:
-            print(f"[cTrader] 청산 볼륨 — positionId={self._open_position_id} volume={volume} (전량)")
+        position_id = position["positionId"]
+        volume      = int(position["volume"])
+        print(f"[cTrader] 청산 볼륨 — positionId={position_id} volume={volume} (전량)")
 
         def _send():
             from ctrader_open_api.messages.OpenApiMessages_pb2 import ProtoOAClosePositionReq
             req = ProtoOAClosePositionReq()
             req.ctidTraderAccountId = self._account_id
-            req.positionId          = self._open_position_id
+            req.positionId          = position_id
             req.volume              = volume
             return self._send_and_wait(req)
 
         result = await self._run_in_executor(_send)
         if result is None:
             print(f"[cTrader] 청산 확인 타임아웃 — reconcile로 실제 청산 확인 (account={self._account_id})")
-            result = await self._reconcile_close(self._open_position_id)
+            result = await self._reconcile_close(position_id)
         if result:
-            self._set_open_position_id(None)
+            self._open_position_id = None
             self._position_cache = None
             print(f"[cTrader] ✅ 청산 — fill={result.get('avgPrice', 0):.4f}")
         return result
@@ -728,7 +687,7 @@ class CTraderExecutor:
             result = await self._reconcile_close(position_id)
         if result:
             if self._open_position_id == position_id:
-                self._set_open_position_id(None)
+                self._open_position_id = None
             self._position_cache = None
             print(f"[cTrader] ✅ 강제 청산 — positionId={position_id} fill={result.get('avgPrice', 0):.4f}")
         return result
