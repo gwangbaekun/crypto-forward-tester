@@ -1,15 +1,15 @@
 import asyncio
 import contextlib
-import importlib.util
-import io
 import os
-import pathlib
-import sys
 import unittest
 from types import SimpleNamespace
 from unittest import mock
 
-SCRIPT = pathlib.Path(__file__).resolve().parents[1] / "scripts" / "ctrader" / "onboard_account.py"
+from fastapi import FastAPI
+from fastapi.testclient import TestClient
+
+from common import ctrader_onboard
+from features.ctrader.router import router
 
 CONFIG = {
     "ctrader_account_id": 49204299,
@@ -20,14 +20,6 @@ CONFIG = {
 }
 
 POSITION = {"positionId": 777, "volume": 10}
-
-
-def _load_script():
-    spec = importlib.util.spec_from_file_location("onboard_account", SCRIPT)
-    module = importlib.util.module_from_spec(spec)
-    with mock.patch("asyncio.run", side_effect=lambda coro: coro.close()):
-        spec.loader.exec_module(module)
-    return module
 
 
 def _symbol(min_volume, max_volume):
@@ -75,15 +67,12 @@ class FakeExecutor:
         return result
 
 
-class OnboardAccountScriptTests(unittest.TestCase):
+class OnboardAccountTests(unittest.TestCase):
     def _run(self, scenario):
-        module = _load_script()
         self.executor = FakeExecutor(scenario["snapshots"])
         self.get_executor = mock.Mock(return_value=self.executor)
-        self.out = io.StringIO()
         infos = [_info(1000000, scenario["symbol"]), _info(999950, scenario["symbol"])]
         with contextlib.ExitStack() as stack:
-            stack.enter_context(mock.patch.object(sys, "argv", ["onboard_account.py", "spot_perp_cvd"]))
             stack.enter_context(mock.patch.dict(os.environ, {"CTRADER_CLIENT_ID": "cid", "CTRADER_CLIENT_SECRET": "secret"}))
             stack.enter_context(mock.patch("features.strategy.common.config_loader.get_ctrader_config", return_value=scenario["config"]))
             stack.enter_context(mock.patch("features.strategy.common.config_loader.get_master_config", return_value={"spot_perp_cvd": {"symbol": "ETHUSDT"}}))
@@ -91,10 +80,9 @@ class OnboardAccountScriptTests(unittest.TestCase):
             stack.enter_context(mock.patch("common.ctrader_executor.get_executor_unavailable_reason", return_value=scenario["reason"]))
             stack.enter_context(mock.patch("common.ctrader_executor.get_executor", self.get_executor))
             stack.enter_context(mock.patch("features.ctrader.router._market_price", mock.AsyncMock(return_value=scenario["price"])))
-            stack.enter_context(mock.patch.object(module, "_fetch_trader_and_symbol", side_effect=infos))
+            stack.enter_context(mock.patch.object(ctrader_onboard, "_fetch_trader_and_symbol", side_effect=infos))
             stack.enter_context(mock.patch("asyncio.sleep", mock.AsyncMock()))
-            stack.enter_context(contextlib.redirect_stdout(self.out))
-            asyncio.run(module.main())
+            self.result = asyncio.run(ctrader_onboard.run_onboard("spot_perp_cvd"))
 
     def test_round_trip_uses_strategy_config_and_min_volume(self):
         self._run(BASE)
@@ -103,8 +91,12 @@ class OnboardAccountScriptTests(unittest.TestCase):
         )
         self.assertEqual(self.executor.opened, [{"symbol": "", "side": "long", "volume": 10}])
         self.assertEqual(self.executor.closed, [{"position_id": 777, "volume": 10}])
-        self.assertIn("volume=200 lots=2.0", self.out.getvalue())
-        self.assertIn("차이=$-0.50", self.out.getvalue())
+        self.assertEqual(self.result["volume"], 200)
+        self.assertEqual(self.result["lots"], 2.0)
+        self.assertEqual(self.result["symbol_spec"]["lotSize"], 100)
+        self.assertEqual(self.result["position"], POSITION)
+        self.assertEqual(self.result["balance_before"], 10000.0)
+        self.assertEqual(self.result["balance_after"], 9999.5)
 
     def test_unavailable_reason_raises_before_executor(self):
         with self.assertRaisesRegex(RuntimeError, "local connect blocked"):
@@ -147,16 +139,40 @@ class OnboardAccountScriptTests(unittest.TestCase):
             self._run(dict(BASE, snapshots=[[], [POSITION], [POSITION]]))
 
     def test_balance_divides_by_money_digits(self):
-        module = _load_script()
-        balance = module._balance({"trader": SimpleNamespace(balance=1234567, moneyDigits=2)})
+        balance = ctrader_onboard._balance({"trader": SimpleNamespace(balance=1234567, moneyDigits=2)})
         self.assertEqual(balance, 12345.67)
 
     def test_open_positions_raises_when_executor_returns_none(self):
-        module = _load_script()
         executor = mock.Mock()
         executor.get_position = mock.AsyncMock(return_value=None)
         with self.assertRaisesRegex(RuntimeError, "오픈 포지션 조회 실패"):
-            asyncio.run(module._open_positions(executor))
+            asyncio.run(ctrader_onboard._open_positions(executor))
+
+
+class OnboardRouterTests(unittest.TestCase):
+    def setUp(self):
+        app = FastAPI()
+        app.include_router(router)
+        self.client = TestClient(app)
+
+    def test_onboard_returns_run_result(self):
+        run = mock.AsyncMock(return_value={"volume": 200, "lots": 2.0})
+        with mock.patch("common.ctrader_onboard.run_onboard", run):
+            response = self.client.post("/auth/ctrader/onboard", params={"strategy": "spot_perp_cvd"})
+        run.assert_awaited_once_with("spot_perp_cvd")
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json(), {"ok": True, "volume": 200, "lots": 2.0})
+
+    def test_onboard_returns_error_message_on_runtime_error(self):
+        run = mock.AsyncMock(side_effect=RuntimeError("진입 전 오픈 포지션 존재: []"))
+        with mock.patch("common.ctrader_onboard.run_onboard", run):
+            response = self.client.post("/auth/ctrader/onboard", params={"strategy": "spot_perp_cvd"})
+        self.assertEqual(response.status_code, 502)
+        self.assertEqual(response.json(), {"ok": False, "error": "진입 전 오픈 포지션 존재: []"})
+
+    def test_onboard_rejects_get(self):
+        response = self.client.get("/auth/ctrader/onboard", params={"strategy": "spot_perp_cvd"})
+        self.assertEqual(response.status_code, 405)
 
 
 if __name__ == "__main__":
