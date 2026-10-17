@@ -279,17 +279,6 @@ async def ctrader_order_close(
     return JSONResponse({"ok": True, "side": side, "result": result})
 
 
-@router.post("/onboard")
-async def ctrader_onboard(strategy: str = Query(...)):
-    from common.ctrader_onboard import run_onboard
-    try:
-        result = await run_onboard(strategy)
-    except RuntimeError as e:
-        return JSONResponse({"ok": False, "error": str(e)}, status_code=502)
-    body = {"ok": True, **result}
-    return JSONResponse(body)
-
-
 # ── OAuth 흐름 ───────────────────────────────────────────────────────────────
 
 @router.get("/login")

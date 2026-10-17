@@ -5,11 +5,7 @@ import unittest
 from types import SimpleNamespace
 from unittest import mock
 
-from fastapi import FastAPI
-from fastapi.testclient import TestClient
-
 from common import ctrader_onboard
-from features.ctrader.router import router
 
 CONFIG = {
     "ctrader_account_id": 49204299,
@@ -40,7 +36,7 @@ BASE = {
     "snapshots": [[], [POSITION], []],
     "symbol": _symbol(10, 100000),
     "price": 2500.0,
-    "tokens": ("access", "refresh"),
+    "token": "access",
     "reason": None,
 }
 
@@ -73,10 +69,9 @@ class OnboardAccountTests(unittest.TestCase):
         self.get_executor = mock.Mock(return_value=self.executor)
         infos = [_info(1000000, scenario["symbol"]), _info(999950, scenario["symbol"])]
         with contextlib.ExitStack() as stack:
-            stack.enter_context(mock.patch.dict(os.environ, {"CTRADER_CLIENT_ID": "cid", "CTRADER_CLIENT_SECRET": "secret"}))
+            stack.enter_context(mock.patch.dict(os.environ, {"CTRADER_CLIENT_ID": "cid", "CTRADER_CLIENT_SECRET": "secret", "CTRADER_ACCESS_TOKEN": scenario["token"]}))
             stack.enter_context(mock.patch("features.strategy.common.config_loader.get_ctrader_config", return_value=scenario["config"]))
             stack.enter_context(mock.patch("features.strategy.common.config_loader.get_master_config", return_value={"spot_perp_cvd": {"symbol": "ETHUSDT"}}))
-            stack.enter_context(mock.patch("common.ctrader_token_store.get_tokens", return_value=scenario["tokens"]))
             stack.enter_context(mock.patch("common.ctrader_executor.get_executor_unavailable_reason", return_value=scenario["reason"]))
             stack.enter_context(mock.patch("common.ctrader_executor.get_executor", self.get_executor))
             stack.enter_context(mock.patch("features.ctrader.router._market_price", mock.AsyncMock(return_value=scenario["price"])))
@@ -104,8 +99,8 @@ class OnboardAccountTests(unittest.TestCase):
         self.get_executor.assert_not_called()
 
     def test_missing_access_token_raises_before_executor(self):
-        with self.assertRaisesRegex(RuntimeError, "access token 없음"):
-            self._run(dict(BASE, tokens=("", "")))
+        with self.assertRaisesRegex(RuntimeError, "CTRADER_ACCESS_TOKEN 비어 있음"):
+            self._run(dict(BASE, token=""))
         self.get_executor.assert_not_called()
 
     def test_existing_open_position_blocks_order(self):
@@ -147,32 +142,6 @@ class OnboardAccountTests(unittest.TestCase):
         executor.get_position = mock.AsyncMock(return_value=None)
         with self.assertRaisesRegex(RuntimeError, "오픈 포지션 조회 실패"):
             asyncio.run(ctrader_onboard._open_positions(executor))
-
-
-class OnboardRouterTests(unittest.TestCase):
-    def setUp(self):
-        app = FastAPI()
-        app.include_router(router)
-        self.client = TestClient(app)
-
-    def test_onboard_returns_run_result(self):
-        run = mock.AsyncMock(return_value={"volume": 200, "lots": 2.0})
-        with mock.patch("common.ctrader_onboard.run_onboard", run):
-            response = self.client.post("/auth/ctrader/onboard", params={"strategy": "spot_perp_cvd"})
-        run.assert_awaited_once_with("spot_perp_cvd")
-        self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.json(), {"ok": True, "volume": 200, "lots": 2.0})
-
-    def test_onboard_returns_error_message_on_runtime_error(self):
-        run = mock.AsyncMock(side_effect=RuntimeError("진입 전 오픈 포지션 존재: []"))
-        with mock.patch("common.ctrader_onboard.run_onboard", run):
-            response = self.client.post("/auth/ctrader/onboard", params={"strategy": "spot_perp_cvd"})
-        self.assertEqual(response.status_code, 502)
-        self.assertEqual(response.json(), {"ok": False, "error": "진입 전 오픈 포지션 존재: []"})
-
-    def test_onboard_rejects_get(self):
-        response = self.client.get("/auth/ctrader/onboard", params={"strategy": "spot_perp_cvd"})
-        self.assertEqual(response.status_code, 405)
 
 
 if __name__ == "__main__":

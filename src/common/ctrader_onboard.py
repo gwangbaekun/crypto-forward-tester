@@ -128,7 +128,6 @@ def _symbol_spec(sym) -> dict:
 
 async def run_onboard(strategy: str) -> dict:
     from common.ctrader_executor import get_executor, get_executor_unavailable_reason
-    from common.ctrader_token_store import get_tokens
     from features.ctrader.router import _market_price
     from features.strategy.common.config_loader import get_ctrader_config, get_master_config
 
@@ -142,9 +141,9 @@ async def run_onboard(strategy: str) -> dict:
 
     client_id = os.environ["CTRADER_CLIENT_ID"].strip()
     client_secret = os.environ["CTRADER_CLIENT_SECRET"].strip()
-    access_token, _ = get_tokens()
+    access_token = os.environ["CTRADER_ACCESS_TOKEN"].strip()
     if not access_token:
-        raise RuntimeError("DB 에 cTrader access token 없음")
+        raise RuntimeError("CTRADER_ACCESS_TOKEN 비어 있음")
 
     reason = get_executor_unavailable_reason(account_id=account_id, symbol_id=symbol_id)
     if reason:
