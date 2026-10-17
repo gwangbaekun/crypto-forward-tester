@@ -1,7 +1,7 @@
 accounts:
-  "48848751":
+  "49204299":
     env: live
-    symbol_id: 324
+    symbol_id: 323
     initial_balance: 10000
     target_mdd: 10
     units_per_lot: 100

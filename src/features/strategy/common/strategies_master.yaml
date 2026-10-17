@@ -163,8 +163,8 @@ oi_cvd_surge:
   discord_alerts: true
   binance_live: true
   binance_leverage: 3
-  ctrader_live: true
-  ctrader_account: "48848751"
+  ctrader_live: false
+  ctrader_account: "49204299"
   ctrader_backtest_mdd: 20
   tick:
     module: features.strategy.oi_cvd_surge.forward_test_runner
@@ -203,10 +203,9 @@ spot_perp_cvd:
   discord_alerts: true
   binance_live: true
   binance_leverage: 9
-  ctrader_live: false
-  ctrader_account_id: 47729078  
-  ctrader_env: live
-  ctrader_symbol_id: 323       
+  ctrader_live: true
+  ctrader_account: "49204299"
+  ctrader_backtest_mdd: 10.66
   tick:
     module: features.strategy.spot_perp_cvd.forward_test_runner
     fn: get_state
