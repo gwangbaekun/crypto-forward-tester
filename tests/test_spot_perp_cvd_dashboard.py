@@ -18,9 +18,11 @@ class SpotPerpCvdDashboardCtraderTests(unittest.TestCase):
         for button_id in ("ct-buy", "ct-sell", "ct-close", "ct-tbuy", "ct-tsell"):
             self.assertIn(f'id="{button_id}"', self.html)
 
-    def test_min_test_buttons_send_volume_one(self):
-        self.assertIn("ctOrder('long', 1)", self.html)
-        self.assertIn("ctOrder('short', 1)", self.html)
+    def test_min_test_buttons_send_min_volume(self):
+        self.assertIn("ctOrder('long', 10)", self.html)
+        self.assertIn("ctOrder('short', 10)", self.html)
+        self.assertIn(">BUY vol 10<", self.html)
+        self.assertIn(">SELL vol 10<", self.html)
 
     def test_order_calls_use_strategy(self):
         self.assertIn("'/auth/ctrader/order/status?strategy=' + STRATEGY", self.html)
