@@ -3,5 +3,5 @@ accounts:
     env: live
     symbol_id: 323
     initial_balance: 10000
-    target_mdd: 10
+    target_mdd: 7
     units_per_lot: 100
