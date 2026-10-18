@@ -443,7 +443,9 @@
         fetch('/auth/ctrader/order/close?strategy=' + STRATEGY + '&side=' + side + '&symbol=' + SYMBOL, { method: 'POST' })
             .then(function(r) { return r.json(); })
             .then(function(d) {
-                out.textContent = d.ok ? '✅ 청산 완료' : ('❌ ' + (d.error || 'failed'));
+                out.textContent = d.ok
+                    ? (d.check.match ? '✅ ' : '❌ ') + '청산 완료 ' + JSON.stringify(d.check)
+                    : ('❌ ' + (d.error || 'failed'));
                 refreshCtrader();
             })
             .catch(function(e) { out.textContent = '❌ ' + e; })

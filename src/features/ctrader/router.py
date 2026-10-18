@@ -270,13 +270,24 @@ async def ctrader_order_close(
     symbol: str = Query("BTCUSDT"),
 ):
     """수동 청산."""
-    ex, _cfg, reason = _executor_for(strategy)
+    ex, cfg, reason = _executor_for(strategy)
     if ex is None:
         return JSONResponse({"ok": False, "error": reason}, status_code=503)
     result = await ex.close_position(symbol, side)
     if result is None:
         return JSONResponse({"ok": False, "error": "청산 실패 — 서버 로그 확인"}, status_code=502)
-    return JSONResponse({"ok": True, "side": side, "result": result})
+    from common.ctrader_deals import verify_position
+    try:
+        check = await verify_position(
+            account_id=cfg["ctrader_account_id"],
+            env=cfg["ctrader_env"],
+            symbol_id=cfg["ctrader_symbol_id"],
+            units_per_lot=cfg["ctrader_units_per_lot"],
+            position_id=result["positionId"],
+        )
+    except RuntimeError as e:
+        return JSONResponse({"ok": False, "closed": True, "error": f"청산됨 — 판정 실패: {e}"}, status_code=502)
+    return JSONResponse({"ok": True, "side": side, "result": result, "check": check})
 
 
 # ── OAuth 흐름 ───────────────────────────────────────────────────────────────

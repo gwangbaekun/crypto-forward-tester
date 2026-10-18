@@ -640,6 +640,7 @@ class CTraderExecutor:
             print(f"[cTrader] 청산 확인 타임아웃 — reconcile로 실제 청산 확인 (account={self._account_id})")
             result = await self._reconcile_close(position_id)
         if result:
+            result["positionId"] = position_id
             self._open_position_id = None
             self._position_cache = None
             print(f"[cTrader] ✅ 청산 — fill={result.get('avgPrice', 0):.4f}")
