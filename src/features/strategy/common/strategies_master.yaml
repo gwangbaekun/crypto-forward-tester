@@ -160,7 +160,7 @@ oi_cvd_surge:
   label: "OI CVD Surge BTC 1h"
   emoji: "📈"
   telegram_alerts: true
-  discord_alerts: true
+  discord_alerts: false
   binance_live: true
   binance_leverage: 3
   ctrader_live: false
@@ -200,7 +200,7 @@ spot_perp_cvd:
   label: "Spot-Perp CVD ETH 1h"
   emoji: "⚡"
   telegram_alerts: true
-  discord_alerts: true
+  discord_alerts: false
   binance_live: true
   binance_leverage: 9
   ctrader_live: true
@@ -221,7 +221,7 @@ oi_accel_breakout_v2:
   label: "OI Accel Breakout v2 BTC 15m"
   emoji: "🚀"
   telegram_alerts: true
-  discord_alerts: true
+  discord_alerts: false
   binance_live: false
   binance_leverage: 3
   tick:
@@ -241,7 +241,7 @@ deribit_gex_reversal:
   label: "Deribit Expiry GEX Reversal (BTC)"
   emoji: "🎯"
   telegram_alerts: true
-  discord_alerts: true
+  discord_alerts: false
   binance_live: false          # 엣지 측정 전용 — 실거래 없음
   ctrader_live: false
   tick:
@@ -259,7 +259,7 @@ us_options_gex_pin:
   label: "US Options Expiry GEX Pinning (SPY)"
   emoji: "📌"
   telegram_alerts: true
-  discord_alerts: true
+  discord_alerts: false
   binance_live: false          # 엣지 측정 전용 — 실거래 없음
   ctrader_live: false
   tick:
