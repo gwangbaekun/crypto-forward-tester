@@ -26,7 +26,9 @@ from collections import deque
 from typing import Any, Dict, Optional
 import httpx
 from twisted.python.failure import Failure
+from ctrader_open_api.messages.OpenApiMessages_pb2 import ProtoOASymbolByIdReq, ProtoOASymbolByIdRes
 from common.ctrader_token_store import get_tokens, save_tokens
+from common.prop_sizing import order_volume
 
 
 def _tg(msg: str) -> None:
@@ -315,6 +317,14 @@ class CTraderExecutor:
                 self._resolve_pending({"positions": positions, "account_id": self._account_id, "env": self._env})
                 return
 
+            if isinstance(payload, ProtoOASymbolByIdRes):
+                if not payload.symbol:
+                    self._resolve_pending(None)
+                    return
+                sym = payload.symbol[0]
+                self._resolve_pending({"symbol_spec": {"step_volume": sym.stepVolume, "max_volume": sym.maxVolume}})
+                return
+
         client.setConnectedCallback(on_connected)
         client.setDisconnectedCallback(on_disconnected)
         client.setMessageReceivedCallback(on_message)
@@ -519,6 +529,21 @@ class CTraderExecutor:
         loop = asyncio.get_event_loop()
         return await loop.run_in_executor(None, fn, *args)
 
+    async def _fetch_symbol_spec(self) -> Dict:
+        def _send():
+            req = ProtoOASymbolByIdReq()
+            req.ctidTraderAccountId = self._account_id
+            req.symbolId.append(self._symbol_id)
+            return self._send_and_wait(req)
+
+        result = await self._run_in_executor(_send)
+        if result is None:
+            raise RuntimeError(
+                f"[cTrader] symbol spec 조회 실패 (account={self._account_id} symbol={self._symbol_id})"
+            )
+        spec = result["symbol_spec"]
+        return spec
+
     async def open_position(
         self,
         symbol: str,
@@ -533,7 +558,11 @@ class CTraderExecutor:
         if volume is not None and volume > 0:
             print(f"[cTrader] 볼륨 직접 지정: volume={volume}")
         elif self._notional_usd and current_price > 0:
-            volume = int(self._notional_usd / current_price * self._units_per_lot)
+            spec = await self._fetch_symbol_spec()
+            volume = order_volume(
+                self._notional_usd, current_price, self._units_per_lot,
+                spec["step_volume"], spec["max_volume"],
+            )
             print(
                 f"[cTrader] 사이징: ${self._notional_usd:,.0f} / {current_price:,.2f} "
                 f"-> volume={volume}"
