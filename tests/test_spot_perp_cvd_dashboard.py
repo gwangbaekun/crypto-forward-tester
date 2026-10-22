@@ -29,6 +29,9 @@ class SpotPerpCvdDashboardCtraderTests(unittest.TestCase):
         self.assertIn("'/auth/ctrader/order?strategy=' + STRATEGY", self.html)
         self.assertIn("'/auth/ctrader/order/close?strategy=' + STRATEGY", self.html)
 
+    def test_result_line_wraps_inside_card(self):
+        self.assertIn('<div id="ct-result" style="font-size:0.75rem;margin-top:8px;color:var(--text-secondary);overflow-wrap:anywhere;">', self.html)
+
     def test_close_result_shows_check(self):
         self.assertIn("(d.check.match ? '✅ ' : '❌ ') + '청산 완료 ' + JSON.stringify(d.check)", self.html)
 
