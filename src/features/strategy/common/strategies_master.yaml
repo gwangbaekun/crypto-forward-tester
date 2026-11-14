@@ -266,6 +266,44 @@ us_options_gex_pin:
     module: features.strategy.us_options_gex_pin.realtime_feed
     fn: get_state
 
+lsr_sell_cmeoi_btc_cellophane_a:
+  enabled: true
+  monitoring: true
+  symbol: "BTCUSDT"
+  tick_interval: 300
+  exit_tick_interval: 1.0
+  timeframes: ["5m"]
+  entry_tf: "5m"
+  strategy_tag: lsr_sell_cmeoi_btc_cellophane_a
+  label: "LSR Sell CME-OI BTC Cellophane A 5m"
+  emoji: "🧪"
+  telegram_alerts: false
+  discord_alerts: false
+  binance_live: false
+  ctrader_live: false
+  tick:
+    module: features.strategy.lsr_sell_cmeoi_btc_cellophane_a.forward_test_runner
+    fn: get_state
+
+lsr_sell_cmeoi_btc_cellophane_b:
+  enabled: true
+  monitoring: true
+  symbol: "BTCUSDT"
+  tick_interval: 300
+  exit_tick_interval: 1.0
+  timeframes: ["5m"]
+  entry_tf: "5m"
+  strategy_tag: lsr_sell_cmeoi_btc_cellophane_b
+  label: "LSR Sell CME-OI BTC Cellophane B 5m"
+  emoji: "🧪"
+  telegram_alerts: false
+  discord_alerts: false
+  binance_live: false
+  ctrader_live: false
+  tick:
+    module: features.strategy.lsr_sell_cmeoi_btc_cellophane_b.forward_test_runner
+    fn: get_state
+
 spc_oiaccel_combine:
   # combine 운영 스위치. tick 블록이 없어 strategy_loop는 자동 제외(tick 안 함).
   # enabled=true → 멤버 이벤트를 받아 주문 fan-out. false → 주문 스킵(끄기).

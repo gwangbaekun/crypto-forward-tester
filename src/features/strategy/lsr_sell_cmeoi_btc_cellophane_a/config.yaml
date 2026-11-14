@@ -1,0 +1,16 @@
+strategy_id: lsr_sell_cmeoi_btc_cellophane_a
+strategy_name: LSR Sell CME-OI BTC Cellophane A 5m
+symbol: BTCUSDT
+entry_tf: 5m
+backtest_file: backtest_quant/src/strategies/crypto/cellophane_5m_same_direction_overlap/saved_pairs/2026-11-14_A.json
+backtest: {fee: ftmo, trades: 111, profit_factor: 1.78, compound_pct: 124.8, mdd_pct: 7.2}
+long:
+  exit: {sl_pct: 3.0, rr_ratio: 1.5}
+  sheets:
+    - {id: metrics.count_long_short_ratio, term: 1152, c_in: 2.845480522212413}
+    - {id: klines.spot.sell_volume, term: 216, c_in: 14.320069513259158}
+short:
+  exit: {sl_pct: 2.0, rr_ratio: 1.5}
+  sheets:
+    - {id: rel.venue.binance_vs_cme_open_interest.diff, term: 432, c_in: 3.7132343651675757}
+    - {id: rel.venue.binance_vs_cme_open_interest.ratio, term: 144, c_in: 5.787358384995607}
