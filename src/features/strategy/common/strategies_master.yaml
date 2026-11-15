@@ -277,7 +277,7 @@ lsr_sell_cmeoi_btc_cellophane_a:
   strategy_tag: lsr_sell_cmeoi_btc_cellophane_a
   label: "LSR Sell CME-OI BTC Cellophane A 5m"
   emoji: "🧪"
-  telegram_alerts: false
+  telegram_alerts: true
   discord_alerts: false
   binance_live: false
   ctrader_live: false
@@ -296,7 +296,7 @@ lsr_sell_cmeoi_btc_cellophane_b:
   strategy_tag: lsr_sell_cmeoi_btc_cellophane_b
   label: "LSR Sell CME-OI BTC Cellophane B 5m"
   emoji: "🧪"
-  telegram_alerts: false
+  telegram_alerts: true
   discord_alerts: false
   binance_live: false
   ctrader_live: false
