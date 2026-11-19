@@ -58,6 +58,7 @@ def _build_registry() -> Dict[str, Dict[str, Any]]:
             "timeframes":    cfg.get("timeframes") or [],
             "symbol":        cfg.get("symbol") or None,
             "entry_tf":      cfg.get("entry_tf") or "15m",
+            "intrabar_exit": cfg.get("intrabar_exit", True),
         }
     return registry
 
@@ -92,7 +93,7 @@ async def _strategy_loop(name: str, cfg: Dict[str, Any], symbol: str) -> None:
                 has_open_pos = False
                 eng = None
 
-            if has_open_pos and eng is not None:
+            if has_open_pos and eng is not None and cfg["intrabar_exit"]:
                 # ── pre-entry window: fn() 호출 → ratchet 수행 (봉당 1회) ──────
                 # dedup: fn() 안에서 new_bar_detected 시에만 tick 실행 + _last_bar_time 갱신.
                 # _last_bar_time 을 보고 이번 봉에 이미 fn()을 호출했는지 판단.

@@ -1,0 +1,12 @@
+strategy_id: qqqsev_vix_nas100_cellophane_a
+strategy_name: QQQ SEV VIX NAS100 Cellophane A 5m
+symbol: NAS100
+entry_tf: 5m
+backtest_url: http://localhost:8000/backtest-nas100-cellophane-same-direction-overlap/?combo=18
+backtest: {fee: ftmo, trades: 101, profit_factor: 2.50, compound_pct: 82.8, mdd_pct: 7.0}
+price: {ctid: 49631616, is_live: false, symbol_name: US TECH 100}
+long:
+  exit: {sl_pct: 3.0}
+  sheets:
+    - {id: finra.QQQ.short_exempt_volume, term: 16, c_in: 0.8006934608848526, c_out: 0.004960594969151847}
+    - {id: macro.VIXCLS.value, term: 5, c_in: 0.6744907594765952, c_out: 0.0}

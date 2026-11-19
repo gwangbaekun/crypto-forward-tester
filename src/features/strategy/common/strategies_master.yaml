@@ -310,3 +310,22 @@ spc_oiaccel_combine:
   # members = 어떤 전략이 묶였는지(단일 출처). venue별 사이징은 config.yaml(venues).
   enabled: false
   members: []
+
+qqqsev_vix_nas100_cellophane_a:
+  enabled: true
+  monitoring: true
+  symbol: "NAS100"
+  tick_interval: 300
+  intrabar_exit: false
+  timeframes: ["5m"]
+  entry_tf: "5m"
+  strategy_tag: qqqsev_vix_nas100_cellophane_a
+  label: "QQQ SEV VIX NAS100 Cellophane A 5m"
+  emoji: "🧪"
+  telegram_alerts: false
+  discord_alerts: false
+  binance_live: false
+  ctrader_live: false
+  tick:
+    module: features.strategy.qqqsev_vix_nas100_cellophane_a.forward_test_runner
+    fn: get_state
