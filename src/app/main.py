@@ -59,7 +59,7 @@ async def _ctrader_token_healthcheck() -> None:
     import os
     try:
         from common.ctrader_token_store import get_tokens
-        from common.ctrader_executor import fetch_account_list_by_token
+        from common.ctrader_executor import _tg, fetch_account_list_by_token, refresh_shared_tokens
         from common.ctrader_account_loader import get_enabled_accounts
 
         client_id     = os.environ.get("CTRADER_CLIENT_ID", "").strip()
@@ -79,9 +79,18 @@ async def _ctrader_token_healthcheck() -> None:
                 None, fetch_account_list_by_token, client_id, client_secret, access_token, 15.0,
             )
         except Exception as e:
-            print(f"[cTrader][healthcheck] ❌ access token 무효 (source={source}): {e}")
-            print("[cTrader][healthcheck]    → 실주문 시 executor가 refresh 시도. 계속 실패하면 재-OAuth 필요.")
-            return
+            print(f"[cTrader][healthcheck] ❌ access token 무효 (source={source}): {e} → refresh 시도")
+            try:
+                access_token = await loop.run_in_executor(None, refresh_shared_tokens, client_id, client_secret)
+                accounts = await loop.run_in_executor(
+                    None, fetch_account_list_by_token, client_id, client_secret, access_token, 15.0,
+                )
+                source = "refresh"
+            except Exception as e2:
+                msg = f"[cTrader][healthcheck] ❌ token refresh 실패: {e2} → /auth/ctrader/login 으로 다시 로그인해야 한다"
+                print(msg)
+                _tg(msg)
+                return
 
         granted = {a["ctidTraderAccountId"] for a in accounts}
         print(f"[cTrader][healthcheck] ✅ access token 유효 (source={source}) — grant 계좌 {len(accounts)}개")

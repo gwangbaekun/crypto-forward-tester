@@ -42,6 +42,27 @@ def _tg(msg: str) -> None:
     threading.Thread(target=_send, daemon=True).start()
 
 _CTRADER_TOKEN_URL = "https://openapi.ctrader.com/apps/token"
+
+
+def refresh_shared_tokens(client_id: str, client_secret: str) -> str:
+    with _token_refresh_lock:
+        _, refresh_token = get_tokens()
+        if not refresh_token:
+            raise RuntimeError("DB 에 refresh token 이 없다")
+        res = httpx.get(_CTRADER_TOKEN_URL, params={"grant_type": "refresh_token", "refresh_token": refresh_token,
+                                                    "client_id": client_id, "client_secret": client_secret},
+                        timeout=10.0)
+        if res.status_code >= 400:
+            raise RuntimeError(f"refresh 실패: {res.status_code} {res.text[:200]}")
+        data = res.json()
+        access = (data.get("accessToken") or "").strip()
+        rotated = (data.get("refreshToken") or "").strip()
+        if not access or not rotated:
+            raise RuntimeError(f"refresh 응답에 token 이 없다: {sorted(data)}")
+        save_tokens(access, rotated)
+        os.environ["CTRADER_ACCESS_TOKEN"] = access
+        os.environ["CTRADER_REFRESH_TOKEN"] = rotated
+    return access
 CTRADER_IDLE_DISCONNECT_SEC = float(os.environ.get("CTRADER_IDLE_DISCONNECT_SEC", "60"))
 CTRADER_MAX_CONSECUTIVE_FAILURES = int(os.environ.get("CTRADER_MAX_FAILURES", "5"))
 
