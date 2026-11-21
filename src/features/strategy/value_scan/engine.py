@@ -1,19 +1,10 @@
-"""
-Value Scan Engine — KOSPI 200 + S&P 500 섹터 상대 가치 스캔 + Forward Test 포지션 관리
-
-판정 기준:
-  BUY  : per < sector_median × 0.70  AND  eps > 0  AND  pbr > 0
-         AND  fwd_eps 필수  AND  fwd_eps >= eps × 1.05
-  SELL : per > sector_median × 1.20  OR   fwd_eps < eps × 0.75
-  HOLD : 나머지
-"""
 from __future__ import annotations
 
 import json
 import math
 import urllib.request as _urllib_req
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime
 from statistics import median
 from typing import Any, Optional
 
@@ -23,15 +14,12 @@ from features.strategy.value_scan.paths import (
     get_scan_dir,
 )
 
-UNIT_USD = 1.0  # $1 per BUY signal
 
 _KRX_ETF_CODES = {"069500", "122630", "114800", "091160"}
 
 _scan_running = False
 _last_scan_at: Optional[str] = None
 
-
-# ── 유니버스 조회 ─────────────────────────────────────────────────────────────
 
 def _fetch_kospi_sector_map() -> dict[str, str]:
     from html.parser import HTMLParser
@@ -136,10 +124,7 @@ def _fetch_sp500_universe() -> list[str]:
     return p.symbols
 
 
-# ── 펀더멘털 조회 ─────────────────────────────────────────────────────────────
-
 def _enrich_kospi_with_yfinance(symbol: str, base: dict) -> dict:
-    """yfinance .KS 로 quality/health/growth/sentiment 필드 보완."""
     import yfinance as yf
     try:
         info = yf.Ticker(f"{symbol}.KS").info
@@ -244,26 +229,21 @@ def _fetch_nasdaq_fundamental(symbol: str) -> Optional[dict[str, Any]]:
         return {
             "symbol": symbol, "name": info.get("shortName") or info.get("longName") or symbol,
             "market": "nasdaq", "sector": info.get("sector") or "Other",
-            # base valuation
             "eps": _f(info.get("trailingEps")), "bps": _f(info.get("bookValue")),
             "per": per, "pbr": pbr,
             "forward_eps": _f(info.get("forwardEps")),
             "forward_per": _f(info.get("forwardPE")),
             "div": _fp(info.get("dividendYield")) if info.get("dividendYield") else math.nan,
             "ev_ebitda": _f(info.get("enterpriseToEbitda")),
-            # quality
             "roe": _fp(info.get("returnOnEquity")),
             "roa": _fp(info.get("returnOnAssets")),
             "op_margin": _fp(info.get("operatingMargins")),
             "net_margin": _fp(info.get("profitMargins")),
-            # health
             "d_e": _f(info.get("debtToEquity")),
             "current_ratio": _f(info.get("currentRatio")),
             "fcf": _f(info.get("freeCashflow")),
-            # growth
             "rev_growth": _fp(info.get("revenueGrowth")),
             "eps_growth": _fp(info.get("earningsGrowth")),
-            # sentiment
             "analyst_rec": _f(info.get("recommendationMean")),
             "target_upside": target_upside,
         }
@@ -276,7 +256,6 @@ def _score_stock(r: dict, sector_med: dict) -> dict:
 
 
 def _score_nasdaq(r: dict, sector_med: dict) -> dict:
-    """5-factor composite score 0-100 for a NASDAQ stock."""
 
     def _v(key: str) -> float:
         v = r.get(key)
@@ -285,7 +264,6 @@ def _score_nasdaq(r: dict, sector_med: dict) -> dict:
     def ok(v: float) -> bool:
         return not math.isnan(v)
 
-    # ── Valuation (30 pts) ────────────────────────────────────────────────────
     val = 0
     per = _v("per")
     med = sector_med.get(r["sector"], math.nan)
@@ -314,7 +292,6 @@ def _score_nasdaq(r: dict, sector_med: dict) -> dict:
 
     val_score = min(val, 30)
 
-    # ── Quality (30 pts) ──────────────────────────────────────────────────────
     qual = 0
     roe = _v("roe")
     if ok(roe):
@@ -338,7 +315,6 @@ def _score_nasdaq(r: dict, sector_med: dict) -> dict:
 
     qual_score = min(qual, 30)
 
-    # ── Health (20 pts) ───────────────────────────────────────────────────────
     health = 0
     de = _v("d_e")
     if ok(de):
@@ -362,7 +338,6 @@ def _score_nasdaq(r: dict, sector_med: dict) -> dict:
 
     health_score = min(health, 20)
 
-    # ── Growth (15 pts) ───────────────────────────────────────────────────────
     growth = 0
     rev_g = _v("rev_growth")
     if ok(rev_g):
@@ -378,8 +353,6 @@ def _score_nasdaq(r: dict, sector_med: dict) -> dict:
 
     growth_score = min(growth, 15)
 
-    # Sentiment 팩터 제거 — KOSPI는 yfinance 커버리지 부재로 NaN 고정이었고,
-    # 애널리스트 추천 수준은 후행 신호라 스코어링에서 배제. composite 만점 95.
     composite = val_score + qual_score + health_score + growth_score
 
     return {
@@ -409,8 +382,6 @@ def _rate_nasdaq_by_score(r: dict) -> str:
         return "SELL"
     return "HOLD"
 
-
-# ── 섹터 중앙값 + 판정 ─────────────────────────────────────────────────────────
 
 def _sector_medians(rows: list[dict]) -> dict[str, float]:
     by_sector: dict[str, list[float]] = {}
@@ -464,38 +435,6 @@ def _rate(r: dict, sector_med: dict) -> str:
     return "HOLD"
 
 
-# ── 종가 조회 ─────────────────────────────────────────────────────────────────
-
-def _fetch_kospi_price(symbol: str) -> float:
-    try:
-        import yfinance as yf
-        fi = yf.Ticker(f"{symbol}.KS").fast_info
-        price = fi.get("lastPrice") or fi.get("regularMarketPreviousClose")
-        if price:
-            return float(price)
-    except Exception:
-        pass
-    return math.nan
-
-
-def _fetch_nasdaq_price(symbol: str) -> float:
-    try:
-        import yfinance as yf
-        fi = yf.Ticker(symbol).fast_info
-        price = fi.get("lastPrice") or fi.get("regularMarketPreviousClose")
-        if price:
-            return float(price)
-    except Exception:
-        pass
-    return math.nan
-
-
-def _fetch_price(market: str, symbol: str) -> float:
-    return _fetch_kospi_price(symbol) if market == "kospi" else _fetch_nasdaq_price(symbol)
-
-
-# ── 스캔 ──────────────────────────────────────────────────────────────────────
-
 def run_scan(market: str, max_workers: int = 10) -> list[dict]:
     if market == "kospi":
         universe = _fetch_kospi200_universe()
@@ -520,50 +459,11 @@ def run_scan(market: str, max_workers: int = 10) -> list[dict]:
     for r in rows:
         r["sector_median"] = sec_med.get(r["sector"], math.nan)
         r.update(_score_stock(r, sec_med))
-        # KOSPI: 섹터 PER 상대 판정 / NASDAQ: 5-factor composite 판정
         if market == "kospi":
             r["rating"] = _rate(r, sec_med)
         else:
             r["rating"] = _rate_nasdaq_by_score(r)
     return rows
-
-
-# ── 포지션 I/O ────────────────────────────────────────────────────────────────
-
-def _pos_key(market: str, symbol: str) -> str:
-    return f"{market}_{symbol}"
-
-
-def load_positions() -> dict[str, dict]:
-    from features.strategy.value_scan.repository import (
-        ensure_migrated_from_json_if_needed,
-        load_positions_from_db,
-    )
-
-    ensure_migrated_from_json_if_needed()
-    return load_positions_from_db()
-
-
-def load_history() -> list[dict]:
-    from features.strategy.value_scan.repository import (
-        ensure_migrated_from_json_if_needed,
-        load_history_from_db,
-    )
-
-    ensure_migrated_from_json_if_needed()
-    return load_history_from_db()
-
-
-def _save_positions(pos: dict) -> None:
-    from features.strategy.value_scan.repository import save_positions_to_db
-
-    save_positions_to_db(pos)
-
-
-def _save_history(hist: list) -> None:
-    from features.strategy.value_scan.repository import save_history_to_db
-
-    save_history_to_db(hist)
 
 
 def _nan_to_none(v: Any) -> Any:
@@ -576,117 +476,9 @@ def _clean_row(r: dict) -> dict:
     return {k: _nan_to_none(v) for k, v in r.items()}
 
 
-# ── 일간 업데이트 ─────────────────────────────────────────────────────────────
-
-def _calc_pnl(lots: list[dict], exit_price: float) -> tuple[Optional[float], Optional[float]]:
-    """lots 리스트와 exit_price로 (avg_pnl_pct, pnl_usd) 계산."""
-    if math.isnan(exit_price) or not lots:
-        return None, None
-    valid = [l for l in lots if l.get("price") and l["price"] > 0]
-    if not valid:
-        return None, None
-    returns = [(exit_price - l["price"]) / l["price"] for l in valid]
-    avg_pnl_pct = sum(returns) / len(returns) * 100
-    invested = len(lots) * UNIT_USD
-    pnl_usd = invested * avg_pnl_pct / 100
-    return round(avg_pnl_pct, 2), round(pnl_usd, 4)
-
-
-def update_positions(
-    all_rows: list[dict],
-    today: str,
-    markets: Optional[list[str]] = None,
-) -> dict:
-    """포지션 갱신.
-
-    - ``markets``: 이번에 실제로 스캔한 시장만 전달 (KOSPI 스캔 시 NASDAQ 포지션은 건드리지 않음).
-    - 청산: rating == SELL 인 경우만. 스캔 결과에 없거나 HOLD/BUY 면 오픈 유지.
-    """
-    from features.strategy.value_scan.lock import value_scan_portfolio_lock
-    from features.strategy.value_scan.repository import append_closed_trades
-
-    if markets is None:
-        markets = sorted({r["market"] for r in all_rows if r.get("market")})
-    markets_set = set(markets)
-
-    with value_scan_portfolio_lock():
-        positions = load_positions()
-
-        rating_map = {_pos_key(r["market"], r["symbol"]): r for r in all_rows}
-        sell_keys  = {
-            _pos_key(r["market"], r["symbol"])
-            for r in all_rows if r["rating"] == "SELL"
-        }
-
-        new_entries: list[dict] = []
-        new_exits:   list[dict] = []
-
-        # ── SELL → 청산 (이번에 스캔한 시장의 포지션만) ───────────────────────
-        for key, pos in list(positions.items()):
-            if pos.get("market") not in markets_set:
-                continue
-            if key not in sell_keys:
-                continue
-            cur = rating_map.get(key)
-            exit_price = _fetch_price(pos["market"], pos["symbol"])
-            lots       = pos.get("lots", [])
-            avg_pnl_pct, pnl_usd = _calc_pnl(lots, exit_price)
-            record = {
-                **pos,
-                "exit_date":   today,
-                "exit_price":  None if math.isnan(exit_price) else exit_price,
-                "exit_reason": (cur or {}).get("rating") or "SELL",
-                "pnl_pct":     avg_pnl_pct,
-                "pnl_usd":     pnl_usd,
-                "hold_days":   (
-                    datetime.strptime(today, "%Y-%m-%d")
-                    - datetime.strptime(pos["first_entry_date"], "%Y-%m-%d")
-                ).days,
-            }
-            del positions[key]
-            new_exits.append(record)
-
-        # ── BUY → $1 lot 추가 (신규 or 기존 포지션) ───────────────────────────
-        for r in all_rows:
-            if r["rating"] != "BUY":
-                continue
-            key   = _pos_key(r["market"], r["symbol"])
-            price = _fetch_price(r["market"], r["symbol"])
-            lot   = {"date": today, "price": None if math.isnan(price) else price}
-
-            if key in positions:
-                positions[key]["lots"].append(lot)
-                positions[key]["invested_usd"] = round(
-                    positions[key].get("invested_usd", 0) + UNIT_USD, 4
-                )
-            else:
-                entry = _clean_row({
-                    "symbol":           r["symbol"],
-                    "name":             r["name"],
-                    "market":           r["market"],
-                    "sector":           r["sector"],
-                    "first_entry_date": today,
-                    "lots":             [lot],
-                    "invested_usd":     UNIT_USD,
-                    "per":              r["per"],
-                    "sector_median":    r.get("sector_median", math.nan),
-                    "eps":              r["eps"],
-                    "fwd_eps":          r["forward_eps"],
-                    "pbr":              r["pbr"],
-                })
-                positions[key] = entry
-                new_entries.append(entry)
-
-        _save_positions(positions)
-        append_closed_trades(new_exits)
-
-    return {"new_entries": new_entries, "new_exits": new_exits, "open": positions}
-
-
 def save_snapshot(today: str, market: str, rows: list[dict]) -> None:
     clean = [_clean_row(r) for r in rows]
 
-    # JSON 백업 (시장별 분리 저장)
     scan_dir = get_scan_dir(market)
     scan_dir.mkdir(parents=True, exist_ok=True)
     path = scan_dir / f"{today}.json"
@@ -695,7 +487,6 @@ def save_snapshot(today: str, market: str, rows: list[dict]) -> None:
         ensure_ascii=False, indent=2,
     ))
 
-    # DB upsert (영속)
     try:
         from features.strategy.value_scan.cache import vs_cache
         from features.strategy.value_scan.repository import save_snapshot_to_db
@@ -706,11 +497,7 @@ def save_snapshot(today: str, market: str, rows: list[dict]) -> None:
         logging.getLogger(__name__).warning("save_snapshot DB upsert failed: %s", e)
 
 
-# ── 엔트리포인트 ──────────────────────────────────────────────────────────────
-
 def run_daily(markets: list[str] = None, max_workers: int = 10) -> dict:
-    from features.strategy.value_scan.lock import ValueScanBusy
-
     global _scan_running, _last_scan_at
     if _scan_running:
         return {"error": "scan already running"}
@@ -734,30 +521,18 @@ def run_daily(markets: list[str] = None, max_workers: int = 10) -> dict:
             m_sell = sum(1 for r in rows if r["rating"] == "SELL")
             per_market_stats[m] = {"scanned": len(rows), "buy": m_buy, "sell": m_sell}
 
-        try:
-            result = update_positions(all_rows, today, markets=markets)
-        except ValueScanBusy:
-            import logging
-            logging.getLogger(__name__).warning(
-                "[ValueScan] skipped position update — lock held by another process"
-            )
-            return {"error": "scan already running", "skipped": True}
         _last_scan_at = datetime.now(UTC).isoformat()
 
         buy_n  = sum(1 for r in all_rows if r["rating"] == "BUY")
         sell_n = sum(1 for r in all_rows if r["rating"] == "SELL")
 
         for m in markets:
-            st = per_market_stats.get(m, {})
-            m_entries = sum(1 for e in result["new_entries"] if e.get("market") == m)
-            m_exits = sum(1 for e in result["new_exits"] if e.get("market") == m)
+            st = per_market_stats[m]
             record_market_scan(
                 m,
-                scanned=st.get("scanned", 0),
-                buy=st.get("buy", 0),
-                sell=st.get("sell", 0),
-                new_entries=m_entries,
-                new_exits=m_exits,
+                scanned=st["scanned"],
+                buy=st["buy"],
+                sell=st["sell"],
             )
 
         activity = {
@@ -767,8 +542,6 @@ def run_daily(markets: list[str] = None, max_workers: int = 10) -> dict:
             "scanned":     len(all_rows),
             "buy":         buy_n,
             "sell":        sell_n,
-            "new_entries": result["new_entries"],
-            "new_exits":   result["new_exits"],
             "per_market":  per_market_stats,
         }
         DATA_DIR.mkdir(parents=True, exist_ok=True)
@@ -779,9 +552,6 @@ def run_daily(markets: list[str] = None, max_workers: int = 10) -> dict:
             "scanned":     len(all_rows),
             "buy":         buy_n,
             "sell":        sell_n,
-            "new_entries": len(result["new_entries"]),
-            "new_exits":   len(result["new_exits"]),
-            "open":        len(result["open"]),
         }
     finally:
         _scan_running = False
@@ -807,203 +577,3 @@ async def get_scan_status(**kwargs) -> dict:
     return payload
 
 
-def _enrich_position(pos: dict) -> dict:
-    """단일 포지션에 현재가·P&L 계산 (스레드 안전)."""
-    lots = pos.get("lots", [])
-    cur  = _fetch_price(pos["market"], pos["symbol"])
-    avg_pnl_pct, pnl_usd = _calc_pnl(lots, cur)
-
-    valid_prices = [l["price"] for l in lots if l.get("price") and l["price"] > 0]
-    avg_entry    = sum(valid_prices) / len(valid_prices) if valid_prices else None
-
-    from features.strategy.value_scan.famous import position_is_famous
-
-    return {
-        **pos,
-        "lot_count":       len(lots),
-        "avg_entry_price": avg_entry,
-        "current_price":   None if math.isnan(cur) else cur,
-        "pnl_pct":         avg_pnl_pct,
-        "pnl_usd":         pnl_usd,
-        "is_famous":       position_is_famous(pos),
-    }
-
-
-def _get_positions_with_pnl_uncached(max_workers: int = 20) -> list[dict]:
-    positions = load_positions()
-    if not positions:
-        return []
-
-    with ThreadPoolExecutor(max_workers=max_workers) as ex:
-        futures = [ex.submit(_enrich_position, pos) for pos in positions.values()]
-        result  = [f.result() for f in futures]
-
-    result.sort(key=lambda x: (x.get("pnl_usd") or 0), reverse=True)
-    return result
-
-
-def get_positions_with_pnl(max_workers: int = 20) -> list[dict]:
-    from features.strategy.value_scan.cache import vs_cache
-    return vs_cache.get("positions", 300, lambda: _get_positions_with_pnl_uncached(max_workers))
-
-
-def _fnum(v: Any, default: float = 0.0) -> float:
-    if v is None:
-        return default
-    try:
-        f = float(v)
-        return default if math.isnan(f) else f
-    except (TypeError, ValueError):
-        return default
-
-
-def _portfolio_slice(positions: list[dict]) -> dict:
-    invested = sum(_fnum(p.get("invested_usd")) for p in positions)
-    unreal   = sum(_fnum(p.get("pnl_usd")) for p in positions)
-    winners  = sum(1 for p in positions if _fnum(p.get("pnl_usd")) > 0)
-    losers   = sum(1 for p in positions if _fnum(p.get("pnl_usd")) < 0)
-    flat     = len(positions) - winners - losers
-    return {
-        "open_count":          len(positions),
-        "invested_usd":        round(invested, 2),
-        "unrealized_pnl_usd":  round(unreal, 4),
-        "unrealized_pnl_pct":  round(unreal / invested * 100, 2) if invested else None,
-        "portfolio_value_usd": round(invested + unreal, 4),
-        "open_winners":        winners,
-        "open_losers":         losers,
-        "open_flat":           flat,
-    }
-
-
-def _closed_stats(history: list[dict]) -> dict[str, Any]:
-    closed = [h for h in history if h.get("pnl_pct") is not None]
-    wins   = [h for h in closed if _fnum(h.get("pnl_pct")) > 0]
-    avg_pnl = (
-        sum(_fnum(h.get("pnl_pct")) for h in closed) / len(closed)
-        if closed else None
-    )
-    return {
-        "closed_count": len(closed),
-        "win_rate": round(len(wins) / len(closed) * 100, 1) if closed else None,
-        "avg_pnl_pct": round(avg_pnl, 2) if avg_pnl is not None else None,
-        "hist_pnl_usd": round(sum(_fnum(h.get("pnl_usd")) for h in history), 4),
-        "hist_invested_usd": round(sum(_fnum(h.get("invested_usd")) for h in history), 2),
-    }
-
-
-def _book_open_slice(positions: dict[str, dict], market: Optional[str] = None) -> dict:
-    rows = [
-        p for p in positions.values()
-        if market is None or p.get("market") == market
-    ]
-    invested = sum(_fnum(p.get("invested_usd")) for p in rows)
-    return {
-        "open_count": len(rows),
-        "invested_usd": round(invested, 2),
-        "unrealized_pnl_usd": None,
-        "unrealized_pnl_pct": None,
-        "portfolio_value_usd": round(invested, 2) if invested else None,
-        "open_winners": None,
-        "open_losers": None,
-        "open_flat": None,
-    }
-
-
-def get_book_stats() -> dict:
-    """DB만 사용 — live 시세 없이 배치·청산 요약 (빠름)."""
-    positions = load_positions()
-    history   = load_history()
-    closed    = _closed_stats(history)
-    portfolio = _book_open_slice(positions)
-    by_market = {m: _book_open_slice(positions, m) for m in ("kospi", "nasdaq")}
-
-    return {
-        **closed,
-        **portfolio,
-        "total_invested_usd": portfolio["invested_usd"],
-        "total_pnl_usd": closed["hist_pnl_usd"],
-        "by_market": by_market,
-        "unit_usd": UNIT_USD,
-        "last_scan_at": _last_scan_at,
-        "scan_running": _scan_running,
-        "live_pnl": False,
-    }
-
-
-def get_summary_stats() -> dict:
-    """오픈 포지션 mark-to-market 포함 (yfinance 조회 — 느림)."""
-    positions = load_positions()
-    history   = load_history()
-    closed    = _closed_stats(history)
-
-    open_enriched = get_positions_with_pnl() if positions else []
-    portfolio     = _portfolio_slice(open_enriched)
-    by_market     = {
-        m: _portfolio_slice([p for p in open_enriched if p.get("market") == m])
-        for m in ("kospi", "nasdaq")
-    }
-
-    hist_pnl = closed["hist_pnl_usd"]
-
-    return {
-        "open_count":         portfolio["open_count"],
-        "closed_count":       closed["closed_count"],
-        "win_rate":           closed["win_rate"],
-        "avg_pnl_pct":        closed["avg_pnl_pct"],
-        "total_invested_usd": portfolio["invested_usd"],
-        "hist_pnl_usd":       hist_pnl,
-        "hist_invested_usd":  closed["hist_invested_usd"],
-        "unrealized_pnl_usd": portfolio["unrealized_pnl_usd"],
-        "unrealized_pnl_pct": portfolio["unrealized_pnl_pct"],
-        "portfolio_value_usd": portfolio["portfolio_value_usd"],
-        "total_pnl_usd":      round(hist_pnl + portfolio["unrealized_pnl_usd"], 4),
-        "open_winners":       portfolio["open_winners"],
-        "open_losers":        portfolio["open_losers"],
-        "open_flat":          portfolio["open_flat"],
-        "by_market":          by_market,
-        "unit_usd":           UNIT_USD,
-        "last_scan_at":       _last_scan_at,
-        "scan_running":       _scan_running,
-        "live_pnl":           True,
-    }
-
-
-def _get_benchmark_return_uncached(market: str) -> dict:
-    """SPY (nasdaq) or ^KS11 (kospi) total return % since earliest entry date."""
-    positions = load_positions()
-    history   = load_history()
-
-    dates: list[str] = []
-    for p in positions.values():
-        if p.get("market") == market and p.get("first_entry_date"):
-            dates.append(p["first_entry_date"])
-    for h in history:
-        if h.get("market") == market and h.get("first_entry_date"):
-            dates.append(h["first_entry_date"])
-
-    ticker = "SPY" if market == "nasdaq" else "^KS11"
-    if not dates:
-        return {"since": None, "benchmark_pct": None, "ticker": ticker}
-
-    since = min(dates)
-    try:
-        import yfinance as yf
-        from datetime import timedelta
-        end = (datetime.now(UTC) + timedelta(days=1)).strftime("%Y-%m-%d")
-        hist = yf.download(ticker, start=since, end=end, progress=False, auto_adjust=True)
-        if hist.empty or len(hist) < 2:
-            return {"since": since, "benchmark_pct": None, "ticker": ticker}
-        first = float(hist["Close"].iloc[0])
-        last  = float(hist["Close"].iloc[-1])
-        return {
-            "since":         since,
-            "benchmark_pct": round((last - first) / first * 100, 2),
-            "ticker":        ticker,
-        }
-    except Exception:
-        return {"since": since, "benchmark_pct": None, "ticker": ticker}
-
-
-def get_benchmark_return(market: str) -> dict:
-    from features.strategy.value_scan.cache import vs_cache
-    return vs_cache.get(f"benchmark_{market}", 3600, lambda: _get_benchmark_return_uncached(market))

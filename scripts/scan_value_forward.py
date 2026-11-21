@@ -1,10 +1,3 @@
-#!/usr/bin/env python3
-"""
-Value Forward Test — Daily runner
-
-Run once:  python scripts/scan_value_forward.py [--market kospi|nasdaq|all]
-Run loop:  python scripts/scan_value_forward.py --loop   # daily at 22:00 UTC
-"""
 from __future__ import annotations
 
 import argparse
@@ -44,10 +37,7 @@ def main() -> None:
         time.sleep(sleep_secs)
         try:
             result = run_daily(markets=markets, max_workers=args.workers)
-            if result.get("skipped"):
-                print("[value_fwd] skipped — another process holds the portfolio lock")
-            else:
-                print(f"[value_fwd] {result}")
+            print(f"[value_fwd] {result}")
         except Exception as e:
             print(f"[value_fwd] 오류: {e}")
 

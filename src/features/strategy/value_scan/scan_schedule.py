@@ -1,4 +1,3 @@
-"""Value Scan — 시장별 마지막 스캔 시각(DB) + 하루 1회 catch-up."""
 from __future__ import annotations
 
 import logging
@@ -37,7 +36,6 @@ def market_tz(market: str) -> ZoneInfo:
 
 
 def trading_date(market: str, when: Optional[datetime] = None) -> str:
-    """해당 시장 기준 거래일 (YYYY-MM-DD)."""
     tz = market_tz(market)
     dt = when.astimezone(tz) if when else datetime.now(tz)
     return dt.strftime("%Y-%m-%d")
@@ -50,7 +48,6 @@ def is_weekday(market: str, when: Optional[datetime] = None) -> bool:
 
 
 def is_past_scan_window(market: str, when: Optional[datetime] = None) -> bool:
-    """장 마감 후 스캔 시각( KOSPI 15:35 KST / NASDAQ 16:05 ET ) 이후인지."""
     cfg = MARKET_CONFIG[market]
     tz = cfg["tz"]
     now = when.astimezone(tz) if when else datetime.now(tz)
@@ -68,8 +65,6 @@ def _row_to_dict(row: ValueScanMarketMeta) -> dict[str, Any]:
         "scanned": row.last_scanned,
         "buy_signals": row.last_buy,
         "sell_signals": row.last_sell,
-        "new_entries": row.last_new_entries,
-        "new_exits": row.last_new_exits,
     }
 
 
@@ -97,7 +92,6 @@ def get_all_market_meta() -> dict[str, dict[str, Any]]:
 
 
 def needs_scan_today(market: str) -> bool:
-    """오늘(시장 거래일) 아직 스캔 안 했으면 True."""
     meta = get_market_meta(market)
     today = trading_date(market)
     if meta is None:
@@ -106,7 +100,6 @@ def needs_scan_today(market: str) -> bool:
 
 
 def should_run_catchup(market: str) -> bool:
-    """평일 + 스캔 시각 이후 + 오늘 미스캔."""
     if market not in MARKET_CONFIG:
         return False
     if not is_weekday(market):
@@ -122,11 +115,8 @@ def record_market_scan(
     scanned: int = 0,
     buy: int = 0,
     sell: int = 0,
-    new_entries: int = 0,
-    new_exits: int = 0,
     when: Optional[datetime] = None,
 ) -> dict[str, Any]:
-    """스캔 완료 시 DB에 시장별 마지막 시각·거래일 저장."""
     now = when or datetime.now(UTC)
     if now.tzinfo is None:
         now = now.replace(tzinfo=UTC)
@@ -143,8 +133,6 @@ def record_market_scan(
         row.last_scanned = scanned
         row.last_buy = buy
         row.last_sell = sell
-        row.last_new_entries = new_entries
-        row.last_new_exits = new_exits
         session.commit()
         session.refresh(row)
         logger.info(
@@ -162,7 +150,6 @@ def record_market_scan(
 
 
 def build_schedule_status(*, running: bool) -> dict[str, Any]:
-    """API / 대시보드용."""
     markets = get_all_market_meta()
     now_kst = datetime.now(_KST)
     now_et = datetime.now(_ET)
