@@ -2,7 +2,7 @@
 
 핀닝 이벤트 생명주기:
   - 진입: 만기 D-N & GEX>0 & 핀 이격 조건 tick 에서 pin 방향 1회
-  - 청산: exit_deadline(만기 20:00 UTC) 경과 시 (시간기반). hard SL 은 옵션.
+  - 청산: 진입 다음 거래일 16:00 ET 경과 시 (시간기반). hard SL 은 옵션.
 
 DB/통계/PnL 은 BaseForwardTest 재사용(프레임워크). 핀닝·GEX 로직은 이 패키지에
 자체 포함 — 다른 전략과 공유하지 않는다. 실거래 없음 — 엣지 측정 전용.
@@ -18,26 +18,19 @@ from features.strategy.common.base_forward_test import (
     _f,
 )
 
-# 재시작 복구 시 exit_deadline 유실 대비 폴백 홀딩(초): 일일 전략이라 3일
-_FALLBACK_HOLD_SEC = 3 * 86400
+from .signal import next_close_ts
 
 
 class UsOptionsGexPinForwardTest(BaseForwardTest):
     STRATEGY_TAG = "us_options_gex_pin"
 
-    def _extra_db_fields(self, row: Any) -> Dict:
-        entry_ts = row.opened_at.timestamp() if row.opened_at else time.time()
-        return {"exit_deadline_ts": entry_ts + _FALLBACK_HOLD_SEC}
-
     def _check_exit_signal(
         self, position: Dict, current_price: float, sig: Dict
     ) -> Optional[tuple]:
         side = position.get("side")
-        deadline = _f(position.get("exit_deadline_ts"))
-        if deadline <= 0:
-            deadline = _f(position.get("entry_time")) + _FALLBACK_HOLD_SEC
+        deadline = next_close_ts(position["entry_time"])
         if time.time() >= deadline:
-            return (current_price, "closed_time", "만기 청산 (20:00 UTC)")
+            return (current_price, "closed_time", "마감 청산 (16:00 ET)")
         sl = position.get("sl")
         if sl:
             sl = _f(sl)
@@ -81,7 +74,6 @@ class UsOptionsGexPinForwardTest(BaseForwardTest):
                     "confidence":       sig.get("confidence", 0),
                     "tp":               None,
                     "sl":               _f(sig.get("sl")) or None,
-                    "exit_deadline_ts": _f(sig.get("exit_deadline_ts")) or (time.time() + _FALLBACK_HOLD_SEC),
                     "entry_state":      str(sig.get("reasons", [])),
                     "expiry":           sig.get("expiry"),
                     "pin_strike":       sig.get("pin_strike"),

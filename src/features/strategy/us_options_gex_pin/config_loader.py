@@ -50,7 +50,6 @@ def get_signal_params() -> Dict[str, Any]:
         "min_distance_pct":     float(sig.get("min_distance_pct", 0.5)),
         "require_gex_positive": bool(sig.get("require_gex_positive", True)),
         "contract_multiplier":  float(sig.get("contract_multiplier", 100)),
-        "exit_hour_utc":        int(sig.get("exit_hour_utc", 20)),
         "chain_window_days":    int(sig.get("chain_window_days", 20)),
     }
 

@@ -3,7 +3,7 @@
 메커니즘(로드맵 §부활조건부, 옵션 핀닝): 딜러가 롱감마(GEX>0)면 델타 헤지가
 가격 변동을 억제해 만기 근처에서 현물이 최대 OI 행사가(pin)로 끌린다. 그래서
 만기 D-N 이내 & GEX>0 & 현물이 pin 에서 충분히 떨어져 있으면 pin 방향으로 회귀
-진입, 만기 종가(20:00 UTC)에 청산.
+진입, 다음 거래일 종가(16:00 ET)에 청산.
 
 일일 해상도(하루 1스냅샷)라 Deribit 의 일중 리버설은 불가 — 이건 다른 현상(핀닝).
 GEX = Σ OI·gamma·mult·S²·0.01·sign  (콜 +1 / 풋 −1). gamma 는 수집 데이터 제공값.
@@ -15,9 +15,24 @@ from __future__ import annotations
 import datetime as dt
 import math
 from typing import Any, Dict
+from zoneinfo import ZoneInfo
 
 import numpy as np
 import pandas as pd
+
+_NY = ZoneInfo("America/New_York")
+
+
+def market_close_ts(d: dt.date) -> float:
+    close = dt.datetime.combine(d, dt.time(16), tzinfo=_NY)
+    return close.timestamp()
+
+
+def next_close_ts(entry_ts: float) -> float:
+    d = dt.datetime.fromtimestamp(entry_ts, _NY).date() + dt.timedelta(days=1)
+    while d.weekday() >= 5:
+        d += dt.timedelta(days=1)
+    return market_close_ts(d)
 
 
 def _empty_signal(reason: str) -> Dict[str, Any]:
@@ -26,7 +41,7 @@ def _empty_signal(reason: str) -> Dict[str, Any]:
         "entry_tf": "expiry", "confidence": 0, "reasons": [reason],
         "gex_bn": None, "gex_regime": None, "pin_strike": None,
         "distance_pct": None, "days_to_exp": None, "expiry": None,
-        "entry_price": None, "exit_deadline_ts": None, "sl": None,
+        "entry_price": None, "sl": None,
     }
 
 
@@ -41,7 +56,6 @@ def compute_signal(df: pd.DataFrame, now_ts: float, params: Dict[str, Any]) -> D
     min_dist = params["min_distance_pct"]
     req_pos = params["require_gex_positive"]
     mult = params["contract_multiplier"]
-    exit_h = params["exit_hour_utc"]
 
     now = pd.Timestamp(now_ts, unit="s", tz="UTC")
     today = now.date()
@@ -57,7 +71,7 @@ def compute_signal(df: pd.DataFrame, now_ts: float, params: Dict[str, Any]) -> D
         return {"spot": None, "signal": _empty_signal("underlying_price 없음"), "should_tick": False}
 
     # ── 최근접(미도래) 만기 ─────────────────────────────────────────────────
-    future_exp = sorted([e for e in snap["expiry"].dropna().unique() if e >= today])
+    future_exp = sorted([e for e in snap["expiry"].dropna().unique() if market_close_ts(e) > now_ts])
     if not future_exp:
         return {"spot": spot, "signal": _empty_signal("미도래 만기 없음"), "should_tick": False}
     E = future_exp[0]
@@ -87,8 +101,6 @@ def compute_signal(df: pd.DataFrame, now_ts: float, params: Dict[str, Any]) -> D
     # 회귀 방향: 현물이 핀보다 높으면 하락 회귀(short), 낮으면 상승 회귀(long)
     direction = "short" if distance_pct > 0 else "long"
 
-    exit_deadline = pd.Timestamp(dt.datetime.combine(E, dt.time(exit_h)), tz="UTC")
-
     action = "idle"
     signal = "none"
     reasons = []
@@ -99,7 +111,7 @@ def compute_signal(df: pd.DataFrame, now_ts: float, params: Dict[str, Any]) -> D
             f"만기 {E} (D-{days_to_exp}) 핀닝",
             f"pin(max-OI)={pin_strike:.1f}, 현물={spot:.1f} → 이격 {distance_pct:+.2f}%",
             f"{gex_regime}, GEX={gex/1e9:+.2f}$bn/1%",
-            f"→ 핀 방향 {direction.upper()}, 만기 {exit_h}:00 UTC 청산",
+            f"→ 핀 방향 {direction.upper()}, 다음 거래일 16:00 ET 청산",
         ]
     else:
         why = []
@@ -125,11 +137,10 @@ def compute_signal(df: pd.DataFrame, now_ts: float, params: Dict[str, Any]) -> D
         "days_to_exp": days_to_exp,
         "expiry": str(E),
         "entry_price": round(spot, 2),
-        "exit_deadline_ts": exit_deadline.timestamp(),
         "sl": None,
     }
 
     # tick 발동: 최신 스냅샷이 오늘 것이면 (하루 1회 평가). 재진입은 엔진/피드가 dedupe.
-    should_tick = (latest_ts.date() == today)
+    should_tick = (latest_ts.date() == today) and today.weekday() < 5
 
     return {"spot": spot, "signal": sig, "should_tick": should_tick}

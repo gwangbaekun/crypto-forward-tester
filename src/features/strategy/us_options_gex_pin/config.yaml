@@ -15,7 +15,6 @@ signal:
   min_distance_pct: 0.5      # 현물이 핀 행사가에서 ±0.5% 이상 떨어졌을 때만
   require_gex_positive: true # GEX>0 (딜러 롱감마=핀닝 레짐)만
   contract_multiplier: 100   # 주식/ETF 옵션 계약승수
-  exit_hour_utc: 20          # 만기일 미국 종가(~20:00 UTC) 청산
   chain_window_days: 20      # us_options_chain 조회 창
 
 tpsl:
